@@ -15,7 +15,9 @@ WORKDIR /app
 # postinstall can generate the client during install.
 COPY package*.json ./
 COPY prisma ./prisma
-RUN npm ci --omit=dev \
+# npm install (not ci) tolerates cross-platform optional-dep resolution
+# differences that would make strict `npm ci` fail on some hosts.
+RUN npm install --omit=dev --no-audit --no-fund \
   && npx prisma generate \
   && npm cache clean --force
 
