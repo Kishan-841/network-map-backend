@@ -1,0 +1,115 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  SURVEYOR
+}
+
+enum FeasibleStatus {
+  FEASIBLE
+  PERMISSION_PENDING
+  REJECTED
+  SURVEY_PENDING
+}
+
+enum SurveyStatus {
+  PENDING
+  COMPLETED
+}
+
+enum PhotoType {
+  ENTRANCE
+  PERMISSION_LETTER
+  ADDITIONAL
+}
+
+model User {
+  id           String     @id @default(cuid())
+  name         String
+  email        String     @unique
+  passwordHash String
+  role         Role       @default(SURVEYOR)
+  isActive     Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  buildings    Building[]
+}
+
+model BuildingType {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+}
+
+model Zone {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  city      String
+  /// Ordered polygon vertices [{ latitude, longitude }, ...], min 3 when set
+  boundary  Json?
+  createdAt DateTime   @default(now())
+  buildings Building[]
+}
+
+model Building {
+  id               String           @id @default(cuid())
+  placeId          String?          @unique
+  buildingName     String
+  formattedAddress String
+  latitude         Float
+  longitude        Float
+  zoneId           String
+  zone             Zone             @relation(fields: [zoneId], references: [id])
+  feasibleStatus   FeasibleStatus   @default(SURVEY_PENDING)
+  surveyStatus     SurveyStatus     @default(PENDING)
+  createdById      String
+  createdBy        User             @relation(fields: [createdById], references: [id])
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  details          BuildingDetails?
+  permission       Permission?
+  photos           Photo[]
+
+  @@index([latitude, longitude])
+}
+
+model BuildingDetails {
+  id           String   @id @default(cuid())
+  buildingId   String   @unique
+  building     Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  wings        Int?
+  floors       Int?
+  homePass     Int?
+  buildingType String?
+  remarks      String?
+}
+
+model Permission {
+  id               String    @id @default(cuid())
+  buildingId       String    @unique
+  building         Building  @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  amountPaid       Decimal?  @db.Decimal(12, 2)
+  permissionStatus String?
+  permissionDate   DateTime?
+  renewalDate      DateTime?
+  ownerName        String?
+  ownerMobile      String?
+  documentUrl      String?
+}
+
+model Photo {
+  id         String    @id @default(cuid())
+  buildingId String
+  building   Building  @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  type       PhotoType
+  url        String
+  createdAt  DateTime  @default(now())
+}

@@ -1,0 +1,43 @@
+# Self-contained backend stack: PostgreSQL + API.
+# Usage:
+#   cp .env.example .env   # then fill in real secrets
+#   docker compose up -d --build
+# First deploy only, to create the admin + baseline data:
+#   RUN_SEED=true docker compose up -d --build
+
+services:
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-isp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-isp}
+      POSTGRES_DB: ${POSTGRES_DB:-isp_feasibility}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-isp} -d ${POSTGRES_DB:-isp_feasibility}']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Point the API at the db service; overrides any DATABASE_URL in .env.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-isp}:${POSTGRES_PASSWORD:-isp}@db:5432/${POSTGRES_DB:-isp_feasibility}
+      RUN_SEED: ${RUN_SEED:-false}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - '${PORT:-4000}:4000'
+    volumes:
+      # Persist uploaded documents/photos across container restarts.
+      - uploads:/app/uploads
+
+volumes:
+  db-data:
+  uploads:

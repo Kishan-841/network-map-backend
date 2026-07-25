@@ -1,0 +1,42 @@
+import { createZoneService } from './zone.service.js'
+import { zoneRepository } from './zone.repository.js'
+
+const zoneService = createZoneService({ zoneRepository })
+
+export const zoneController = {
+  async list(req, res, next) {
+    try {
+      const zones = await zoneRepository.list()
+      res.json({ success: true, data: zones })
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  async create(req, res, next) {
+    try {
+      const zone = await zoneService.createZone(req.body)
+      res.status(201).json({ success: true, data: zone })
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  async update(req, res, next) {
+    try {
+      const zone = await zoneService.updateZone(req.params.id, req.body)
+      res.json({ success: true, data: zone })
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  async remove(req, res, next) {
+    try {
+      await zoneService.deleteZone(req.params.id)
+      res.json({ success: true, data: null })
+    } catch (err) {
+      next(err)
+    }
+  },
+}
