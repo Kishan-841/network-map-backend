@@ -13,9 +13,15 @@ RUN_SEED=true docker compose up -d --build   # FIRST deploy only
 docker compose up -d --build
 ```
 
-The API comes up on `PORT` (default 4000). Compose runs migrations on start,
+The API is published on the host at `API_PUBLISH` (default `127.0.0.1:5004`,
+chosen to avoid the other stacks on this VM — 5001/5002/5003/5432/5500). Postgres
+is **not** published to the host (internal to the compose network), so it never
+clashes with the other databases' 5432. Compose runs migrations on start,
 persists the database and uploaded files in named volumes, and restarts on
 failure. Health: `GET /api/v1/health`.
+
+If you add more services later, check free ports with `docker ps` and set
+`API_PUBLISH` accordingly.
 
 ## Deploying the image elsewhere (managed Postgres, ECS/Fly/Render/K8s)
 

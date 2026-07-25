@@ -9,6 +9,8 @@ services:
   db:
     image: postgres:15-alpine
     restart: unless-stopped
+    # No host port published — Postgres is reachable only inside this compose
+    # network (as `db`). This avoids clashing with the other stacks' 5432.
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-isp}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-isp}
@@ -32,8 +34,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Host publish (bind:port). MUST be unique on this VM.
+    # In use here: 5001, 5002, 5003, 5432, 5500 → we default to 5004.
+    # Default binds to localhost (put a reverse proxy / TLS in front).
+    # For direct public access set API_PUBLISH=0.0.0.0:5004 in .env.
     ports:
-      - '${PORT:-4000}:4000'
+      - '${API_PUBLISH:-127.0.0.1:5004}:4000'
     volumes:
       # Persist uploaded documents/photos across container restarts.
       - uploads:/app/uploads
