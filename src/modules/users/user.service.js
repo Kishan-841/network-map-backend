@@ -20,7 +20,18 @@ export function createUserService({ userRepository }) {
       return users.map(toPublicUser)
     },
 
-    async updateUser(id, data) {
+    async updateUser(id, { password, email, ...data }) {
+      // Changing to an email another account already uses → clean 409.
+      if (email) {
+        const existing = await userRepository.findByEmail(email)
+        if (existing && existing.id !== id) {
+          throw ApiError.conflict('A user with this email already exists')
+        }
+        data.email = email
+      }
+      // Password is stored only as a hash, never plaintext.
+      if (password) data.passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS)
+
       const user = await userRepository.update(id, data)
       return toPublicUser(user)
     },

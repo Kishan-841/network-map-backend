@@ -37,6 +37,34 @@ describe('user service', () => {
     expect(bcrypt.compareSync('StrongPass1', repo.users[0].passwordHash)).toBe(true)
   })
 
+  it('hashes a new password on update and never returns passwordHash', async () => {
+    const repo = fakeUserRepository([
+      { id: 'u1', email: 'a@isp.local', passwordHash: 'old', role: 'SURVEYOR', isActive: true },
+    ])
+    const service = createUserService({ userRepository: repo })
+    const updated = await service.updateUser('u1', { password: 'NewPass123' })
+    expect(updated).not.toHaveProperty('passwordHash')
+    expect(bcrypt.compareSync('NewPass123', repo.users[0].passwordHash)).toBe(true)
+  })
+
+  it('rejects updating email to one another user already has (409)', async () => {
+    const repo = fakeUserRepository([
+      { id: 'u1', email: 'a@isp.local', role: 'ADMIN' },
+      { id: 'u2', email: 'b@isp.local', role: 'SURVEYOR' },
+    ])
+    const service = createUserService({ userRepository: repo })
+    await expect(service.updateUser('u2', { email: 'a@isp.local' })).rejects.toMatchObject({
+      status: 409,
+    })
+  })
+
+  it('allows keeping the same email on update', async () => {
+    const repo = fakeUserRepository([{ id: 'u1', email: 'a@isp.local', role: 'ADMIN' }])
+    const service = createUserService({ userRepository: repo })
+    const updated = await service.updateUser('u1', { email: 'a@isp.local', name: 'Renamed' })
+    expect(updated.name).toBe('Renamed')
+  })
+
   it('rejects a duplicate email with 409', async () => {
     const repo = fakeUserRepository([{ id: 'u1', email: 'dup@isp.local' }])
     const service = createUserService({ userRepository: repo })
