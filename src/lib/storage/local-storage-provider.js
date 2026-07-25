@@ -1,15 +1,12 @@
-import { randomUUID } from 'node:crypto'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { buildObjectKey, keyFromPublicUrl } from './object-key.js'
 
 export function createLocalStorageProvider({ rootDir, baseUrl }) {
   return {
     async save({ buffer, extension }) {
-      const now = new Date()
-      const dir = `${now.getFullYear()}/${String(now.getMonth() + 1).padStart(2, '0')}`
-      const key = `${dir}/${randomUUID()}.${extension}`
-
-      await mkdir(path.join(rootDir, dir), { recursive: true })
+      const key = buildObjectKey(extension)
+      await mkdir(path.join(rootDir, path.dirname(key)), { recursive: true })
       await writeFile(path.join(rootDir, key), buffer)
       return { key, url: `${baseUrl}/${key}` }
     },
@@ -23,12 +20,7 @@ export function createLocalStorageProvider({ rootDir, baseUrl }) {
     },
 
     keyFromUrl(url) {
-      const prefix = `${baseUrl}/`
-      if (!url.startsWith(prefix)) return null
-      const key = url.slice(prefix.length)
-      // Reject traversal or empty segments — keys are always "yyyy/mm/uuid.ext".
-      if (key.split('/').some((segment) => segment === '..' || segment === '')) return null
-      return key
+      return keyFromPublicUrl(url, baseUrl)
     },
   }
 }

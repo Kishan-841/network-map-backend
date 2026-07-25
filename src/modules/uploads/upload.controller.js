@@ -15,7 +15,11 @@ export const uploadController = {
     try {
       if (!req.file) throw ApiError.badRequest('No file provided (field name: file)')
       const extension = ALLOWED_MIME_TYPES[req.file.mimetype]
-      const { url } = await storage.save({ buffer: req.file.buffer, extension })
+      const { url } = await storage.save({
+        buffer: req.file.buffer,
+        extension,
+        contentType: req.file.mimetype, // R2 stores it so images render inline
+      })
       res.status(201).json({ success: true, data: { url } })
     } catch (err) {
       next(err)
