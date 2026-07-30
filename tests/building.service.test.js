@@ -100,4 +100,33 @@ describe('building service', () => {
       service.updateStatus('missing', { feasibleStatus: 'FEASIBLE' }),
     ).rejects.toMatchObject({ status: 404 })
   })
+
+  it('stores isLive on create', async () => {
+    const repo = fakeBuildingRepository()
+    const service = createBuildingService({ buildingRepository: repo, storage: fakeStorage })
+    await service.createBuilding(
+      {
+        buildingName: 'Live Tower',
+        formattedAddress: '1 Fiber Rd',
+        latitude: 1,
+        longitude: 2,
+        zoneId: 'z1',
+        isLive: true,
+      },
+      'u1',
+    )
+    expect(repo.buildings[0].isLive).toBe(true)
+  })
+
+  it('toggles isLive via updateStatus (including false)', async () => {
+    const repo = fakeBuildingRepository([{ id: 'b1', isLive: false }])
+    repo.update = async (id, data) => {
+      const building = repo.buildings.find((b) => b.id === id)
+      Object.assign(building, data)
+      return building
+    }
+    const service = createBuildingService({ buildingRepository: repo })
+    expect((await service.updateStatus('b1', { isLive: true })).isLive).toBe(true)
+    expect((await service.updateStatus('b1', { isLive: false })).isLive).toBe(false)
+  })
 })

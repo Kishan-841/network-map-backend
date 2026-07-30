@@ -20,10 +20,10 @@ export function createBuildingService({ buildingRepository, storage }) {
         ...building,
         createdById,
         // A surveyor adding a building means: surveyed, and viable for fiber
-        // (user decision — ease of use over a manual status step). Admins
-        // change feasibility later via the status endpoint when needed.
+        // (user decision — ease of use over a manual status step).
         feasibleStatus: 'FEASIBLE',
         surveyStatus: 'COMPLETED',
+        isLive: building.isLive ?? false, // green when live, red when not
         details: details ? { create: details } : undefined,
         permission: permission ? { create: permission } : undefined,
         photos: photos?.length ? { create: photos } : undefined,
@@ -97,12 +97,13 @@ export function createBuildingService({ buildingRepository, storage }) {
       return building
     },
 
-    async updateStatus(id, { feasibleStatus, surveyStatus }) {
+    async updateStatus(id, { feasibleStatus, surveyStatus, isLive }) {
       const building = await buildingRepository.findById(id)
       if (!building) throw ApiError.notFound('Building not found')
       return buildingRepository.update(id, {
         ...(feasibleStatus && { feasibleStatus }),
         ...(surveyStatus && { surveyStatus }),
+        ...(isLive !== undefined && { isLive }),
       })
     },
 

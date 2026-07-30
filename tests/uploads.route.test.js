@@ -39,6 +39,8 @@ describe('POST /api/v1/uploads', () => {
         contentType: 'image/jpeg',
       })
     expect(res.status).toBe(201)
-    expect(res.body.data.url).toMatch(/^http:\/\/localhost:4000\/uploads\/.+\.jpg$/)
+    expect(res.body.data.url).toMatch(
+      new RegExp(`^${env.appUrl.replace(/[.]/g, '\\.')}/uploads/.+\\.jpg$`),
+    )
   })
 })

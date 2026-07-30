@@ -6,9 +6,10 @@ export const updateStatusSchema = z
       .enum(['FEASIBLE', 'PERMISSION_PENDING', 'REJECTED', 'SURVEY_PENDING'])
       .optional(),
     surveyStatus: z.enum(['PENDING', 'COMPLETED']).optional(),
+    isLive: z.boolean().optional(),
   })
-  .refine((data) => data.feasibleStatus || data.surveyStatus, {
-    message: 'Provide at least one status field',
+  .refine((data) => data.feasibleStatus || data.surveyStatus || data.isLive !== undefined, {
+    message: 'Provide at least one field to update',
   })
 
 export const addPhotoSchema = z.object({
@@ -45,6 +46,7 @@ export const createBuildingSchema = z.object({
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
   zoneId: z.string().min(1),
+  isLive: z.boolean().optional(), // fiber connection already live?
   details: z
     .object({
       wings: z.number().int().positive().optional(),

@@ -70,6 +70,8 @@ model Building {
   zone             Zone             @relation(fields: [zoneId], references: [id])
   feasibleStatus   FeasibleStatus   @default(SURVEY_PENDING)
   surveyStatus     SurveyStatus     @default(PENDING)
+  /// Fiber connection is live at this building (drives the green/red marker).
+  isLive           Boolean          @default(false)
   createdById      String
   createdBy        User             @relation(fields: [createdById], references: [id])
   createdAt        DateTime         @default(now())
