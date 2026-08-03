@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { requireAuth, requireRole } from '../../middleware/auth.js'
 import { validateBody } from '../../middleware/validate.js'
-import { createZoneSchema, updateZoneSchema } from './zone.schemas.js'
+import { createZoneSchema, updateZoneSchema, bulkZoneSchema } from './zone.schemas.js'
 import { zoneController } from './zone.controller.js'
 import { audit } from '../system-logs/audit.js'
 import { zoneRepository } from './zone.repository.js'
@@ -16,6 +16,18 @@ zoneRoutes.post(
   audit('Zone', 'Create', { describe: (req) => `Zone '${req.body?.name ?? 'unknown'}' created` }),
   validateBody(createZoneSchema),
   zoneController.create,
+)
+zoneRoutes.post(
+  '/bulk',
+  requireRole('ADMIN', 'MANAGER'),
+  audit('Zone', 'BulkCreate', {
+    describe: (req, old, body) =>
+      body?.data
+        ? `Bulk zone import: ${body.data.created.length} created, ${body.data.skipped.length} skipped`
+        : 'Bulk zone import',
+  }),
+  validateBody(bulkZoneSchema),
+  zoneController.bulk,
 )
 zoneRoutes.patch(
   '/:id',

@@ -22,6 +22,15 @@ export const zoneController = {
     }
   },
 
+  async bulk(req, res, next) {
+    try {
+      const result = await zoneService.bulkCreateZones(req.body.zones)
+      res.json({ success: true, data: result })
+    } catch (err) {
+      next(err)
+    }
+  },
+
   async update(req, res, next) {
     try {
       const zone = await zoneService.updateZone(req.params.id, req.body)
