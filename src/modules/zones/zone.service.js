@@ -8,6 +8,27 @@ export function createZoneService({ zoneRepository }) {
       return zoneRepository.create({ name, city, ...(boundary && { boundary }) })
     },
 
+    // Sequential create-or-skip; re-uploading the same file is idempotent.
+    async bulkCreateZones(rows) {
+      const created = []
+      const skipped = []
+      const seenNames = new Set()
+      for (const { name, city } of rows) {
+        if (seenNames.has(name)) {
+          skipped.push({ name, reason: 'duplicate in file' })
+          continue
+        }
+        seenNames.add(name)
+        const existing = await zoneRepository.findByName(name)
+        if (existing) {
+          skipped.push({ name, reason: 'already exists' })
+          continue
+        }
+        created.push(await zoneRepository.create({ name, city }))
+      }
+      return { created, skipped, total: rows.length }
+    },
+
     async updateZone(id, data) {
       const zone = await zoneRepository.findById(id)
       if (!zone) throw ApiError.notFound('Zone not found')

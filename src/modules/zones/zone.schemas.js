@@ -13,3 +13,15 @@ export const createZoneSchema = z.object({
 })
 
 export const updateZoneSchema = createZoneSchema.partial()
+
+export const bulkZoneSchema = z.object({
+  zones: z
+    .array(
+      z.object({
+        name: z.string().trim().min(1).max(100),
+        city: z.string().trim().min(1).max(100),
+      }),
+    )
+    .min(1)
+    .max(500),
+})
