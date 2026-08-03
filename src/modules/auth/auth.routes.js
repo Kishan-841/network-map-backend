@@ -7,4 +7,5 @@ import { authController } from './auth.controller.js'
 export const authRoutes = Router()
 
 authRoutes.post('/login', validateBody(loginSchema), authController.login)
+authRoutes.post('/logout', requireAuth, authController.logout)
 authRoutes.get('/me', requireAuth, authController.me)
