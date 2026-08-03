@@ -1,8 +1,9 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import request from 'supertest'
 import jwt from 'jsonwebtoken'
 import { createApp } from '../src/app.js'
 import { env } from '../src/config/env.js'
+import { prisma } from '../src/lib/prisma.js'
 
 const tokenFor = (role) =>
   jwt.sign({ sub: `test-${role.toLowerCase()}`, role }, env.jwtSecret, { expiresIn: '1h' })
@@ -38,5 +39,24 @@ describe('GET /api/v1/system-logs', () => {
       .get('/api/v1/system-logs?status=WHATEVER')
       .set('Authorization', `Bearer ${tokenFor('ADMIN')}`)
     expect(res.status).toBe(400)
+  })
+})
+
+describe('audit capture on real routes', () => {
+  it('logs a failed building-type create (validation error)', async () => {
+    const before = await prisma.systemLog.count({ where: { module: 'BuildingType' } })
+    await request(createApp())
+      .post('/api/v1/building-types')
+      .set('Authorization', `Bearer ${tokenFor('ADMIN')}`)
+      .send({}) // fails validation -> 400, still logged
+    await vi.waitFor(async () => {
+      expect(await prisma.systemLog.count({ where: { module: 'BuildingType' } })).toBe(before + 1)
+    })
+    const latest = await prisma.systemLog.findFirst({
+      where: { module: 'BuildingType' },
+      orderBy: { createdAt: 'desc' },
+    })
+    expect(latest.status).toBe('FAILED')
+    expect(latest.httpMethod).toBe('POST')
   })
 })

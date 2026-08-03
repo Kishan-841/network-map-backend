@@ -9,11 +9,20 @@ import {
   updateStatusSchema,
 } from './building.schemas.js'
 import { buildingController } from './building.controller.js'
+import { audit } from '../system-logs/audit.js'
+import { buildingRepository } from './building.repository.js'
 
 export const buildingRoutes = Router()
 
 buildingRoutes.use(requireAuth)
-buildingRoutes.post('/', validateBody(createBuildingSchema), buildingController.create)
+buildingRoutes.post(
+  '/',
+  audit('Building', 'Create', {
+    describe: (req) => `Building '${req.body?.buildingName ?? 'unknown'}' added`,
+  }),
+  validateBody(createBuildingSchema),
+  buildingController.create,
+)
 buildingRoutes.get('/', validateQuery(listQuerySchema), buildingController.list)
 // NOTE: /nearby must stay above /:id or Express matches it as an id.
 buildingRoutes.get('/nearby', validateQuery(nearbyQuerySchema), buildingController.nearby)
@@ -21,12 +30,28 @@ buildingRoutes.get('/:id', buildingController.get)
 buildingRoutes.patch(
   '/:id/status',
   requireRole('ADMIN', 'MANAGER'),
+  audit('Building', 'StatusChange', {
+    load: (req) => buildingRepository.findById(req.params.id),
+    describe: (req, old) => `Building '${old?.buildingName ?? req.params.id}' status changed`,
+  }),
   validateBody(updateStatusSchema),
   buildingController.updateStatus,
 )
-buildingRoutes.post('/:id/photos', validateBody(addPhotoSchema), buildingController.addPhoto)
+buildingRoutes.post(
+  '/:id/photos',
+  audit('Building', 'PhotoAdd', {
+    describe: (req) => `Photo added to building ${req.params.id}`,
+  }),
+  validateBody(addPhotoSchema),
+  buildingController.addPhoto,
+)
 buildingRoutes.delete(
   '/:id/photos/:photoId',
   requireRole('ADMIN', 'MANAGER'),
+  audit('Building', 'PhotoDelete', {
+    describe: (req) => `Photo ${req.params.photoId} deleted from building ${req.params.id}`,
+    recordId: (req) => req.params.photoId,
+    buildingId: (req) => req.params.id,
+  }),
   buildingController.removePhoto,
 )

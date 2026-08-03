@@ -3,6 +3,8 @@ import { requireAuth, requireRole } from '../../middleware/auth.js'
 import { validateBody } from '../../middleware/validate.js'
 import { createZoneSchema, updateZoneSchema } from './zone.schemas.js'
 import { zoneController } from './zone.controller.js'
+import { audit } from '../system-logs/audit.js'
+import { zoneRepository } from './zone.repository.js'
 
 export const zoneRoutes = Router()
 
@@ -11,13 +13,26 @@ zoneRoutes.get('/', zoneController.list)
 zoneRoutes.post(
   '/',
   requireRole('ADMIN', 'MANAGER'),
+  audit('Zone', 'Create', { describe: (req) => `Zone '${req.body?.name ?? 'unknown'}' created` }),
   validateBody(createZoneSchema),
   zoneController.create,
 )
 zoneRoutes.patch(
   '/:id',
   requireRole('ADMIN', 'MANAGER'),
+  audit('Zone', 'Update', {
+    load: (req) => zoneRepository.findById(req.params.id),
+    describe: (req, old) => `Zone '${old?.name ?? req.params.id}' updated`,
+  }),
   validateBody(updateZoneSchema),
   zoneController.update,
 )
-zoneRoutes.delete('/:id', requireRole('ADMIN', 'MANAGER'), zoneController.remove)
+zoneRoutes.delete(
+  '/:id',
+  requireRole('ADMIN', 'MANAGER'),
+  audit('Zone', 'Delete', {
+    load: (req) => zoneRepository.findById(req.params.id),
+    describe: (req, old) => `Zone '${old?.name ?? req.params.id}' deleted`,
+  }),
+  zoneController.remove,
+)
