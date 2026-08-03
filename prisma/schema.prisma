@@ -115,3 +115,34 @@ model Photo {
   url        String
   createdAt  DateTime  @default(now())
 }
+
+/// Append-only audit trail. User fields are denormalized snapshots (no FK)
+/// so log entries survive user deletion/rename.
+model SystemLog {
+  id           String   @id @default(cuid())
+  userId       String?
+  userName     String?
+  userEmail    String?
+  userRole     String?
+  module       String
+  action       String
+  description  String
+  oldValue     Json?
+  newValue     Json?
+  recordId     String?
+  buildingId   String?
+  ipAddress    String?
+  device       String?
+  browser      String?
+  os           String?
+  requestUrl   String
+  httpMethod   String
+  status       String
+  statusCode   Int?
+  errorMessage String?
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId])
+  @@index([module, action])
+}
