@@ -1,12 +1,8 @@
 import { Router } from 'express'
-import { requireAuth, requireRole } from '../../middleware/auth.js'
+import { requireAuth } from '../../middleware/auth.js'
 import { statsController } from './stats.controller.js'
 
 export const statsRoutes = Router()
 
-statsRoutes.get(
-  '/dashboard',
-  requireAuth,
-  requireRole('ADMIN', 'MANAGER'),
-  statsController.dashboard,
-)
+// All roles may read: the service scopes surveyors to their own buildings.
+statsRoutes.get('/dashboard', requireAuth, statsController.dashboard)
