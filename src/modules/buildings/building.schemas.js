@@ -104,5 +104,12 @@ export const createBuildingSchema = z.object({
       }),
     )
     .max(20)
+    .refine(
+      (photos) =>
+        ['ENTRANCE', 'PERMISSION_LETTER'].every(
+          (type) => photos.filter((photo) => photo.type === type).length <= 1,
+        ),
+      { message: 'Only one entrance photo and one permission letter per building' },
+    )
     .optional(),
 })

@@ -1,9 +1,16 @@
-import { describe, it, expect, afterAll } from 'vitest'
+import { describe, it, expect, afterAll, vi } from 'vitest'
 import request from 'supertest'
 import jwt from 'jsonwebtoken'
 import { rm } from 'node:fs/promises'
-import { createApp } from '../src/app.js'
-import { env } from '../src/config/env.js'
+
+// Tests must never write to real R2 — force the local driver before the
+// app (and its cached env) loads. R2 has its own unit tests with a fake client.
+vi.hoisted(() => {
+  process.env.STORAGE_DRIVER = 'local'
+})
+
+const { createApp } = await import('../src/app.js')
+const { env } = await import('../src/config/env.js')
 
 const token = jwt.sign({ sub: 'test-user', role: 'SURVEYOR' }, env.jwtSecret, { expiresIn: '1h' })
 

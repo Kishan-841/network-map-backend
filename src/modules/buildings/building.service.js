@@ -192,6 +192,12 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       if (user?.role === 'SURVEYOR' && building.createdById !== user.id) {
         throw ApiError.forbidden('You can only add photos to your own buildings')
       }
+      // A building has exactly one entrance photo and one permission letter;
+      // only ADDITIONAL photos are unlimited. Delete the existing one to replace.
+      if (type !== 'ADDITIONAL' && building.photos?.some((photo) => photo.type === type)) {
+        const label = type === 'ENTRANCE' ? 'An entrance photo' : 'A permission letter'
+        throw ApiError.conflict(`${label} already exists — delete it first to replace it`)
+      }
       assertOwnedUrl(url)
 
       const photo = await buildingRepository.createPhoto({ buildingId, type, url })

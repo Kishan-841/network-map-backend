@@ -1,5 +1,40 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createBuildingService } from '../src/modules/buildings/building.service.js'
+import { createBuildingSchema } from '../src/modules/buildings/building.schemas.js'
+
+describe('create schema photo limits', () => {
+  const base = {
+    buildingName: 'X',
+    formattedAddress: 'A',
+    latitude: 1,
+    longitude: 1,
+    zoneId: 'z1',
+  }
+
+  it('rejects two ENTRANCE photos in the create payload', () => {
+    const result = createBuildingSchema.safeParse({
+      ...base,
+      photos: [
+        { type: 'ENTRANCE', url: '/uploads/a.jpg' },
+        { type: 'ENTRANCE', url: '/uploads/b.jpg' },
+      ],
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('allows one of each plus several ADDITIONAL', () => {
+    const result = createBuildingSchema.safeParse({
+      ...base,
+      photos: [
+        { type: 'ENTRANCE', url: '/uploads/a.jpg' },
+        { type: 'PERMISSION_LETTER', url: '/uploads/l.pdf' },
+        { type: 'ADDITIONAL', url: '/uploads/c.jpg' },
+        { type: 'ADDITIONAL', url: '/uploads/d.jpg' },
+      ],
+    })
+    expect(result.success).toBe(true)
+  })
+})
 
 function fakeRepo({ building = { id: 'b1' }, photo } = {}) {
   return {
@@ -90,6 +125,40 @@ describe('building service photos', () => {
       { id: 'u2', role: 'SURVEYOR' },
     )
     expect(repo.createPhoto).toHaveBeenCalledTimes(2)
+  })
+
+  it('409s a second ENTRANCE photo (one per building)', async () => {
+    const repo = fakeRepo({
+      building: { id: 'b1', createdById: 'u2', photos: [{ id: 'p0', type: 'ENTRANCE' }] },
+    })
+    const service = createBuildingService({ buildingRepository: repo, storage: fakeStorage() })
+    await expect(
+      service.addPhoto('b1', { type: 'ENTRANCE', url: '/uploads/door2.jpg' }, { id: 'u2', role: 'SURVEYOR' }),
+    ).rejects.toMatchObject({ status: 409 })
+    expect(repo.createPhoto).not.toHaveBeenCalled()
+  })
+
+  it('409s a second PERMISSION_LETTER', async () => {
+    const repo = fakeRepo({
+      building: { id: 'b1', photos: [{ id: 'p0', type: 'PERMISSION_LETTER' }] },
+    })
+    const service = createBuildingService({ buildingRepository: repo, storage: fakeStorage() })
+    await expect(
+      service.addPhoto('b1', { type: 'PERMISSION_LETTER', url: '/uploads/l2.pdf' }, { id: 'u1', role: 'ADMIN' }),
+    ).rejects.toMatchObject({ status: 409 })
+  })
+
+  it('allows multiple ADDITIONAL photos', async () => {
+    const repo = fakeRepo({
+      building: {
+        id: 'b1',
+        createdById: 'u2',
+        photos: [{ id: 'p0', type: 'ADDITIONAL' }, { id: 'p1', type: 'ENTRANCE' }],
+      },
+    })
+    const service = createBuildingService({ buildingRepository: repo, storage: fakeStorage() })
+    await service.addPhoto('b1', { type: 'ADDITIONAL', url: '/uploads/x.jpg' }, { id: 'u2', role: 'SURVEYOR' })
+    expect(repo.createPhoto).toHaveBeenCalledTimes(1)
   })
 
   it('removes a photo, deletes the stored file, clears matching permission doc', async () => {
