@@ -2,16 +2,18 @@ import { env } from '../../config/env.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
 import { createBuildingService } from './building.service.js'
 import { buildingRepository } from './building.repository.js'
+import { userRepository } from '../users/user.repository.js'
 
 const buildingService = createBuildingService({
   buildingRepository,
   storage: getStorageProvider(),
+  userRepository,
 })
 
 export const buildingController = {
   async create(req, res, next) {
     try {
-      const building = await buildingService.createBuilding(req.body, req.user.id)
+      const building = await buildingService.createBuilding(req.body, req.user.id, req.user)
       res.status(201).json({ success: true, data: building })
     } catch (err) {
       next(err)
@@ -20,7 +22,7 @@ export const buildingController = {
 
   async list(req, res, next) {
     try {
-      const buildings = await buildingService.listBuildings(req.validatedQuery ?? {})
+      const buildings = await buildingService.listBuildings(req.validatedQuery ?? {}, req.user)
       res.json({ success: true, data: buildings })
     } catch (err) {
       next(err)
@@ -36,7 +38,7 @@ export const buildingController = {
         radiusMeters: radius ?? env.duplicateRadiusMeters,
         name,
         placeId,
-      })
+      }, req.user)
       res.json({ success: true, data: buildings })
     } catch (err) {
       next(err)
@@ -72,7 +74,7 @@ export const buildingController = {
 
   async get(req, res, next) {
     try {
-      const building = await buildingService.getBuilding(req.params.id)
+      const building = await buildingService.getBuilding(req.params.id, req.user)
       res.json({ success: true, data: building })
     } catch (err) {
       next(err)

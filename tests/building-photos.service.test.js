@@ -75,8 +75,9 @@ describe('building service photos', () => {
     expect(repo.upsertPermissionDocument).not.toHaveBeenCalled()
   })
 
-  it('surveyors can still add ENTRANCE and ADDITIONAL photos', async () => {
-    const repo = fakeRepo()
+  it('surveyors can still add ENTRANCE and ADDITIONAL photos to their own buildings', async () => {
+    // Surveyors may only touch buildings they created (zone-access feature).
+    const repo = fakeRepo({ building: { id: 'b1', createdById: 'u2' } })
     const service = createBuildingService({ buildingRepository: repo, storage: fakeStorage() })
     await service.addPhoto(
       'b1',

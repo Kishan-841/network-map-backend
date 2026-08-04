@@ -2,7 +2,7 @@ import { ApiError } from '../../lib/api-error.js'
 import { haversineMeters, boundingBox } from '../../lib/geo.js'
 import { isSimilarName } from '../../lib/name-similarity.js'
 
-export function createBuildingService({ buildingRepository, storage }) {
+export function createBuildingService({ buildingRepository, storage, userRepository }) {
   // Stored URLs are rendered as <a href>/<img src> — only accept files that
   // came from our own uploads API (blocks javascript:/foreign URLs).
   function assertOwnedUrl(url) {
@@ -12,10 +12,16 @@ export function createBuildingService({ buildingRepository, storage }) {
   }
 
   return {
-    async createBuilding(input, createdById) {
+    async createBuilding(input, createdById, actor) {
       const { details, permission, photos, ...building } = input
       photos?.forEach((photo) => assertOwnedUrl(photo.url))
       if (permission?.documentUrl) assertOwnedUrl(permission.documentUrl)
+      if (actor?.role === 'SURVEYOR') {
+        const assigned = await userRepository.assignedZoneIds(actor.id)
+        if (!assigned.includes(building.zoneId)) {
+          throw ApiError.forbidden('You are not assigned to this zone')
+        }
+      }
       return buildingRepository.create({
         ...building,
         createdById,
@@ -30,7 +36,7 @@ export function createBuildingService({ buildingRepository, storage }) {
       })
     },
 
-    async listBuildings(filters = {}) {
+    async listBuildings(filters = {}, actor) {
       const {
         zoneId,
         status,
@@ -48,6 +54,8 @@ export function createBuildingService({ buildingRepository, storage }) {
       if (zoneId) where.zoneId = zoneId
       if (status) where.feasibleStatus = status
       if (createdById) where.createdById = createdById
+      // Surveyors only ever see their own buildings — forced, not a param.
+      if (actor?.role === 'SURVEYOR') where.createdById = actor.id
       if (dateFrom || dateTo) {
         where.createdAt = {}
         if (dateFrom) where.createdAt.gte = new Date(dateFrom)
@@ -91,9 +99,12 @@ export function createBuildingService({ buildingRepository, storage }) {
       return { items, pagination: paginate(total) }
     },
 
-    async getBuilding(id) {
+    async getBuilding(id, actor) {
       const building = await buildingRepository.findById(id)
-      if (!building) throw ApiError.notFound('Building not found')
+      // 404 (not 403) for foreign buildings: don't leak existence.
+      if (!building || (actor?.role === 'SURVEYOR' && building.createdById !== actor.id)) {
+        throw ApiError.notFound('Building not found')
+      }
       return building
     },
 
@@ -107,7 +118,7 @@ export function createBuildingService({ buildingRepository, storage }) {
       })
     },
 
-    async findNearby({ latitude, longitude, radiusMeters, name, placeId }) {
+    async findNearby({ latitude, longitude, radiusMeters, name, placeId }, actor) {
       const box = boundingBox(latitude, longitude, radiusMeters)
       const candidates = await buildingRepository.findWithinBounds(box)
 
@@ -136,8 +147,14 @@ export function createBuildingService({ buildingRepository, storage }) {
       return withinRadius
         .map((building) => ({
           ...building,
+          // similarName is computed from the real name BEFORE masking, so
+          // duplicate detection still works on buildings the surveyor can't see.
           samePlaceId: Boolean(placeId) && building.placeId === placeId,
           similarName: name ? isSimilarName(name, building.buildingName) : false,
+          buildingName:
+            actor?.role === 'SURVEYOR' && building.createdById !== actor.id
+              ? null
+              : building.buildingName,
         }))
         .sort((a, b) => a.distanceMeters - b.distanceMeters)
     },
@@ -149,6 +166,9 @@ export function createBuildingService({ buildingRepository, storage }) {
       }
       const building = await buildingRepository.findById(buildingId)
       if (!building) throw ApiError.notFound('Building not found')
+      if (user?.role === 'SURVEYOR' && building.createdById !== user.id) {
+        throw ApiError.forbidden('You can only add photos to your own buildings')
+      }
       assertOwnedUrl(url)
 
       const photo = await buildingRepository.createPhoto({ buildingId, type, url })
