@@ -64,5 +64,8 @@ describe('audit middleware', () => {
       statusCode: 400,
       errorMessage: 'Bad input',
     })
+    // A failed request changed nothing — no body is persisted.
+    expect(entry.newValue).toBeNull()
+    expect(entry.oldValue).toBeNull()
   })
 })

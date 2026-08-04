@@ -1,6 +1,7 @@
 import path from 'node:path'
 import express from 'express'
 import cors from 'cors'
+import { buildCorsOrigin } from './lib/cors-origin.js'
 import { env } from './config/env.js'
 import { errorHandler } from './middleware/error-handler.js'
 import { authRoutes } from './modules/auth/auth.routes.js'
@@ -20,11 +21,9 @@ export function createApp() {
   if (env.nodeEnv === 'production') app.set('trust proxy', 1)
 
   // Restrict which browser origins may call the API. '*' in dev; a specific
-  // list in production (CORS_ORIGIN). We authenticate via bearer tokens, not
-  // cookies, so credentials stay off.
-  const origin =
-    env.corsOrigin === '*' ? '*' : env.corsOrigin.split(',').map((value) => value.trim())
-  app.use(cors({ origin }))
+  // list in production (CORS_ORIGIN, wildcards allowed for Vercel previews).
+  // We authenticate via bearer tokens, not cookies, so credentials stay off.
+  app.use(cors({ origin: buildCorsOrigin(env.corsOrigin) }))
   app.use(express.json({ limit: '1mb' }))
 
   app.get('/api/v1/health', (req, res) => {

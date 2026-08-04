@@ -4,6 +4,7 @@ import { requireAuth } from '../../middleware/auth.js'
 import { ApiError } from '../../lib/api-error.js'
 import { uploadController, ALLOWED_MIME_TYPES } from './upload.controller.js'
 import { audit } from '../system-logs/audit.js'
+import { uploadLimiter } from '../../middleware/rate-limit.js'
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
@@ -21,6 +22,7 @@ export const uploadRoutes = Router()
 uploadRoutes.post(
   '/',
   requireAuth,
+  uploadLimiter,
   upload.single('file'),
   // After multer so req.file is populated; describe runs at response-finish time.
   audit('Upload', 'FileUpload', {

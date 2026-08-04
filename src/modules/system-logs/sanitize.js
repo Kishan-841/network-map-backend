@@ -1,4 +1,4 @@
-const SENSITIVE_KEY = /password|token|secret/i
+const SENSITIVE_KEY = /password|token|secret|authorization|credential|apikey|api_key/i
 
 function stripSensitive(value) {
   if (Array.isArray(value)) return value.map(stripSensitive)

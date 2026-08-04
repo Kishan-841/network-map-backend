@@ -54,6 +54,14 @@ describe('user zone assignment', () => {
     ).rejects.toMatchObject({ status: 400 })
   })
 
+  it('accepts duplicate zoneIds (dedupes instead of rejecting)', async () => {
+    const deps = fakeRepos()
+    const service = createUserService(deps)
+    await service.createUser({ ...surveyorInput, zoneIds: ['z1', 'z1', 'z2'] })
+    const [, data] = deps.calls.find(([op]) => op === 'create')
+    expect(data.assignedZones).toEqual({ connect: [{ id: 'z1' }, { id: 'z2' }] })
+  })
+
   it('replaces the set on update', async () => {
     const existing = {
       id: 'u1',

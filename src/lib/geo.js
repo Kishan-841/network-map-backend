@@ -14,7 +14,10 @@ export function haversineMeters(lat1, lon1, lat2, lon2) {
 
 export function boundingBox(latitude, longitude, radiusMeters) {
   const latDelta = radiusMeters / METERS_PER_DEGREE_LAT
-  const lonDelta = radiusMeters / (METERS_PER_DEGREE_LAT * Math.cos(toRadians(latitude)))
+  // Clamp cos(lat) away from 0 so the longitude delta can't explode to a
+  // whole-planet span near the poles (which would match every row).
+  const cosLat = Math.max(Math.cos(toRadians(latitude)), 0.01)
+  const lonDelta = Math.min(radiusMeters / (METERS_PER_DEGREE_LAT * cosLat), 180)
   return {
     minLat: latitude - latDelta,
     maxLat: latitude + latDelta,

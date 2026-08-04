@@ -33,4 +33,12 @@ describe('boundingBox', () => {
     expect(19.0765).toBeLessThan(box.maxLat)
     expect(box.maxLat).toBeLessThan(19.078) // 100 m ≈ 0.0009°, not 0.002°
   })
+
+  it('does not blow up near the poles (cos(lat) → 0)', () => {
+    const box = boundingBox(90, 0, 5000)
+    // Longitude delta must stay finite and bounded, not span the whole planet.
+    expect(Number.isFinite(box.minLon)).toBe(true)
+    expect(Number.isFinite(box.maxLon)).toBe(true)
+    expect(box.maxLon - box.minLon).toBeLessThanOrEqual(360)
+  })
 })

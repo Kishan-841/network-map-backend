@@ -32,8 +32,10 @@ export function createAudit(recordLog) {
           module,
           action,
           description: opts.describe?.(req, oldValue, body) ?? `${module} ${action.toLowerCase()}`,
-          oldValue,
-          newValue: req.body && Object.keys(req.body).length ? req.body : null,
+          oldValue: failed ? null : oldValue,
+          // A failed request changed nothing, and on failure req.body is the
+          // raw (unvalidated) payload — never persist it (log-spam / poisoning).
+          newValue: !failed && req.body && Object.keys(req.body).length ? req.body : null,
           recordId,
           buildingId,
           ...parseRequestInfo(req),

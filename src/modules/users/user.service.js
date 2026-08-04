@@ -9,9 +9,12 @@ export function createUserService({ userRepository, zoneRepository }) {
   // (assignments are stored only for surveyors).
   async function zoneAssignment(zoneIds, role, op) {
     if (zoneIds === undefined || role !== 'SURVEYOR') return undefined
-    const found = await zoneRepository.countByIds(zoneIds)
-    if (found !== zoneIds.length) throw ApiError.badRequest('One or more zones do not exist')
-    return { [op]: zoneIds.map((id) => ({ id })) }
+    // Dedupe first: countByIds is a distinct-row count, so a repeated id
+    // (UI double-click / merged sheet) would otherwise fail the length check.
+    const uniqueIds = [...new Set(zoneIds)]
+    const found = await zoneRepository.countByIds(uniqueIds)
+    if (found !== uniqueIds.length) throw ApiError.badRequest('One or more zones do not exist')
+    return { [op]: uniqueIds.map((id) => ({ id })) }
   }
 
   return {
