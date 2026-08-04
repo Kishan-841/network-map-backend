@@ -2,6 +2,8 @@ import { prisma } from '../../lib/prisma.js'
 
 export const userRepository = {
   findByEmail: (email) => prisma.user.findUnique({ where: { email } }),
+  findByEmailInsensitive: (email) =>
+    prisma.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' } } }),
   findById: (id) => prisma.user.findUnique({ where: { id } }),
   create: (data) => prisma.user.create({ data }),
   list: () =>

@@ -18,6 +18,18 @@ export const createUserSchema = z.object({
   zoneIds: z.array(z.string().min(1)).max(200).optional(),
 })
 
+export const bulkZoneAssignSchema = z.object({
+  assignments: z
+    .array(
+      z.object({
+        email: z.string().trim().email(),
+        zoneNames: z.array(z.string().trim().min(1)).min(1).max(200),
+      }),
+    )
+    .min(1)
+    .max(500),
+})
+
 export const listUsersQuerySchema = z.object({
   page: z.coerce.number().int().min(1).optional(),
   pageSize: z.coerce.number().int().min(1).max(100).default(50),

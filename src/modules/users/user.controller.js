@@ -25,6 +25,15 @@ export const userController = {
     }
   },
 
+  async bulkZones(req, res, next) {
+    try {
+      const result = await userService.bulkAssignZones(req.body.assignments)
+      res.json({ success: true, data: result })
+    } catch (err) {
+      next(err)
+    }
+  },
+
   async update(req, res, next) {
     try {
       const user = await userService.updateUser(req.params.id, req.body)

@@ -1,7 +1,12 @@
 import { Router } from 'express'
 import { requireAuth, requireRole } from '../../middleware/auth.js'
 import { validateBody, validateQuery } from '../../middleware/validate.js'
-import { createUserSchema, updateUserSchema, listUsersQuerySchema } from './user.schemas.js'
+import {
+  createUserSchema,
+  updateUserSchema,
+  listUsersQuerySchema,
+  bulkZoneAssignSchema,
+} from './user.schemas.js'
 import { userController } from './user.controller.js'
 import { audit } from '../system-logs/audit.js'
 import { userRepository } from './user.repository.js'
@@ -17,6 +22,18 @@ userRoutes.post(
   }),
   validateBody(createUserSchema),
   userController.create,
+)
+userRoutes.post(
+  '/bulk-zones',
+  requireRole('ADMIN'),
+  audit('User', 'BulkZoneAssign', {
+    describe: (req, old, body) =>
+      body?.data
+        ? `Bulk zone assignment: ${body.data.updated.length} updated, ${body.data.skipped.length} skipped`
+        : 'Bulk zone assignment',
+  }),
+  validateBody(bulkZoneAssignSchema),
+  userController.bulkZones,
 )
 userRoutes.get(
   '/',

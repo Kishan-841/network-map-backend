@@ -34,6 +34,41 @@ export function createUserService({ userRepository, zoneRepository }) {
       return users.map(toPublicUser)
     },
 
+    // Sheet-driven assignment: each row REPLACES that surveyor's zone set.
+    // Rows with any unresolvable zone name are skipped whole — a typo must
+    // never silently shrink an assignment.
+    async bulkAssignZones(assignments) {
+      const zones = await zoneRepository.list()
+      const zoneIdByName = new Map(zones.map((zone) => [zone.name.trim().toLowerCase(), zone.id]))
+
+      const updated = []
+      const skipped = []
+      for (const { email, zoneNames } of assignments) {
+        const user = await userRepository.findByEmailInsensitive(email.trim())
+        if (!user) {
+          skipped.push({ email, reason: 'user not found' })
+          continue
+        }
+        if (user.role !== 'SURVEYOR') {
+          skipped.push({ email, reason: 'not a surveyor' })
+          continue
+        }
+        const missing = zoneNames.filter(
+          (name) => !zoneIdByName.has(name.trim().toLowerCase()),
+        )
+        if (missing.length > 0) {
+          skipped.push({ email, reason: `zone(s) not found: ${missing.join(', ')}` })
+          continue
+        }
+        const ids = [...new Set(zoneNames.map((name) => zoneIdByName.get(name.trim().toLowerCase())))]
+        await userRepository.update(user.id, {
+          assignedZones: { set: ids.map((id) => ({ id })) },
+        })
+        updated.push({ email: user.email, zones: ids.length })
+      }
+      return { updated, skipped, total: assignments.length }
+    },
+
     async listUsersPaged({ page, pageSize, search, role }) {
       const where = {
         ...(role && { role }),
