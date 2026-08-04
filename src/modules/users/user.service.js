@@ -34,6 +34,29 @@ export function createUserService({ userRepository, zoneRepository }) {
       return users.map(toPublicUser)
     },
 
+    async listUsersPaged({ page, pageSize, search, role }) {
+      const where = {
+        ...(role && { role }),
+        ...(search && {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { email: { contains: search, mode: 'insensitive' } },
+          ],
+        }),
+      }
+      const [items, total] = await Promise.all([
+        userRepository.paged({ where, skip: (page - 1) * pageSize, take: pageSize }),
+        userRepository.count(where),
+      ])
+      return {
+        items: items.map(toPublicUser),
+        total,
+        page,
+        pageSize,
+        totalPages: Math.ceil(total / pageSize),
+      }
+    },
+
     async updateUser(id, { password, email, zoneIds, ...data }) {
       // Changing to an email another account already uses → clean 409.
       if (email) {

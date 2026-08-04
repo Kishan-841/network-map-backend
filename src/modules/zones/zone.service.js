@@ -7,6 +7,23 @@ export function createZoneService({ zoneRepository }) {
       return zoneRepository.list()
     },
 
+    async listZonesPaged({ page, pageSize, search }, actor) {
+      const where = {
+        ...(actor?.role === 'SURVEYOR' && { assignedUsers: { some: { id: actor.id } } }),
+        ...(search && {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' } },
+            { city: { contains: search, mode: 'insensitive' } },
+          ],
+        }),
+      }
+      const [items, total] = await Promise.all([
+        zoneRepository.paged({ where, skip: (page - 1) * pageSize, take: pageSize }),
+        zoneRepository.count(where),
+      ])
+      return { items, total, page, pageSize, totalPages: Math.ceil(total / pageSize) }
+    },
+
     async createZone({ name, city, boundary }) {
       const existing = await zoneRepository.findByName(name)
       if (existing) throw ApiError.conflict('A zone with this name already exists')

@@ -6,8 +6,12 @@ const zoneService = createZoneService({ zoneRepository })
 export const zoneController = {
   async list(req, res, next) {
     try {
-      const zones = await zoneService.listZones(req.user)
-      res.json({ success: true, data: zones })
+      const query = req.validatedQuery ?? {}
+      // Dual response: ?page → envelope; without → legacy array (dropdown consumers).
+      const data = query.page
+        ? await zoneService.listZonesPaged(query, req.user)
+        : await zoneService.listZones(req.user)
+      res.json({ success: true, data })
     } catch (err) {
       next(err)
     }

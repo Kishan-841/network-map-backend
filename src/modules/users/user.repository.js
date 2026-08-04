@@ -9,6 +9,15 @@ export const userRepository = {
       orderBy: { createdAt: 'desc' },
       include: { assignedZones: { select: { id: true, name: true } } },
     }),
+  paged: ({ where, skip, take }) =>
+    prisma.user.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take,
+      include: { assignedZones: { select: { id: true, name: true } } },
+    }),
+  count: (where) => prisma.user.count({ where }),
   assignedZoneIds: (userId) =>
     prisma.zone
       .findMany({ where: { assignedUsers: { some: { id: userId } } }, select: { id: true } })

@@ -16,8 +16,10 @@ export const userController = {
 
   async list(req, res, next) {
     try {
-      const users = await userService.listUsers()
-      res.json({ success: true, data: users })
+      const query = req.validatedQuery ?? {}
+      // Dual response: ?page → envelope; without → legacy array (dropdown consumers).
+      const data = query.page ? await userService.listUsersPaged(query) : await userService.listUsers()
+      res.json({ success: true, data })
     } catch (err) {
       next(err)
     }

@@ -14,6 +14,12 @@ export const createZoneSchema = z.object({
 
 export const updateZoneSchema = createZoneSchema.partial()
 
+export const listZonesQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(100).default(50),
+  search: z.string().optional(),
+})
+
 export const bulkZoneSchema = z.object({
   zones: z
     .array(

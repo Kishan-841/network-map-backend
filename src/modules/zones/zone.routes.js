@@ -1,7 +1,12 @@
 import { Router } from 'express'
 import { requireAuth, requireRole } from '../../middleware/auth.js'
-import { validateBody } from '../../middleware/validate.js'
-import { createZoneSchema, updateZoneSchema, bulkZoneSchema } from './zone.schemas.js'
+import { validateBody, validateQuery } from '../../middleware/validate.js'
+import {
+  createZoneSchema,
+  updateZoneSchema,
+  bulkZoneSchema,
+  listZonesQuerySchema,
+} from './zone.schemas.js'
 import { zoneController } from './zone.controller.js'
 import { audit } from '../system-logs/audit.js'
 import { zoneRepository } from './zone.repository.js'
@@ -9,7 +14,7 @@ import { zoneRepository } from './zone.repository.js'
 export const zoneRoutes = Router()
 
 zoneRoutes.use(requireAuth)
-zoneRoutes.get('/', zoneController.list)
+zoneRoutes.get('/', validateQuery(listZonesQuerySchema), zoneController.list)
 zoneRoutes.post(
   '/',
   requireRole('ADMIN', 'MANAGER'),

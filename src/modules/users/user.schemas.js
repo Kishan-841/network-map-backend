@@ -18,6 +18,13 @@ export const createUserSchema = z.object({
   zoneIds: z.array(z.string().min(1)).max(200).optional(),
 })
 
+export const listUsersQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(100).default(50),
+  search: z.string().optional(),
+  role: roleSchema.optional(),
+})
+
 export const updateUserSchema = z
   .object({
     name: z.string().min(1),

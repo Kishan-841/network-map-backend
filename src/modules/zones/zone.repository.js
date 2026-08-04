@@ -14,4 +14,7 @@ export const zoneRepository = {
   delete: (id) => prisma.zone.delete({ where: { id } }),
   countBuildings: (zoneId) => prisma.building.count({ where: { zoneId } }),
   countByIds: (ids) => prisma.zone.count({ where: { id: { in: ids } } }),
+  paged: ({ where, skip, take }) =>
+    prisma.zone.findMany({ where, orderBy: { name: 'asc' }, skip, take }),
+  count: (where) => prisma.zone.count({ where }),
 }
