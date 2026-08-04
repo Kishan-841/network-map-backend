@@ -5,7 +5,7 @@ import { createApp } from '../src/app.js'
 import { env } from '../src/config/env.js'
 
 // ADMIN: surveyors now see only their assigned zones (zone-access feature).
-const token = jwt.sign({ sub: 'test-user', role: 'ADMIN' }, env.jwtSecret, { expiresIn: '1h' })
+const token = jwt.sign({ sub: 'test-admin', role: 'ADMIN' }, env.jwtSecret, { expiresIn: '1h' })
 
 describe('GET /api/v1/zones', () => {
   it('requires authentication', async () => {

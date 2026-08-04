@@ -58,7 +58,7 @@ buildingRoutes.post(
 )
 buildingRoutes.delete(
   '/:id/photos/:photoId',
-  requireRole('ADMIN', 'MANAGER'),
+  // Ownership is enforced in the service so surveyors can fix their own photos.
   audit('Building', 'PhotoDelete', {
     describe: (req) => `Photo ${req.params.photoId} deleted from building ${req.params.id}`,
     recordId: (req) => req.params.photoId,

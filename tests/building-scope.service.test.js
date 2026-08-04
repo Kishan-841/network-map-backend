@@ -78,6 +78,50 @@ describe('building scoping', () => {
     ).resolves.toMatchObject({ id: 'new' })
   })
 
+  it('403s a surveyor setting permission details or a permission letter at create', async () => {
+    const { service } = makeService()
+    const input = {
+      buildingName: 'X',
+      formattedAddress: 'A',
+      latitude: 1,
+      longitude: 1,
+      zoneId: 'z1',
+    }
+    await expect(
+      service.createBuilding({ ...input, permission: { amountPaid: 5000 } }, 'u-surv', surveyor),
+    ).rejects.toMatchObject({ status: 403 })
+    await expect(
+      service.createBuilding(
+        { ...input, photos: [{ type: 'PERMISSION_LETTER', url: 'u' }] },
+        'u-surv',
+        surveyor,
+      ),
+    ).rejects.toMatchObject({ status: 403 })
+  })
+
+  it('lets a surveyor delete a photo on their own building but not a foreign one', async () => {
+    const buildings = [
+      { ...own, photos: [] },
+      { ...foreign, photos: [] },
+    ]
+    const service = createBuildingService({
+      buildingRepository: {
+        findById: async (id) => buildings.find((b) => b.id === id) ?? null,
+        findPhotoById: async (photoId) =>
+          photoId === 'own-photo'
+            ? { id: 'own-photo', buildingId: 'b1', type: 'ENTRANCE', url: '/uploads/x.jpg' }
+            : { id: 'foreign-photo', buildingId: 'b2', type: 'ENTRANCE', url: '/uploads/y.jpg' },
+        deletePhoto: async () => {},
+      },
+      storage: { keyFromUrl: () => null },
+      userRepository: { assignedZoneIds: async () => [] },
+    })
+    await expect(service.removePhoto('b1', 'own-photo', surveyor)).resolves.toBeUndefined()
+    await expect(service.removePhoto('b2', 'foreign-photo', surveyor)).rejects.toMatchObject({
+      status: 403,
+    })
+  })
+
   it('403s photo add on a foreign building for surveyors', async () => {
     const { service } = makeService()
     await expect(
@@ -98,5 +142,38 @@ describe('building scoping', () => {
       admin,
     )
     expect(forAdmin.find((b) => b.id === 'b2').buildingName).toBe('Theirs')
+  })
+
+  it('strips ALL sensitive fields of foreign buildings for surveyors (only masks name)', async () => {
+    const richForeign = {
+      ...foreign,
+      formattedAddress: '123 Secret St',
+      zoneId: 'z-secret',
+      zone: { id: 'z-secret', name: 'Secret Zone' },
+      details: { floors: 42, homePass: 999, remarks: 'confidential' },
+      feasibleStatus: 'FEASIBLE',
+    }
+    const { service } = makeService({ buildings: [own, richForeign] })
+    const forSurveyor = await service.findNearby(
+      { latitude: 18.5, longitude: 73.8, radiusMeters: 500, name: 'Mine' },
+      surveyor,
+    )
+    const masked = forSurveyor.find((b) => b.id === 'b2')
+    // Only distance + duplicate-signal fields survive; everything else is gone.
+    expect(masked.buildingName).toBeNull()
+    expect(masked.formattedAddress ?? null).toBeNull()
+    expect(masked.zone).toBeUndefined()
+    expect(masked.details).toBeUndefined()
+    expect(masked.latitude).toBeUndefined()
+    expect(masked.createdById).toBeUndefined()
+    expect(masked.feasibleStatus).toBeUndefined()
+    // Duplicate detection still works.
+    expect(typeof masked.distanceMeters).toBe('number')
+    expect(masked).toHaveProperty('samePlaceId')
+
+    // Own building keeps everything.
+    const ownResult = forSurveyor.find((b) => b.id === 'b1')
+    expect(ownResult.buildingName).toBe('Mine')
+    expect(ownResult.latitude).toBe(18.5)
   })
 })

@@ -93,6 +93,9 @@ export function createUserService({ userRepository, zoneRepository }) {
     },
 
     async updateUser(id, { password, email, zoneIds, ...data }) {
+      // Explicit existence check → 404 instead of a Prisma P2025 leaking as 500.
+      const current = await userRepository.findById(id)
+      if (!current) throw ApiError.notFound('User not found')
       // Changing to an email another account already uses → clean 409.
       if (email) {
         const existing = await userRepository.findByEmail(email)
@@ -106,8 +109,6 @@ export function createUserService({ userRepository, zoneRepository }) {
 
       // zoneIds replaces the full assignment set; omitting it leaves it unchanged.
       if (zoneIds !== undefined) {
-        const current = await userRepository.findById(id)
-        if (!current) throw ApiError.notFound('User not found')
         const targetRole = data.role ?? current.role
         const assignedZones = await zoneAssignment(zoneIds, targetRole, 'set')
         if (assignedZones) data.assignedZones = assignedZones

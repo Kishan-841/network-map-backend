@@ -7,6 +7,7 @@ function fakeUserRepository(seed = []) {
   return {
     users,
     findByEmail: async (email) => users.find((u) => u.email === email) ?? null,
+    findById: async (id) => users.find((u) => u.id === id) ?? null,
     create: async (data) => {
       const user = { id: `user-${users.length + 1}`, isActive: true, ...data }
       users.push(user)

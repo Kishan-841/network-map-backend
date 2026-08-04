@@ -76,7 +76,7 @@ export const buildingController = {
 
   async removePhoto(req, res, next) {
     try {
-      await buildingService.removePhoto(req.params.id, req.params.photoId)
+      await buildingService.removePhoto(req.params.id, req.params.photoId, req.user)
       res.json({ success: true, data: null })
     } catch (err) {
       next(err)

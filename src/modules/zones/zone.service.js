@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client'
 import { ApiError } from '../../lib/api-error.js'
 
 export function createZoneService({ zoneRepository }) {
@@ -54,7 +55,10 @@ export function createZoneService({ zoneRepository }) {
     async updateZone(id, data) {
       const zone = await zoneRepository.findById(id)
       if (!zone) throw ApiError.notFound('Zone not found')
-      return zoneRepository.update(id, data)
+      // Prisma needs DbNull (not JS null) to clear a Json? column to SQL NULL.
+      const patch =
+        data.boundary === null ? { ...data, boundary: Prisma.DbNull } : data
+      return zoneRepository.update(id, patch)
     },
 
     async deleteZone(id) {

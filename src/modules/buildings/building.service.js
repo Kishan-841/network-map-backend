@@ -16,7 +16,15 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       const { details, permission, photos, ...building } = input
       photos?.forEach((photo) => assertOwnedUrl(photo.url))
       if (permission?.documentUrl) assertOwnedUrl(permission.documentUrl)
+      // Permission records are legal artifacts — surveyors may not set them, the
+      // same rule addPhoto enforces for permission letters.
       if (actor?.role === 'SURVEYOR') {
+        if (permission) {
+          throw ApiError.forbidden('Only admins or managers can set permission details')
+        }
+        if (photos?.some((photo) => photo.type === 'PERMISSION_LETTER')) {
+          throw ApiError.forbidden('Only admins or managers can upload permission letters')
+        }
         const assigned = await userRepository.assignedZoneIds(actor.id)
         if (!assigned.includes(building.zoneId)) {
           throw ApiError.forbidden('You are not assigned to this zone')
@@ -168,17 +176,26 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       }
 
       return withinRadius
-        .map((building) => ({
-          ...building,
-          // similarName is computed from the real name BEFORE masking, so
-          // duplicate detection still works on buildings the surveyor can't see.
-          samePlaceId: Boolean(placeId) && building.placeId === placeId,
-          similarName: name ? isSimilarName(name, building.buildingName) : false,
-          buildingName:
-            actor?.role === 'SURVEYOR' && building.createdById !== actor.id
-              ? null
-              : building.buildingName,
-        }))
+        .map((building) => {
+          // Duplicate signals are computed from the real record first.
+          const samePlaceId = Boolean(placeId) && building.placeId === placeId
+          const similarName = name ? isSimilarName(name, building.buildingName) : false
+          // A surveyor must not learn ANYTHING about another surveyor's building
+          // beyond "one exists here" — return only distance + duplicate signals,
+          // never address / coordinates / details / owner / status.
+          if (actor?.role === 'SURVEYOR' && building.createdById !== actor.id) {
+            return {
+              id: building.id,
+              distanceMeters: building.distanceMeters,
+              buildingName: null,
+              formattedAddress: null,
+              samePlaceId,
+              similarName,
+              masked: true,
+            }
+          }
+          return { ...building, samePlaceId, similarName }
+        })
         .sort((a, b) => a.distanceMeters - b.distanceMeters)
     },
 
@@ -207,9 +224,18 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       return photo
     },
 
-    async removePhoto(buildingId, photoId) {
+    async removePhoto(buildingId, photoId, user) {
       const photo = await buildingRepository.findPhotoById(photoId)
       if (!photo || photo.buildingId !== buildingId) throw ApiError.notFound('Photo not found')
+
+      // Surveyors may manage photos on their OWN buildings (so they can fix a
+      // wrong entrance/permission upload); admins/managers may manage any.
+      if (user?.role === 'SURVEYOR') {
+        const building = await buildingRepository.findById(buildingId)
+        if (!building || building.createdById !== user.id) {
+          throw ApiError.forbidden('You can only delete photos on your own buildings')
+        }
+      }
 
       await buildingRepository.deletePhoto(photoId)
       if (photo.type === 'PERMISSION_LETTER') {

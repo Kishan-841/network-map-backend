@@ -43,7 +43,7 @@ describe('auth audit events', () => {
   })
 
   it('logs logout', async () => {
-    const token = jwt.sign({ sub: 'test-user', role: 'ADMIN' }, env.jwtSecret, { expiresIn: '1h' })
+    const token = jwt.sign({ sub: 'test-admin', role: 'ADMIN' }, env.jwtSecret, { expiresIn: '1h' })
     const before = await countAuth('Logout')
     const res = await request(createApp())
       .post('/api/v1/auth/logout')
