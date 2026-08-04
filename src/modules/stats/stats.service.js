@@ -2,12 +2,16 @@ const FEASIBLE_STATUSES = ['FEASIBLE', 'PERMISSION_PENDING', 'REJECTED', 'SURVEY
 
 export function createStatsService({ statsRepository }) {
   return {
-    async getDashboardStats() {
+    async getDashboardStats(actor) {
+      // Surveyors see KPIs over their own buildings only.
+      const scoped = actor?.role === 'SURVEYOR'
+      const buildingWhere = scoped ? { createdById: actor.id } : undefined
+      const nestedWhere = scoped ? { building: { createdById: actor.id } } : undefined
       const [totalBuildings, statusCounts, homePass, permissionCost] = await Promise.all([
-        statsRepository.countBuildings(),
-        statsRepository.countsByStatus(),
-        statsRepository.sumHomePass(),
-        statsRepository.sumPermissionCost(),
+        statsRepository.countBuildings(buildingWhere),
+        statsRepository.countsByStatus(buildingWhere),
+        statsRepository.sumHomePass(nestedWhere),
+        statsRepository.sumPermissionCost(nestedWhere),
       ])
 
       const byStatus = Object.fromEntries(FEASIBLE_STATUSES.map((status) => [status, 0]))

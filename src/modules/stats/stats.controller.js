@@ -6,7 +6,7 @@ const statsService = createStatsService({ statsRepository })
 export const statsController = {
   async dashboard(req, res, next) {
     try {
-      const stats = await statsService.getDashboardStats()
+      const stats = await statsService.getDashboardStats(req.user)
       res.json({ success: true, data: stats })
     } catch (err) {
       next(err)
