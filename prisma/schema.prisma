@@ -41,6 +41,8 @@ model User {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   buildings    Building[]
+  /// Zones a SURVEYOR may work in; unused for other roles.
+  assignedZones Zone[]    @relation("UserAssignedZones")
 }
 
 model BuildingType {
@@ -57,6 +59,7 @@ model Zone {
   boundary  Json?
   createdAt DateTime   @default(now())
   buildings Building[]
+  assignedUsers User[] @relation("UserAssignedZones")
 }
 
 model Building {
