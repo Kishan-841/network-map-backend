@@ -31,6 +31,40 @@ export const listQuerySchema = z.object({
   pageSize: z.coerce.number().int().positive().max(500).optional(),
 })
 
+// Admin/Manager edit — location (lat/lng/placeId) is immutable and the
+// permission documentUrl belongs to the photo manager, so neither appears here.
+export const updateBuildingSchema = z
+  .object({
+    buildingName: z.string().trim().min(1).max(200),
+    formattedAddress: z.string().trim().min(1).max(500),
+    zoneId: z.string().min(1),
+    isLive: z.boolean(),
+    details: z
+      .object({
+        wings: z.number().int().positive().nullable(),
+        floors: z.number().int().positive().nullable(),
+        homePass: z.number().int().nonnegative().nullable(),
+        buildingType: z.string().max(50).nullable(),
+        remarks: z.string().max(1000).nullable(),
+      })
+      .partial(),
+    permission: z
+      .object({
+        amountPaid: z.number().nonnegative().nullable(),
+        permissionStatus: z.string().max(50).nullable(),
+        permissionDate: z.string().date().nullable(),
+        renewalDate: z.string().date().nullable(),
+        ownerName: z.string().max(100).nullable(),
+        ownerMobile: z.string().max(20).nullable(),
+      })
+      .partial(),
+  })
+  .partial()
+  .strict()
+  .refine((data) => Object.keys(data).length > 0, {
+    message: 'Provide at least one field to update',
+  })
+
 export const nearbyQuerySchema = z.object({
   latitude: z.coerce.number().min(-90).max(90),
   longitude: z.coerce.number().min(-180).max(180),

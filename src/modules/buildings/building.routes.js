@@ -7,6 +7,7 @@ import {
   listQuerySchema,
   addPhotoSchema,
   updateStatusSchema,
+  updateBuildingSchema,
 } from './building.schemas.js'
 import { buildingController } from './building.controller.js'
 import { audit } from '../system-logs/audit.js'
@@ -36,6 +37,16 @@ buildingRoutes.patch(
   }),
   validateBody(updateStatusSchema),
   buildingController.updateStatus,
+)
+buildingRoutes.patch(
+  '/:id',
+  requireRole('ADMIN', 'MANAGER'),
+  audit('Building', 'Update', {
+    load: (req) => buildingRepository.findById(req.params.id),
+    describe: (req, old) => `Building '${old?.buildingName ?? req.params.id}' updated`,
+  }),
+  validateBody(updateBuildingSchema),
+  buildingController.update,
 )
 buildingRoutes.post(
   '/:id/photos',

@@ -3,11 +3,13 @@ import { getStorageProvider } from '../../lib/storage/index.js'
 import { createBuildingService } from './building.service.js'
 import { buildingRepository } from './building.repository.js'
 import { userRepository } from '../users/user.repository.js'
+import { zoneRepository } from '../zones/zone.repository.js'
 
 const buildingService = createBuildingService({
   buildingRepository,
   storage: getStorageProvider(),
   userRepository,
+  zoneRepository,
 })
 
 export const buildingController = {
@@ -40,6 +42,15 @@ export const buildingController = {
         placeId,
       }, req.user)
       res.json({ success: true, data: buildings })
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  async update(req, res, next) {
+    try {
+      const building = await buildingService.updateBuilding(req.params.id, req.body)
+      res.json({ success: true, data: building })
     } catch (err) {
       next(err)
     }

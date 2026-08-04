@@ -2,7 +2,7 @@ import { ApiError } from '../../lib/api-error.js'
 import { haversineMeters, boundingBox } from '../../lib/geo.js'
 import { isSimilarName } from '../../lib/name-similarity.js'
 
-export function createBuildingService({ buildingRepository, storage, userRepository }) {
+export function createBuildingService({ buildingRepository, storage, userRepository, zoneRepository }) {
   // Stored URLs are rendered as <a href>/<img src> — only accept files that
   // came from our own uploads API (blocks javascript:/foreign URLs).
   function assertOwnedUrl(url) {
@@ -106,6 +106,29 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         throw ApiError.notFound('Building not found')
       }
       return building
+    },
+
+    async updateBuilding(id, { details, permission, ...building }) {
+      const existing = await buildingRepository.findById(id)
+      if (!existing) throw ApiError.notFound('Building not found')
+      if (building.zoneId && building.zoneId !== existing.zoneId) {
+        const zone = await zoneRepository.findById(building.zoneId)
+        if (!zone) throw ApiError.badRequest('Zone does not exist')
+      }
+      const data = { ...building }
+      // Older buildings may lack the child rows — upsert instead of update.
+      if (details) data.details = { upsert: { create: details, update: details } }
+      if (permission) {
+        const patch = { ...permission }
+        if (patch.permissionDate !== undefined) {
+          patch.permissionDate = patch.permissionDate ? new Date(patch.permissionDate) : null
+        }
+        if (patch.renewalDate !== undefined) {
+          patch.renewalDate = patch.renewalDate ? new Date(patch.renewalDate) : null
+        }
+        data.permission = { upsert: { create: patch, update: patch } }
+      }
+      return buildingRepository.update(id, data)
     },
 
     async updateStatus(id, { feasibleStatus, surveyStatus, isLive }) {
