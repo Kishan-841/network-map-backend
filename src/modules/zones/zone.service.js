@@ -2,6 +2,11 @@ import { ApiError } from '../../lib/api-error.js'
 
 export function createZoneService({ zoneRepository }) {
   return {
+    async listZones(actor) {
+      if (actor?.role === 'SURVEYOR') return zoneRepository.listAssigned(actor.id)
+      return zoneRepository.list()
+    },
+
     async createZone({ name, city, boundary }) {
       const existing = await zoneRepository.findByName(name)
       if (existing) throw ApiError.conflict('A zone with this name already exists')

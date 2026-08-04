@@ -6,7 +6,7 @@ const zoneService = createZoneService({ zoneRepository })
 export const zoneController = {
   async list(req, res, next) {
     try {
-      const zones = await zoneRepository.list()
+      const zones = await zoneService.listZones(req.user)
       res.json({ success: true, data: zones })
     } catch (err) {
       next(err)

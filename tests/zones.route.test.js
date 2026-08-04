@@ -4,7 +4,8 @@ import jwt from 'jsonwebtoken'
 import { createApp } from '../src/app.js'
 import { env } from '../src/config/env.js'
 
-const token = jwt.sign({ sub: 'test-user', role: 'SURVEYOR' }, env.jwtSecret, { expiresIn: '1h' })
+// ADMIN: surveyors now see only their assigned zones (zone-access feature).
+const token = jwt.sign({ sub: 'test-user', role: 'ADMIN' }, env.jwtSecret, { expiresIn: '1h' })
 
 describe('GET /api/v1/zones', () => {
   it('requires authentication', async () => {
