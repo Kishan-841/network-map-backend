@@ -15,6 +15,7 @@ export const createUserSchema = z.object({
   email: z.string().email(),
   password: passwordSchema,
   role: roleSchema,
+  zoneIds: z.array(z.string().min(1)).max(200).optional(),
 })
 
 export const updateUserSchema = z
@@ -24,5 +25,6 @@ export const updateUserSchema = z
     password: passwordSchema,
     role: roleSchema,
     isActive: z.boolean(),
+    zoneIds: z.array(z.string().min(1)).max(200),
   })
   .partial()

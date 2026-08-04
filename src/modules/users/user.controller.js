@@ -1,7 +1,8 @@
 import { createUserService } from './user.service.js'
 import { userRepository } from './user.repository.js'
+import { zoneRepository } from '../zones/zone.repository.js'
 
-const userService = createUserService({ userRepository })
+const userService = createUserService({ userRepository, zoneRepository })
 
 export const userController = {
   async create(req, res, next) {

@@ -13,4 +13,5 @@ export const zoneRepository = {
   update: (id, data) => prisma.zone.update({ where: { id }, data }),
   delete: (id) => prisma.zone.delete({ where: { id } }),
   countBuildings: (zoneId) => prisma.building.count({ where: { zoneId } }),
+  countByIds: (ids) => prisma.zone.count({ where: { id: { in: ids } } }),
 }

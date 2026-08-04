@@ -64,7 +64,9 @@ export const authController = {
     try {
       const user = await userRepository.findById(req.user.id)
       if (!user || !user.isActive) throw ApiError.unauthorized()
-      res.json({ success: true, data: toPublicUser(user) })
+      const assignedZoneIds =
+        user.role === 'SURVEYOR' ? await userRepository.assignedZoneIds(user.id) : []
+      res.json({ success: true, data: { ...toPublicUser(user), assignedZoneIds } })
     } catch (err) {
       next(err)
     }
