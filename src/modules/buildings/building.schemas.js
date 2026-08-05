@@ -19,6 +19,7 @@ export const addPhotoSchema = z.object({
 
 export const listQuerySchema = z.object({
   zoneId: z.string().optional(),
+  operatorId: z.string().optional(),
   status: z.enum(['FEASIBLE', 'PERMISSION_PENDING', 'REJECTED', 'SURVEY_PENDING']).optional(),
   createdById: z.string().optional(),
   dateFrom: z.string().date().optional(),

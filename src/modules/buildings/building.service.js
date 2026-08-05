@@ -47,6 +47,7 @@ export function createBuildingService({ buildingRepository, storage, userReposit
     async listBuildings(filters = {}, actor) {
       const {
         zoneId,
+        operatorId,
         status,
         createdById,
         dateFrom,
@@ -60,6 +61,8 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       } = filters
       const where = {}
       if (zoneId) where.zoneId = zoneId
+      // Building → Operator is derived through the zone.
+      if (operatorId) where.zone = { operatorId }
       if (status) where.feasibleStatus = status
       if (createdById) where.createdById = createdById
       // Surveyors only ever see their own buildings — forced, not a param.

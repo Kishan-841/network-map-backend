@@ -12,6 +12,7 @@ import { uploadRoutes } from './modules/uploads/upload.routes.js'
 import { buildingTypeRoutes } from './modules/building-types/building-type.routes.js'
 import { statsRoutes } from './modules/stats/stats.routes.js'
 import { systemLogRoutes } from './modules/system-logs/system-log.routes.js'
+import { operatorRoutes } from './modules/operators/operator.routes.js'
 
 export function createApp() {
   const app = express()
@@ -49,6 +50,7 @@ export function createApp() {
   app.use('/api/v1/building-types', buildingTypeRoutes)
   app.use('/api/v1/stats', statsRoutes)
   app.use('/api/v1/system-logs', systemLogRoutes)
+  app.use('/api/v1/operators', operatorRoutes)
 
   app.use(errorHandler)
   return app

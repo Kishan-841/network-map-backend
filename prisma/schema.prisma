@@ -51,6 +51,14 @@ model BuildingType {
   createdAt DateTime @default(now())
 }
 
+model Operator {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  city      String?
+  createdAt DateTime @default(now())
+  zones     Zone[]
+}
+
 model Zone {
   id        String     @id @default(cuid())
   name      String     @unique
@@ -60,6 +68,9 @@ model Zone {
   createdAt DateTime   @default(now())
   buildings Building[]
   assignedUsers User[] @relation("UserAssignedZones")
+  /// Groups zones under an operator; null for zones with no operator yet.
+  operatorId String?
+  operator   Operator? @relation(fields: [operatorId], references: [id], onDelete: SetNull)
 }
 
 model Building {
