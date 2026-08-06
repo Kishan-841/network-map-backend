@@ -83,6 +83,15 @@ export const buildingController = {
     }
   },
 
+  async remove(req, res, next) {
+    try {
+      await buildingService.deleteBuilding(req.params.id)
+      res.status(204).end()
+    } catch (err) {
+      next(err)
+    }
+  },
+
   async get(req, res, next) {
     try {
       const building = await buildingService.getBuilding(req.params.id, req.user)

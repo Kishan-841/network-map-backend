@@ -21,6 +21,7 @@ export const buildingRepository = {
   count: (where = {}) => prisma.building.count({ where }),
   findById: (id) => prisma.building.findUnique({ where: { id }, include: fullInclude }),
   update: (id, data) => prisma.building.update({ where: { id }, data, include: fullInclude }),
+  delete: (id) => prisma.building.delete({ where: { id } }),
   // Capped so a large/degenerate box can't pull the whole table into memory.
   // The nearby check only needs enough candidates to flag a duplicate.
   findWithinBounds: ({ minLat, maxLat, minLon, maxLon }) =>

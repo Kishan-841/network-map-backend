@@ -66,3 +66,12 @@ buildingRoutes.delete(
   }),
   buildingController.removePhoto,
 )
+buildingRoutes.delete(
+  '/:id',
+  requireRole('ADMIN'),
+  audit('Building', 'Delete', {
+    load: (req) => buildingRepository.findById(req.params.id),
+    describe: (req, old) => `Building '${old?.buildingName ?? req.params.id}' deleted`,
+  }),
+  buildingController.remove,
+)
