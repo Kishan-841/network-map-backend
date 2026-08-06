@@ -255,5 +255,29 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         }
       }
     },
+
+    async deleteBuilding(id) {
+      const building = await buildingRepository.findById(id)
+      if (!building) throw ApiError.notFound('Building not found')
+
+      // Collect every stored file before the row (and its cascaded photo/
+      // permission children) disappears. The permission letter usually exists
+      // as both a photo row and permission.documentUrl — the Set dedupes it.
+      const urls = new Set(building.photos?.map((photo) => photo.url) ?? [])
+      if (building.permission?.documentUrl) urls.add(building.permission.documentUrl)
+
+      await buildingRepository.delete(id)
+
+      // File removal is best-effort — the record is gone either way.
+      for (const url of urls) {
+        const key = storage?.keyFromUrl(url)
+        if (!key) continue
+        try {
+          await storage.delete({ key })
+        } catch (err) {
+          console.error('File deletion failed (row removed):', err.message)
+        }
+      }
+    },
   }
 }
