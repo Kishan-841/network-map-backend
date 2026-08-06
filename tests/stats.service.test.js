@@ -14,6 +14,10 @@ describe('stats service', () => {
           { feasibleStatus: 'FEASIBLE', _count: { _all: 2 } },
           { feasibleStatus: 'REJECTED', _count: { _all: 1 } },
         ],
+        countsByLive: async () => [
+          { isLive: true, _count: { _all: 2 } },
+          { isLive: false, _count: { _all: 1 } },
+        ],
         sumHomePass: async () => 48,
         sumPermissionCost: async () => '5000.50', // Prisma Decimal serializes to string
         countOperators: async () => 4,
@@ -29,6 +33,7 @@ describe('stats service', () => {
     expect(stats).toEqual({
       totalBuildings: 3,
       byStatus: { FEASIBLE: 2, PERMISSION_PENDING: 0, REJECTED: 1, SURVEY_PENDING: 0 },
+      byLive: { live: 2, notLive: 1 },
       totalHomePass: 48,
       totalPermissionCost: 5000.5,
       operatorCount: 4,
@@ -43,6 +48,7 @@ describe('stats service', () => {
       statsRepository: {
         countBuildings: async () => 0,
         countsByStatus: async () => [],
+        countsByLive: async () => [],
         sumHomePass: async () => null,
         sumPermissionCost: async () => null,
         countOperators: async () => 0,

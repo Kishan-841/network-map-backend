@@ -9,6 +9,7 @@ function fakeStatsRepo() {
     calls,
     countBuildings: async (where) => ((wheres.count = where), 5),
     countsByStatus: async (where) => ((wheres.status = where), []),
+    countsByLive: async (where) => ((wheres.live = where), []),
     sumHomePass: async (where) => ((wheres.homePass = where), 10),
     sumPermissionCost: async (where) => ((wheres.cost = where), 0),
     countOperators: async () => 7,

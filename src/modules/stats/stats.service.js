@@ -15,18 +15,32 @@ export function createStatsService({ statsRepository }) {
       const where = hasBuildingWhere ? buildingWhere : undefined
       const nestedWhere = hasBuildingWhere ? { building: buildingWhere } : undefined
 
-      const [totalBuildings, statusCounts, homePass, permissionCost, operatorCount, zoneCount] =
-        await Promise.all([
-          statsRepository.countBuildings(where),
-          statsRepository.countsByStatus(where),
-          statsRepository.sumHomePass(nestedWhere),
-          statsRepository.sumPermissionCost(nestedWhere),
-          statsRepository.countOperators(),
-          statsRepository.countZones(operatorId ? { operatorId } : {}),
-        ])
+      const [
+        totalBuildings,
+        statusCounts,
+        liveCounts,
+        homePass,
+        permissionCost,
+        operatorCount,
+        zoneCount,
+      ] = await Promise.all([
+        statsRepository.countBuildings(where),
+        statsRepository.countsByStatus(where),
+        statsRepository.countsByLive(where),
+        statsRepository.sumHomePass(nestedWhere),
+        statsRepository.sumPermissionCost(nestedWhere),
+        statsRepository.countOperators(),
+        statsRepository.countZones(operatorId ? { operatorId } : {}),
+      ])
 
       const byStatus = Object.fromEntries(FEASIBLE_STATUSES.map((status) => [status, 0]))
       for (const row of statusCounts) byStatus[row.feasibleStatus] = row._count._all
+
+      // Live = fiber connection is live (the green/red map marker).
+      const byLive = { live: 0, notLive: 0 }
+      for (const row of liveCounts) {
+        byLive[row.isLive ? 'live' : 'notLive'] = row._count._all
+      }
 
       // Charts are ADMIN/MANAGER only — surveyors never see them.
       let byOperator = []
@@ -42,6 +56,7 @@ export function createStatsService({ statsRepository }) {
       return {
         totalBuildings,
         byStatus,
+        byLive,
         totalHomePass: homePass ?? 0,
         totalPermissionCost: Number(permissionCost ?? 0),
         operatorCount,
