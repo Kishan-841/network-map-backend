@@ -1,7 +1,8 @@
 import { createStatsService } from './stats.service.js'
 import { statsRepository } from './stats.repository.js'
+import { userRepository } from '../users/user.repository.js'
 
-const statsService = createStatsService({ statsRepository })
+const statsService = createStatsService({ statsRepository, userRepository })
 
 export const statsController = {
   async dashboard(req, res, next) {

@@ -26,6 +26,12 @@ function fakeStatsRepo() {
   }
 }
 
+const fakeUserRepo = (zones = ['z1']) => ({ assignedZoneIds: async () => zones })
+
+const SURVEYOR_SCOPE = {
+  OR: [{ zoneId: { in: ['z1'] } }, { createdById: 'u-surv' }],
+}
+
 describe('dashboard stats scoping', () => {
   it('passes no building filter for admins and computes charts', async () => {
     const repo = fakeStatsRepo()
@@ -42,14 +48,14 @@ describe('dashboard stats scoping', () => {
     expect(result.overTime).toHaveLength(1)
   })
 
-  it('scopes all KPI queries to the surveyor and omits charts', async () => {
+  it('scopes all KPI queries to assigned zones + own and omits charts', async () => {
     const repo = fakeStatsRepo()
-    const result = await createStatsService({ statsRepository: repo }).getDashboardStats({
-      id: 'u-surv',
-      role: 'SURVEYOR',
-    })
-    expect(repo.wheres.count).toEqual({ createdById: 'u-surv' })
-    expect(repo.wheres.homePass).toEqual({ building: { createdById: 'u-surv' } })
+    const result = await createStatsService({
+      statsRepository: repo,
+      userRepository: fakeUserRepo(['z1']),
+    }).getDashboardStats({ id: 'u-surv', role: 'SURVEYOR' })
+    expect(repo.wheres.count).toEqual(SURVEYOR_SCOPE)
+    expect(repo.wheres.homePass).toEqual({ building: SURVEYOR_SCOPE })
     // Charts are admin/manager only.
     expect(result.byOperator).toEqual([])
     expect(result.overTime).toEqual([])
@@ -71,10 +77,10 @@ describe('dashboard stats scoping', () => {
 
   it('combines surveyor scope AND operator filter', async () => {
     const repo = fakeStatsRepo()
-    await createStatsService({ statsRepository: repo }).getDashboardStats(
-      { id: 'u-surv', role: 'SURVEYOR' },
-      { operatorId: 'op1' },
-    )
-    expect(repo.wheres.count).toEqual({ createdById: 'u-surv', zone: { operatorId: 'op1' } })
+    await createStatsService({
+      statsRepository: repo,
+      userRepository: fakeUserRepo(['z1']),
+    }).getDashboardStats({ id: 'u-surv', role: 'SURVEYOR' }, { operatorId: 'op1' })
+    expect(repo.wheres.count).toEqual({ ...SURVEYOR_SCOPE, zone: { operatorId: 'op1' } })
   })
 })

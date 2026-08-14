@@ -1,7 +1,7 @@
 const FEASIBLE_STATUSES = ['FEASIBLE', 'PERMISSION_PENDING', 'REJECTED', 'SURVEY_PENDING']
 const OVER_TIME_DAYS = 30
 
-export function createStatsService({ statsRepository }) {
+export function createStatsService({ statsRepository, userRepository }) {
   return {
     async getDashboardStats(actor, { operatorId } = {}) {
       const scoped = actor?.role === 'SURVEYOR'
@@ -9,7 +9,11 @@ export function createStatsService({ statsRepository }) {
       // KPI where merges surveyor ownership and the operator filter (operator is
       // reached through the building's zone).
       const buildingWhere = {}
-      if (scoped) buildingWhere.createdById = actor.id
+      if (scoped) {
+        // Same zone-or-own read scope the buildings list uses (spec 2026-08-14).
+        const assigned = await userRepository.assignedZoneIds(actor.id)
+        buildingWhere.OR = [{ zoneId: { in: assigned } }, { createdById: actor.id }]
+      }
       if (operatorId) buildingWhere.zone = { operatorId }
       const hasBuildingWhere = Object.keys(buildingWhere).length > 0
       const where = hasBuildingWhere ? buildingWhere : undefined
