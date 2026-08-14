@@ -4,27 +4,40 @@ import { createBuildingService } from '../src/modules/buildings/building.service
 const own = {
   id: 'b1',
   createdById: 'u-surv',
+  zoneId: 'z1',
   buildingName: 'Mine',
   latitude: 18.5,
   longitude: 73.8,
   placeId: null,
 }
+// Foreign building in an UNASSIGNED zone — stays invisible/masked.
 const foreign = {
   id: 'b2',
   createdById: 'u-other',
+  zoneId: 'z9',
   buildingName: 'Theirs',
   latitude: 18.5001,
   longitude: 73.8001,
   placeId: null,
 }
+// Foreign building in the surveyor's ASSIGNED zone — now visible (the fix).
+const foreignInZone = {
+  id: 'b3',
+  createdById: 'u-admin',
+  zoneId: 'z1',
+  buildingName: 'AdminAdded',
+  latitude: 18.5002,
+  longitude: 73.8002,
+  placeId: null,
+}
 
-function makeService({ buildings = [own, foreign], assigned = ['z1'] } = {}) {
+function makeService({ buildings = [own, foreign, foreignInZone], assigned = ['z1'] } = {}) {
   let lastWhere = null
   const service = createBuildingService({
     buildingRepository: {
       list: async (where) => {
         lastWhere = where
-        return buildings.filter((b) => !where.createdById || b.createdById === where.createdById)
+        return buildings
       },
       count: async () => buildings.length,
       findById: async (id) => buildings.find((b) => b.id === id) ?? null,
@@ -43,10 +56,23 @@ const surveyor = { id: 'u-surv', role: 'SURVEYOR' }
 const admin = { id: 'u-a', role: 'ADMIN' }
 
 describe('building scoping', () => {
-  it('forces createdById for surveyors even when the param says otherwise', async () => {
-    const { service, whereUsed } = makeService()
-    await service.listBuildings({ createdById: 'u-other' }, surveyor)
-    expect(whereUsed().createdById).toBe('u-surv')
+  it('scopes surveyors to assigned zones plus their own buildings', async () => {
+    const { service, whereUsed } = makeService({ assigned: ['z1'] })
+    await service.listBuildings({}, surveyor)
+    expect(whereUsed().createdById).toBeUndefined()
+    expect(whereUsed().AND).toEqual([
+      { OR: [{ zoneId: { in: ['z1'] } }, { createdById: 'u-surv' }] },
+    ])
+  })
+
+  it('composes surveyor scope with search (search keeps the top-level OR)', async () => {
+    const { service, whereUsed } = makeService({ assigned: ['z1'] })
+    await service.listBuildings({ search: 'abc' }, surveyor)
+    expect(whereUsed().OR).toHaveLength(3) // name/address/zone search clauses
+    expect(whereUsed().AND[0].OR).toEqual([
+      { zoneId: { in: ['z1'] } },
+      { createdById: 'u-surv' },
+    ])
   })
 
   it('does not scope admins', async () => {
@@ -55,9 +81,11 @@ describe('building scoping', () => {
     expect(whereUsed().createdById).toBeUndefined()
   })
 
-  it('404s surveyor access to a foreign building', async () => {
-    const { service } = makeService()
+  it('404s foreign buildings in unassigned zones, allows assigned-zone ones', async () => {
+    const { service } = makeService({ assigned: ['z1'] })
     await expect(service.getBuilding('b2', surveyor)).rejects.toMatchObject({ status: 404 })
+    await expect(service.getBuilding('b3', surveyor)).resolves.toMatchObject({ id: 'b3' })
+    await expect(service.getBuilding('b1', surveyor)).resolves.toMatchObject({ id: 'b1' })
     await expect(service.getBuilding('b2', admin)).resolves.toMatchObject({ id: 'b2' })
   })
 
@@ -129,13 +157,14 @@ describe('building scoping', () => {
     ).rejects.toMatchObject({ status: 403 })
   })
 
-  it('masks foreign building names in nearby results for surveyors only', async () => {
-    const { service } = makeService()
+  it('masks only unassigned-zone buildings in nearby results for surveyors', async () => {
+    const { service } = makeService({ assigned: ['z1'] })
     const forSurveyor = await service.findNearby(
       { latitude: 18.5, longitude: 73.8, radiusMeters: 500, name: 'Mine' },
       surveyor,
     )
     expect(forSurveyor.find((b) => b.id === 'b1').buildingName).toBe('Mine')
+    expect(forSurveyor.find((b) => b.id === 'b3').buildingName).toBe('AdminAdded')
     expect(forSurveyor.find((b) => b.id === 'b2').buildingName).toBeNull()
     const forAdmin = await service.findNearby(
       { latitude: 18.5, longitude: 73.8, radiusMeters: 500 },

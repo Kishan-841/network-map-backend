@@ -65,8 +65,12 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       if (operatorId) where.zone = { operatorId }
       if (status) where.feasibleStatus = status
       if (createdById) where.createdById = createdById
-      // Surveyors only ever see their own buildings — forced, not a param.
-      if (actor?.role === 'SURVEYOR') where.createdById = actor.id
+      // Surveyors see their assigned zones plus their own buildings — via AND
+      // because `search` below owns the top-level OR (spec 2026-08-14).
+      if (actor?.role === 'SURVEYOR') {
+        const assigned = await userRepository.assignedZoneIds(actor.id)
+        where.AND = [{ OR: [{ zoneId: { in: assigned } }, { createdById: actor.id }] }]
+      }
       if (dateFrom || dateTo) {
         where.createdAt = {}
         if (dateFrom) where.createdAt.gte = new Date(dateFrom)
@@ -112,9 +116,11 @@ export function createBuildingService({ buildingRepository, storage, userReposit
 
     async getBuilding(id, actor) {
       const building = await buildingRepository.findById(id)
-      // 404 (not 403) for foreign buildings: don't leak existence.
-      if (!building || (actor?.role === 'SURVEYOR' && building.createdById !== actor.id)) {
-        throw ApiError.notFound('Building not found')
+      if (!building) throw ApiError.notFound('Building not found')
+      // 404 (not 403) for out-of-scope buildings: don't leak existence.
+      if (actor?.role === 'SURVEYOR' && building.createdById !== actor.id) {
+        const assigned = await userRepository.assignedZoneIds(actor.id)
+        if (!assigned.includes(building.zoneId)) throw ApiError.notFound('Building not found')
       }
       return building
     },
@@ -178,15 +184,22 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         }
       }
 
+      const assigned =
+        actor?.role === 'SURVEYOR' ? await userRepository.assignedZoneIds(actor.id) : null
+
       return withinRadius
         .map((building) => {
           // Duplicate signals are computed from the real record first.
           const samePlaceId = Boolean(placeId) && building.placeId === placeId
           const similarName = name ? isSimilarName(name, building.buildingName) : false
-          // A surveyor must not learn ANYTHING about another surveyor's building
-          // beyond "one exists here" — return only distance + duplicate signals,
-          // never address / coordinates / details / owner / status.
-          if (actor?.role === 'SURVEYOR' && building.createdById !== actor.id) {
+          // A surveyor must not learn ANYTHING about a building outside their
+          // assigned zones beyond "one exists here" — return only distance +
+          // duplicate signals, never address / coordinates / details / owner.
+          if (
+            actor?.role === 'SURVEYOR' &&
+            building.createdById !== actor.id &&
+            !assigned.includes(building.zoneId)
+          ) {
             return {
               id: building.id,
               distanceMeters: building.distanceMeters,
