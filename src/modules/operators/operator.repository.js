@@ -1,6 +1,9 @@
 import { prisma } from '../../lib/prisma.js'
 
-const withZoneCount = { _count: { select: { zones: true } } }
+const withZoneCount = {
+  _count: { select: { zones: true } },
+  city: { select: { id: true, name: true } },
+}
 const shape = (operator) =>
   operator && { ...operator, zoneCount: operator._count?.zones ?? 0, _count: undefined }
 
@@ -16,8 +19,16 @@ export const operatorRepository = {
   count: (where) => prisma.operator.count({ where }),
   findById: (id) => prisma.operator.findUnique({ where: { id } }),
   findByName: (name) => prisma.operator.findFirst({ where: { name: { equals: name, mode: 'insensitive' } } }),
-  create: (data) => prisma.operator.create({ data }).then((op) => ({ ...op, zoneCount: 0 })),
-  update: (id, data) => prisma.operator.update({ where: { id }, data }),
+  create: (data) =>
+    prisma.operator
+      .create({ data, include: { city: { select: { id: true, name: true } } } })
+      .then((op) => ({ ...op, zoneCount: 0 })),
+  update: (id, data) =>
+    prisma.operator.update({
+      where: { id },
+      data,
+      include: { city: { select: { id: true, name: true } } },
+    }),
   delete: (id) => prisma.operator.delete({ where: { id } }),
   listAll: () => prisma.operator.findMany(),
 }

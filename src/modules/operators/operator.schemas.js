@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 export const createOperatorSchema = z.object({
   name: z.string().trim().min(1).max(100),
-  city: z.string().trim().max(100).nullish(),
+  cityId: z.string().nullish(),
 })
 
 export const updateOperatorSchema = createOperatorSchema.partial()

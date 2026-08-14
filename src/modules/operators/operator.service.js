@@ -2,9 +2,16 @@ import { ApiError } from '../../lib/api-error.js'
 import { operatorRepository } from './operator.repository.js'
 import { zoneRepository } from '../zones/zone.repository.js'
 import { userRepository } from '../users/user.repository.js'
+import { cityRepository } from '../cities/city.repository.js'
 
 export function createOperatorService(deps) {
-  const { operatorRepository, zoneRepository, userRepository } = deps
+  const { operatorRepository, zoneRepository, userRepository, cityRepository } = deps
+
+  async function assertCityExists(cityId) {
+    if (!cityId) return
+    const city = await cityRepository.findById(cityId)
+    if (!city) throw ApiError.badRequest('City does not exist')
+  }
 
   return {
     async listOperators() {
@@ -16,7 +23,7 @@ export function createOperatorService(deps) {
         ? {
             OR: [
               { name: { contains: search, mode: 'insensitive' } },
-              { city: { contains: search, mode: 'insensitive' } },
+              { city: { is: { name: { contains: search, mode: 'insensitive' } } } },
             ],
           }
         : {}
@@ -30,12 +37,14 @@ export function createOperatorService(deps) {
     async createOperator(data) {
       const existing = await operatorRepository.findByName(data.name)
       if (existing) throw ApiError.conflict('An operator with this name already exists')
+      await assertCityExists(data.cityId)
       return operatorRepository.create(data)
     },
 
     async updateOperator(id, data) {
       const operator = await operatorRepository.findById(id)
       if (!operator) throw ApiError.notFound('Operator not found')
+      await assertCityExists(data.cityId)
       return operatorRepository.update(id, data)
     },
 
@@ -63,12 +72,28 @@ export function createOperatorService(deps) {
       let zonesLinked = 0
       const emailToZoneIds = new Map()
 
+      // Sheet city strings become linked City rows (created once per name).
+      const cityIdByName = new Map()
+      async function cityIdFor(name) {
+        const trimmed = name?.trim()
+        if (!trimmed) return null
+        const key = trimmed.toLowerCase()
+        if (cityIdByName.has(key)) return cityIdByName.get(key)
+        const existing = await cityRepository.findByName(trimmed)
+        const id = existing ? existing.id : (await cityRepository.create({ name: trimmed })).id
+        cityIdByName.set(key, id)
+        return id
+      }
+
       for (const { operator, zone, city, email } of rows) {
         // 1. Operator
         const opKey = operator.trim().toLowerCase()
         let operatorId = opIdByName.get(opKey)
         if (!operatorId) {
-          const created = await operatorRepository.create({ name: operator.trim(), city: city || null })
+          const created = await operatorRepository.create({
+            name: operator.trim(),
+            cityId: await cityIdFor(city),
+          })
           operatorId = created.id
           opIdByName.set(opKey, operatorId)
           operatorsCreated++
@@ -132,4 +157,5 @@ export const operatorService = createOperatorService({
   operatorRepository,
   zoneRepository,
   userRepository,
+  cityRepository,
 })
