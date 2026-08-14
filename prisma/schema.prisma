@@ -51,12 +51,22 @@ model BuildingType {
   createdAt DateTime @default(now())
 }
 
+model City {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  operators Operator[]
+}
+
 model Operator {
   id        String   @id @default(cuid())
   name      String   @unique
-  city      String?
   createdAt DateTime @default(now())
   zones     Zone[]
+  /// Groups operators under a city; null for operators with no city yet.
+  cityId    String?
+  city      City?    @relation(fields: [cityId], references: [id], onDelete: SetNull)
 }
 
 model Zone {
