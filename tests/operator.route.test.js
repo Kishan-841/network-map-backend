@@ -71,9 +71,15 @@ describe('operators API', () => {
     expect(filtered.status).toBe(200)
     expect(Array.isArray(filtered.body.data.items)).toBe(true)
 
+    // The import upserts the sheet's city as a City row linked to the operator.
+    expect(operator.cityId).not.toBeNull()
+
     // Cleanup (zones first: FK restrict on building none here; detach assignment via delete).
     await prisma.zone.deleteMany({ where: { name: { in: [zoneA, zoneB] } } })
     await prisma.operator.delete({ where: { id: operator.id } })
     await prisma.user.delete({ where: { id: surveyor.id } })
+    // Delete the upserted city only if this run created it and nothing else uses it.
+    const cityInUse = await prisma.operator.count({ where: { cityId: operator.cityId } })
+    if (cityInUse === 0) await prisma.city.deleteMany({ where: { id: operator.cityId } })
   })
 })
