@@ -75,6 +75,17 @@ describe('dashboard stats scoping', () => {
     expect(repo.wheres.overTime.operatorId).toBe('op1')
   })
 
+  it('filters KPIs and zone count by cityId (through the operator)', async () => {
+    const repo = fakeStatsRepo()
+    await createStatsService({ statsRepository: repo }).getDashboardStats(
+      { id: 'a', role: 'ADMIN' },
+      { cityId: 'c1' },
+    )
+    expect(repo.wheres.count).toEqual({ zone: { operator: { cityId: 'c1' } } })
+    expect(repo.wheres.zone).toEqual({ operator: { cityId: 'c1' } })
+    expect(repo.wheres.overTime.cityId).toBe('c1')
+  })
+
   it('combines surveyor scope AND operator filter', async () => {
     const repo = fakeStatsRepo()
     await createStatsService({

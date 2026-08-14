@@ -37,6 +37,24 @@ describe('building service listBuildings filters', () => {
     })
   })
 
+  it('filters by cityId through the zone operator', async () => {
+    const repo = captureRepo()
+    await createBuildingService({ buildingRepository: repo }).listBuildings({ cityId: 'c1' })
+    expect(repo.calls.find((c) => c.where).where.zone).toEqual({ operator: { cityId: 'c1' } })
+  })
+
+  it('composes cityId AND operatorId', async () => {
+    const repo = captureRepo()
+    await createBuildingService({ buildingRepository: repo }).listBuildings({
+      cityId: 'c1',
+      operatorId: 'op1',
+    })
+    expect(repo.calls.find((c) => c.where).where.zone).toEqual({
+      operatorId: 'op1',
+      operator: { cityId: 'c1' },
+    })
+  })
+
   it('builds a createdAt range from dateFrom/dateTo', async () => {
     const repo = captureRepo()
     await createBuildingService({ buildingRepository: repo }).listBuildings({

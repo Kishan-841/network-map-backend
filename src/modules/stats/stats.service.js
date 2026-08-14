@@ -3,7 +3,7 @@ const OVER_TIME_DAYS = 30
 
 export function createStatsService({ statsRepository, userRepository }) {
   return {
-    async getDashboardStats(actor, { operatorId } = {}) {
+    async getDashboardStats(actor, { operatorId, cityId } = {}) {
       const scoped = actor?.role === 'SURVEYOR'
 
       // KPI where merges surveyor ownership and the operator filter (operator is
@@ -15,6 +15,7 @@ export function createStatsService({ statsRepository, userRepository }) {
         buildingWhere.OR = [{ zoneId: { in: assigned } }, { createdById: actor.id }]
       }
       if (operatorId) buildingWhere.zone = { operatorId }
+      if (cityId) buildingWhere.zone = { ...buildingWhere.zone, operator: { cityId } }
       const hasBuildingWhere = Object.keys(buildingWhere).length > 0
       const where = hasBuildingWhere ? buildingWhere : undefined
       const nestedWhere = hasBuildingWhere ? { building: buildingWhere } : undefined
@@ -34,7 +35,10 @@ export function createStatsService({ statsRepository, userRepository }) {
         statsRepository.sumHomePass(nestedWhere),
         statsRepository.sumPermissionCost(nestedWhere),
         statsRepository.countOperators(),
-        statsRepository.countZones(operatorId ? { operatorId } : {}),
+        statsRepository.countZones({
+          ...(operatorId && { operatorId }),
+          ...(cityId && { operator: { cityId } }),
+        }),
       ])
 
       const byStatus = Object.fromEntries(FEASIBLE_STATUSES.map((status) => [status, 0]))
@@ -53,7 +57,11 @@ export function createStatsService({ statsRepository, userRepository }) {
         const since = new Date(Date.now() - OVER_TIME_DAYS * 24 * 60 * 60 * 1000)
         ;[byOperator, overTime] = await Promise.all([
           statsRepository.buildingsByOperator(),
-          statsRepository.buildingsOverTime({ sinceDate: since, operatorId: operatorId ?? null }),
+          statsRepository.buildingsOverTime({
+            sinceDate: since,
+            operatorId: operatorId ?? null,
+            cityId: cityId ?? null,
+          }),
         ])
       }
 

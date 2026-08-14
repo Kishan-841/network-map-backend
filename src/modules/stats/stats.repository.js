@@ -35,15 +35,17 @@ export const statsRepository = {
 
   // Buildings created per day since a cutoff, optionally scoped to a surveyor
   // and/or an operator. Params are bound, never string-interpolated.
-  buildingsOverTime: ({ sinceDate, createdById = null, operatorId = null }) =>
+  buildingsOverTime: ({ sinceDate, createdById = null, operatorId = null, cityId = null }) =>
     prisma.$queryRaw`
       SELECT to_char(date_trunc('day', b."createdAt"), 'YYYY-MM-DD') AS "date",
              COUNT(*)::int AS "count"
       FROM "Building" b
       JOIN "Zone" z ON z.id = b."zoneId"
+      LEFT JOIN "Operator" o ON o.id = z."operatorId"
       WHERE b."createdAt" >= ${sinceDate}
         AND (${createdById}::text IS NULL OR b."createdById" = ${createdById})
         AND (${operatorId}::text IS NULL OR z."operatorId" = ${operatorId})
+        AND (${cityId}::text IS NULL OR o."cityId" = ${cityId})
       GROUP BY 1
       ORDER BY 1`,
 }

@@ -48,6 +48,7 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       const {
         zoneId,
         operatorId,
+        cityId,
         status,
         createdById,
         dateFrom,
@@ -61,8 +62,9 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       } = filters
       const where = {}
       if (zoneId) where.zoneId = zoneId
-      // Building → Operator is derived through the zone.
+      // Building → Operator → City are derived through the zone.
       if (operatorId) where.zone = { operatorId }
+      if (cityId) where.zone = { ...where.zone, operator: { cityId } }
       if (status) where.feasibleStatus = status
       if (createdById) where.createdById = createdById
       // Surveyors see their assigned zones plus their own buildings — via AND
