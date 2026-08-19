@@ -8,10 +8,13 @@ const tokenFor = (role) =>
   jwt.sign({ sub: `test-${role.toLowerCase()}`, role }, env.jwtSecret, { expiresIn: '1h' })
 
 const SEGMENTS = [
-  [
-    { latitude: 18.59, longitude: 73.74 },
-    { latitude: 18.6, longitude: 73.75 },
-  ],
+  {
+    fiberType: '2 core',
+    points: [
+      { latitude: 18.59, longitude: 73.74 },
+      { latitude: 18.6, longitude: 73.75 },
+    ],
+  },
 ]
 
 describe('fiber routes API', () => {
@@ -50,15 +53,12 @@ describe('fiber routes API', () => {
       .send({
         name: `FiberTest-${stamp}`,
         segments: SEGMENTS,
-        color: '#dc2626',
-        fiberType: '24 core',
         fiberId: `FBR-${stamp}`,
         placement: 'OUT',
         remark: 'test remark',
       })
     expect(created.status).toBe(201)
-    expect(created.body.data.color).toBe('#dc2626')
-    expect(created.body.data.fiberType).toBe('24 core')
+    expect(created.body.data.segments[0].fiberType).toBe('2 core')
     expect(created.body.data.placement).toBe('OUT')
     const id = created.body.data.id
 
@@ -68,7 +68,6 @@ describe('fiber routes API', () => {
       .send({
         name: `fibertest-${stamp}`,
         segments: SEGMENTS,
-        fiberType: '2 core',
         fiberId: 'X',
         placement: 'IN',
       })
@@ -77,7 +76,15 @@ describe('fiber routes API', () => {
     const updated = await request(app)
       .patch(`/api/v1/fiber-routes/${id}`)
       .set(...auth)
-      .send({ segments: [...SEGMENTS, [SEGMENTS[0][1], { latitude: 18.61, longitude: 73.73 }]] })
+      .send({
+        segments: [
+          ...SEGMENTS,
+          {
+            fiberType: '4 core',
+            points: [SEGMENTS[0].points[1], { latitude: 18.61, longitude: 73.73 }],
+          },
+        ],
+      })
     expect(updated.status).toBe(200)
     expect(updated.body.data.segments).toHaveLength(2)
 

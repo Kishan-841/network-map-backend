@@ -3,20 +3,26 @@ import { createFiberRouteService } from '../src/modules/fiber-routes/fiber-route
 import { createFiberRouteSchema } from '../src/modules/fiber-routes/fiber-route.schemas.js'
 
 const SEGMENTS = [
-  [
-    { latitude: 18.59, longitude: 73.74 },
-    { latitude: 18.6, longitude: 73.75 },
-  ],
-  [
-    { latitude: 18.6, longitude: 73.75 },
-    { latitude: 18.61, longitude: 73.74 },
-  ],
+  {
+    fiberType: '2 core',
+    points: [
+      { latitude: 18.59, longitude: 73.74 },
+      { latitude: 18.6, longitude: 73.75 },
+    ],
+  },
+  {
+    fiberType: '4 core',
+    points: [
+      { latitude: 18.6, longitude: 73.75 },
+      { latitude: 18.61, longitude: 73.74 },
+    ],
+  },
 ]
 
-const DETAILS = { fiberType: '24 core', fiberId: 'FBR-001', placement: 'OUT' }
+const DETAILS = { fiberId: 'FBR-001', placement: 'OUT' }
 
 describe('fiber route schema', () => {
-  it('accepts trunk + branch segments with the required details', () => {
+  it('accepts mixed-type segments with the required details', () => {
     const parsed = createFiberRouteSchema.safeParse({
       name: 'Wakad trunk',
       segments: SEGMENTS,
@@ -27,14 +33,13 @@ describe('fiber route schema', () => {
     expect(parsed.success).toBe(true)
   })
 
-  it('requires fiberType, fiberId, and placement on create', () => {
+  it('requires fiberId and placement, and a valid type on every segment', () => {
     expect(createFiberRouteSchema.safeParse({ name: 'X', segments: SEGMENTS }).success).toBe(false)
     expect(
       createFiberRouteSchema.safeParse({
         name: 'X',
-        segments: SEGMENTS,
         ...DETAILS,
-        fiberType: '3 core', // not a real option
+        segments: [{ fiberType: '3 core', points: SEGMENTS[0].points }],
       }).success,
     ).toBe(false)
     expect(
@@ -47,20 +52,16 @@ describe('fiber route schema', () => {
     ).toBe(false)
   })
 
-  it('rejects a 1-point segment, empty segments, and bad colors', () => {
+  it('rejects a 1-point segment and empty segments', () => {
     expect(
       createFiberRouteSchema.safeParse({
         name: 'X',
         ...DETAILS,
-        segments: [[{ latitude: 1, longitude: 1 }]],
+        segments: [{ fiberType: '2 core', points: [{ latitude: 1, longitude: 1 }] }],
       }).success,
     ).toBe(false)
     expect(
       createFiberRouteSchema.safeParse({ name: 'X', ...DETAILS, segments: [] }).success,
-    ).toBe(false)
-    expect(
-      createFiberRouteSchema.safeParse({ name: 'X', ...DETAILS, segments: SEGMENTS, color: 'red' })
-        .success,
     ).toBe(false)
   })
 })

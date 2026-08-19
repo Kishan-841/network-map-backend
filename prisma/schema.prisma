@@ -86,13 +86,10 @@ model Zone {
 model FiberRoute {
   id        String   @id @default(cuid())
   name      String   @unique
-  /// Hex render color; a typed palette maps onto this later (phase 2).
-  color     String   @default("#f59e0b")
-  /// Ordered polylines: [ [ {latitude, longitude}, ... ], ... ].
-  /// A branch is a segment whose first point sits on another segment's vertex.
+  /// Typed polylines: [ { fiberType, points: [ {latitude, longitude}, ... ] }, ... ].
+  /// fiberType: '2 core' … '48 core' (render color derives from it). A branch
+  /// is a segment whose first point sits on another segment's vertex.
   segments  Json
-  /// Cable spec: '2 core' | '4 core' | '6 core' | '12 core' | '24 core' | '48 core'.
-  fiberType String?
   /// Field/asset identifier printed on the cable or duct.
   fiberId   String?
   /// 'IN' | 'OUT'.
