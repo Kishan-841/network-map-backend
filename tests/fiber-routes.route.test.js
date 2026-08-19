@@ -37,18 +37,41 @@ describe('fiber routes API', () => {
     const app = createApp()
     const auth = ['Authorization', `Bearer ${tokenFor('MANAGER')}`]
 
+    // Missing details (fiberType/fiberId/placement) → validation error.
+    const missing = await request(app)
+      .post('/api/v1/fiber-routes')
+      .set(...auth)
+      .send({ name: `FiberTest-${stamp}`, segments: SEGMENTS })
+    expect(missing.status).toBe(400)
+
     const created = await request(app)
       .post('/api/v1/fiber-routes')
       .set(...auth)
-      .send({ name: `FiberTest-${stamp}`, segments: SEGMENTS, color: '#dc2626' })
+      .send({
+        name: `FiberTest-${stamp}`,
+        segments: SEGMENTS,
+        color: '#dc2626',
+        fiberType: '24 core',
+        fiberId: `FBR-${stamp}`,
+        placement: 'OUT',
+        remark: 'test remark',
+      })
     expect(created.status).toBe(201)
     expect(created.body.data.color).toBe('#dc2626')
+    expect(created.body.data.fiberType).toBe('24 core')
+    expect(created.body.data.placement).toBe('OUT')
     const id = created.body.data.id
 
     const dup = await request(app)
       .post('/api/v1/fiber-routes')
       .set(...auth)
-      .send({ name: `fibertest-${stamp}`, segments: SEGMENTS })
+      .send({
+        name: `fibertest-${stamp}`,
+        segments: SEGMENTS,
+        fiberType: '2 core',
+        fiberId: 'X',
+        placement: 'IN',
+      })
     expect(dup.status).toBe(409)
 
     const updated = await request(app)

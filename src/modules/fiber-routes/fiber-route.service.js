@@ -1,13 +1,24 @@
 import { ApiError } from '../../lib/api-error.js'
+import { getStorageProvider } from '../../lib/storage/index.js'
 import { fiberRouteRepository } from './fiber-route.repository.js'
 
 export function createFiberRouteService(deps) {
-  const { fiberRouteRepository } = deps
+  const { fiberRouteRepository, storage } = deps
 
   async function assertNameFree(name, selfId) {
     const clash = await fiberRouteRepository.findByName(name)
     if (clash && clash.id !== selfId) {
       throw ApiError.conflict('A fiber route with this name already exists')
+    }
+  }
+
+  // Stored URLs are rendered as <img src> — only accept files that came from
+  // our own uploads API (blocks javascript:/foreign URLs), like buildings do.
+  function assertOwnedImages(images) {
+    for (const url of images ?? []) {
+      if (!storage?.keyFromUrl(url)) {
+        throw ApiError.badRequest('Image URL must come from the uploads API')
+      }
     }
   }
 
@@ -18,6 +29,7 @@ export function createFiberRouteService(deps) {
 
     async createFiberRoute(data) {
       await assertNameFree(data.name)
+      assertOwnedImages(data.images)
       return fiberRouteRepository.create(data)
     },
 
@@ -25,6 +37,7 @@ export function createFiberRouteService(deps) {
       const route = await fiberRouteRepository.findById(id)
       if (!route) throw ApiError.notFound('Fiber route not found')
       if (data.name) await assertNameFree(data.name, id)
+      assertOwnedImages(data.images)
       return fiberRouteRepository.update(id, data)
     },
 
@@ -36,4 +49,7 @@ export function createFiberRouteService(deps) {
   }
 }
 
-export const fiberRouteService = createFiberRouteService({ fiberRouteRepository })
+export const fiberRouteService = createFiberRouteService({
+  fiberRouteRepository,
+  storage: getStorageProvider(),
+})

@@ -91,6 +91,15 @@ model FiberRoute {
   /// Ordered polylines: [ [ {latitude, longitude}, ... ], ... ].
   /// A branch is a segment whose first point sits on another segment's vertex.
   segments  Json
+  /// Cable spec: '2 core' | '4 core' | '6 core' | '12 core' | '24 core' | '48 core'.
+  fiberType String?
+  /// Field/asset identifier printed on the cable or duct.
+  fiberId   String?
+  /// 'IN' | 'OUT'.
+  placement String?
+  remark    String?
+  /// Upload URLs from our uploads API (photos of the laid fiber).
+  images    Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
