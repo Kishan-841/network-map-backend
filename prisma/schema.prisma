@@ -60,10 +60,11 @@ model City {
 }
 
 model Operator {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  createdAt DateTime @default(now())
-  zones     Zone[]
+  id          String       @id @default(cuid())
+  name        String       @unique
+  createdAt   DateTime     @default(now())
+  zones       Zone[]
+  fiberRoutes FiberRoute[]
   /// Groups operators under a city; null for operators with no city yet.
   cityId    String?
   city      City?    @relation(fields: [cityId], references: [id], onDelete: SetNull)
@@ -94,6 +95,9 @@ model FiberRoute {
   fiberId   String?
   /// 'IN' | 'OUT'.
   placement String?
+  /// Owning operator; null for shared/unassigned routes.
+  operatorId String?
+  operator   Operator? @relation(fields: [operatorId], references: [id], onDelete: SetNull)
   remark    String?
   /// Upload URLs from our uploads API (photos of the laid fiber).
   images    Json?

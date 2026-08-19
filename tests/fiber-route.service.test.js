@@ -66,6 +66,10 @@ describe('fiber route schema', () => {
   })
 })
 
+const fakeOperatorRepo = (known = 'op1') => ({
+  findById: async (id) => (id === known ? { id, name: 'Op' } : null),
+})
+
 function fakeRepo({ existing = null, route = { id: 'f1', name: 'Trunk' } } = {}) {
   return {
     list: vi.fn(async () => [route]),
@@ -84,16 +88,38 @@ const fakeStorage = () => ({
 describe('fiber route service', () => {
   it('creates a route', async () => {
     const repo = fakeRepo()
-    const service = createFiberRouteService({ fiberRouteRepository: repo, storage: fakeStorage() })
+    const service = createFiberRouteService({
+      fiberRouteRepository: repo,
+      storage: fakeStorage(),
+      operatorRepository: fakeOperatorRepo(),
+    })
     const created = await service.createFiberRoute({ name: 'Trunk 2', segments: SEGMENTS })
     expect(repo.create).toHaveBeenCalledWith({ name: 'Trunk 2', segments: SEGMENTS })
     expect(created.id).toBe('new')
+  })
+
+  it('accepts a real operatorId and 400s an unknown one', async () => {
+    const service = createFiberRouteService({
+      fiberRouteRepository: fakeRepo(),
+      storage: fakeStorage(),
+      operatorRepository: fakeOperatorRepo('op1'),
+    })
+    await expect(
+      service.createFiberRoute({ name: 'T', segments: SEGMENTS, operatorId: 'op1' }),
+    ).resolves.toBeTruthy()
+    await expect(
+      service.createFiberRoute({ name: 'T2', segments: SEGMENTS, operatorId: 'ghost' }),
+    ).rejects.toMatchObject({ status: 400 })
+    await expect(
+      service.updateFiberRoute('f1', { operatorId: 'ghost' }),
+    ).rejects.toMatchObject({ status: 400 })
   })
 
   it('rejects image URLs that do not belong to our storage (XSS guard)', async () => {
     const service = createFiberRouteService({
       fiberRouteRepository: fakeRepo(),
       storage: fakeStorage(),
+      operatorRepository: fakeOperatorRepo(),
     })
     await expect(
       service.createFiberRoute({
@@ -112,7 +138,7 @@ describe('fiber route service', () => {
 
   it('409s a duplicate name; renaming onto another route also 409s', async () => {
     const clash = fakeRepo({ existing: { id: 'OTHER', name: 'trunk' } })
-    const service = createFiberRouteService({ fiberRouteRepository: clash, storage: fakeStorage() })
+    const service = createFiberRouteService({ fiberRouteRepository: clash, storage: fakeStorage(), operatorRepository: fakeOperatorRepo() })
     await expect(
       service.createFiberRoute({ name: 'Trunk', segments: SEGMENTS }),
     ).rejects.toMatchObject({ status: 409 })
@@ -123,7 +149,7 @@ describe('fiber route service', () => {
 
   it('404s update/delete of unknown routes; delete works on known ones', async () => {
     const repo = fakeRepo()
-    const service = createFiberRouteService({ fiberRouteRepository: repo, storage: fakeStorage() })
+    const service = createFiberRouteService({ fiberRouteRepository: repo, storage: fakeStorage(), operatorRepository: fakeOperatorRepo() })
     await expect(service.updateFiberRoute('nope', { name: 'X' })).rejects.toMatchObject({
       status: 404,
     })

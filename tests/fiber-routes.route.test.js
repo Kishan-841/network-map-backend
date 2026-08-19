@@ -3,6 +3,7 @@ import request from 'supertest'
 import jwt from 'jsonwebtoken'
 import { createApp } from '../src/app.js'
 import { env } from '../src/config/env.js'
+import { prisma } from '../src/lib/prisma.js'
 
 const tokenFor = (role) =>
   jwt.sign({ sub: `test-${role.toLowerCase()}`, role }, env.jwtSecret, { expiresIn: '1h' })
@@ -47,6 +48,20 @@ describe('fiber routes API', () => {
       .send({ name: `FiberTest-${stamp}`, segments: SEGMENTS })
     expect(missing.status).toBe(400)
 
+    const operator = await prisma.operator.create({ data: { name: `FiberOp-${stamp}` } })
+
+    const badOp = await request(app)
+      .post('/api/v1/fiber-routes')
+      .set(...auth)
+      .send({
+        name: `FiberTest-${stamp}`,
+        segments: SEGMENTS,
+        fiberId: `FBR-${stamp}`,
+        placement: 'OUT',
+        operatorId: 'ghost-operator',
+      })
+    expect(badOp.status).toBe(400)
+
     const created = await request(app)
       .post('/api/v1/fiber-routes')
       .set(...auth)
@@ -56,8 +71,10 @@ describe('fiber routes API', () => {
         fiberId: `FBR-${stamp}`,
         placement: 'OUT',
         remark: 'test remark',
+        operatorId: operator.id,
       })
     expect(created.status).toBe(201)
+    expect(created.body.data.operator).toEqual({ id: operator.id, name: `FiberOp-${stamp}` })
     expect(created.body.data.segments[0].fiberType).toBe('2 core')
     expect(created.body.data.placement).toBe('OUT')
     const id = created.body.data.id
@@ -90,5 +107,6 @@ describe('fiber routes API', () => {
 
     const del = await request(app).delete(`/api/v1/fiber-routes/${id}`).set(...auth)
     expect(del.status).toBe(200)
+    await prisma.operator.delete({ where: { id: operator.id } })
   })
 })

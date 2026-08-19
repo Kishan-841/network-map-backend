@@ -1,9 +1,16 @@
 import { ApiError } from '../../lib/api-error.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
 import { fiberRouteRepository } from './fiber-route.repository.js'
+import { operatorRepository } from '../operators/operator.repository.js'
 
 export function createFiberRouteService(deps) {
-  const { fiberRouteRepository, storage } = deps
+  const { fiberRouteRepository, storage, operatorRepository } = deps
+
+  async function assertOperatorExists(operatorId) {
+    if (!operatorId) return
+    const operator = await operatorRepository.findById(operatorId)
+    if (!operator) throw ApiError.badRequest('Operator does not exist')
+  }
 
   async function assertNameFree(name, selfId) {
     const clash = await fiberRouteRepository.findByName(name)
@@ -29,6 +36,7 @@ export function createFiberRouteService(deps) {
 
     async createFiberRoute(data) {
       await assertNameFree(data.name)
+      await assertOperatorExists(data.operatorId)
       assertOwnedImages(data.images)
       return fiberRouteRepository.create(data)
     },
@@ -37,6 +45,7 @@ export function createFiberRouteService(deps) {
       const route = await fiberRouteRepository.findById(id)
       if (!route) throw ApiError.notFound('Fiber route not found')
       if (data.name) await assertNameFree(data.name, id)
+      await assertOperatorExists(data.operatorId)
       assertOwnedImages(data.images)
       return fiberRouteRepository.update(id, data)
     },
@@ -52,4 +61,5 @@ export function createFiberRouteService(deps) {
 export const fiberRouteService = createFiberRouteService({
   fiberRouteRepository,
   storage: getStorageProvider(),
+  operatorRepository,
 })

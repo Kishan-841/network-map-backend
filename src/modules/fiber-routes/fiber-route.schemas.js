@@ -20,6 +20,7 @@ export const createFiberRouteSchema = z.object({
   segments: z.array(segmentSchema).min(1).max(50),
   fiberId: z.string().trim().min(1).max(100),
   placement: z.enum(['IN', 'OUT']),
+  operatorId: z.string().nullish(),
   remark: z.string().trim().max(500).nullish(),
   images: z.array(z.string()).max(20).nullish(),
 })
