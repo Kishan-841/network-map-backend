@@ -83,6 +83,18 @@ model Zone {
   operator   Operator? @relation(fields: [operatorId], references: [id], onDelete: SetNull)
 }
 
+model FiberRoute {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  /// Hex render color; a typed palette maps onto this later (phase 2).
+  color     String   @default("#f59e0b")
+  /// Ordered polylines: [ [ {latitude, longitude}, ... ], ... ].
+  /// A branch is a segment whose first point sits on another segment's vertex.
+  segments  Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model Building {
   id               String           @id @default(cuid())
   placeId          String?          @unique
