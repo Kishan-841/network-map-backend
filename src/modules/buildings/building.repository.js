@@ -8,12 +8,17 @@ const fullInclude = {
   createdBy: { select: { id: true, name: true } },
 }
 
+// List rows only need the zone's NAME — `zone: true` would ship the zone's
+// boundary polygon with every building (duplicated per building, huge at
+// pageSize 500 for the map).
+const listInclude = { zone: { select: { id: true, name: true } }, details: true }
+
 export const buildingRepository = {
   create: (data) => prisma.building.create({ data, include: fullInclude }),
   list: (where = {}, { skip = 0, take = 100 } = {}) =>
     prisma.building.findMany({
       where,
-      include: { zone: true, details: true },
+      include: listInclude,
       orderBy: { createdAt: 'desc' },
       skip,
       take,
@@ -30,11 +35,11 @@ export const buildingRepository = {
         latitude: { gte: minLat, lte: maxLat },
         longitude: { gte: minLon, lte: maxLon },
       },
-      include: { zone: true, details: true },
+      include: listInclude,
       take: 200,
     }),
   findByPlaceId: (placeId) =>
-    prisma.building.findUnique({ where: { placeId }, include: { zone: true, details: true } }),
+    prisma.building.findUnique({ where: { placeId }, include: listInclude }),
   createPhoto: (data) => prisma.photo.create({ data }),
   findPhotoById: (id) => prisma.photo.findUnique({ where: { id } }),
   deletePhoto: (id) => prisma.photo.delete({ where: { id } }),
