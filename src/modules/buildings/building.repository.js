@@ -38,6 +38,10 @@ export const buildingRepository = {
       include: listInclude,
       take: 200,
     }),
+  findByNameInZone: (buildingName, zoneId) =>
+    prisma.building.findFirst({
+      where: { zoneId, buildingName: { equals: buildingName, mode: 'insensitive' } },
+    }),
   findByPlaceId: (placeId) =>
     prisma.building.findUnique({ where: { placeId }, include: listInclude }),
   createPhoto: (data) => prisma.photo.create({ data }),

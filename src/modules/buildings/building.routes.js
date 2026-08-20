@@ -8,6 +8,7 @@ import {
   addPhotoSchema,
   updateStatusSchema,
   updateBuildingSchema,
+  bulkBuildingsSchema,
 } from './building.schemas.js'
 import { buildingController } from './building.controller.js'
 import { audit } from '../system-logs/audit.js'
@@ -23,6 +24,18 @@ buildingRoutes.post(
   }),
   validateBody(createBuildingSchema),
   buildingController.create,
+)
+buildingRoutes.post(
+  '/bulk',
+  requireRole('ADMIN'),
+  audit('Building', 'BulkCreate', {
+    describe: (req, old, body) =>
+      body?.data
+        ? `Bulk building import: ${body.data.createdCount} created, ${body.data.skipped.length} skipped`
+        : 'Bulk building import',
+  }),
+  validateBody(bulkBuildingsSchema),
+  buildingController.bulk,
 )
 buildingRoutes.get('/', validateQuery(listQuerySchema), buildingController.list)
 // NOTE: /nearby must stay above /:id or Express matches it as an id.

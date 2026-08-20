@@ -17,6 +17,23 @@ export const addPhotoSchema = z.object({
   url: z.string().min(1).max(500),
 })
 
+export const bulkBuildingsSchema = z.object({
+  rows: z
+    .array(
+      z.object({
+        buildingName: z.string().trim().min(1).max(150),
+        latitude: z.number().min(-90).max(90),
+        longitude: z.number().min(-180).max(180),
+        zone: z.string().trim().min(1).max(100),
+        operator: z.string().trim().max(100).nullish(),
+        homePass: z.number().int().min(0).nullish(),
+        remark: z.string().trim().max(500).nullish(),
+      }),
+    )
+    .min(1)
+    .max(500),
+})
+
 export const listQuerySchema = z.object({
   zoneId: z.string().optional(),
   operatorId: z.string().optional(),

@@ -2,7 +2,7 @@ import { ApiError } from '../../lib/api-error.js'
 import { haversineMeters, boundingBox } from '../../lib/geo.js'
 import { isSimilarName } from '../../lib/name-similarity.js'
 
-export function createBuildingService({ buildingRepository, storage, userRepository, zoneRepository }) {
+export function createBuildingService({ buildingRepository, storage, userRepository, zoneRepository, operatorRepository }) {
   // Stored URLs are rendered as <a href>/<img src> — only accept files that
   // came from our own uploads API (blocks javascript:/foreign URLs).
   function assertOwnedUrl(url) {
@@ -268,6 +268,103 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         } catch (err) {
           console.error('File deletion failed (row removed):', err.message)
         }
+      }
+    },
+
+    /**
+     * Admin bulk import: create-or-skip per row so re-uploading the same
+     * sheet is idempotent. Missing zones/operators are created on the fly
+     * (zone city defaults to 'Unknown' — editable later), mirroring the
+     * operator-mapping import. Rich fields (floors, wings, …) arrive later
+     * via the normal Update building flow.
+     */
+    async bulkCreateBuildings(rows, createdById) {
+      const zonesByName = new Map(
+        (await zoneRepository.listAll()).map((zone) => [zone.name.trim().toLowerCase(), zone]),
+      )
+      const operatorsByName = new Map(
+        (await operatorRepository.listAll()).map((op) => [op.name.trim().toLowerCase(), op]),
+      )
+      const created = []
+      const skipped = []
+      let zonesCreated = 0
+      let operatorsCreated = 0
+      const seenInFile = new Set()
+
+      for (const [index, row] of rows.entries()) {
+        const rowNo = index + 1
+        // 1. Operator (optional) — reuse or create.
+        let operatorId = null
+        const operatorName = row.operator?.trim()
+        if (operatorName) {
+          const key = operatorName.toLowerCase()
+          let operator = operatorsByName.get(key)
+          if (!operator) {
+            operator = await operatorRepository.create({ name: operatorName })
+            operatorsByName.set(key, operator)
+            operatorsCreated++
+          }
+          operatorId = operator.id
+        }
+
+        // 2. Zone — reuse or create; link a fresh/unlinked zone to the operator.
+        const zoneKey = row.zone.trim().toLowerCase()
+        let zone = zonesByName.get(zoneKey)
+        if (!zone) {
+          zone = await zoneRepository.create({
+            name: row.zone.trim(),
+            city: 'Unknown',
+            ...(operatorId && { operatorId }),
+          })
+          zonesByName.set(zoneKey, zone)
+          zonesCreated++
+        } else if (operatorId && !zone.operatorId) {
+          zone = await zoneRepository.update(zone.id, { operatorId })
+          zonesByName.set(zoneKey, zone)
+        }
+
+        // 3. Building — skip duplicates (same name in the same zone).
+        const dupKey = `${zoneKey}|${row.buildingName.trim().toLowerCase()}`
+        if (seenInFile.has(dupKey)) {
+          skipped.push({ row: rowNo, buildingName: row.buildingName, reason: 'duplicate in file' })
+          continue
+        }
+        seenInFile.add(dupKey)
+        const existing = await buildingRepository.findByNameInZone(row.buildingName.trim(), zone.id)
+        if (existing) {
+          skipped.push({ row: rowNo, buildingName: row.buildingName, reason: 'already exists in zone' })
+          continue
+        }
+
+        const hasDetails = row.homePass != null || row.remark
+        const building = await buildingRepository.create({
+          buildingName: row.buildingName.trim(),
+          formattedAddress: row.buildingName.trim(),
+          latitude: row.latitude,
+          longitude: row.longitude,
+          zoneId: zone.id,
+          createdById,
+          feasibleStatus: 'FEASIBLE',
+          surveyStatus: 'COMPLETED',
+          isLive: false,
+          ...(hasDetails && {
+            details: {
+              create: {
+                ...(row.homePass != null && { homePass: row.homePass }),
+                ...(row.remark && { remarks: row.remark }),
+              },
+            },
+          }),
+        })
+        created.push(building.id)
+      }
+
+      return {
+        createdCount: created.length,
+        skipped,
+        zonesCreated,
+        operatorsCreated,
+        total: rows.length,
       }
     },
 

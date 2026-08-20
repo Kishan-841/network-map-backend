@@ -4,12 +4,14 @@ import { createBuildingService } from './building.service.js'
 import { buildingRepository } from './building.repository.js'
 import { userRepository } from '../users/user.repository.js'
 import { zoneRepository } from '../zones/zone.repository.js'
+import { operatorRepository } from '../operators/operator.repository.js'
 
 const buildingService = createBuildingService({
   buildingRepository,
   storage: getStorageProvider(),
   userRepository,
   zoneRepository,
+  operatorRepository,
 })
 
 export const buildingController = {
@@ -17,6 +19,15 @@ export const buildingController = {
     try {
       const building = await buildingService.createBuilding(req.body, req.user.id, req.user)
       res.status(201).json({ success: true, data: building })
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  async bulk(req, res, next) {
+    try {
+      const result = await buildingService.bulkCreateBuildings(req.body.rows, req.user.id)
+      res.json({ success: true, data: result })
     } catch (err) {
       next(err)
     }
