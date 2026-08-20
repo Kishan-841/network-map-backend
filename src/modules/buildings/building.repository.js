@@ -1,6 +1,8 @@
 import { prisma } from '../../lib/prisma.js'
 
 const fullInclude = {
+  contact: true,
+  city: { select: { id: true, name: true } },
   zone: true,
   details: true,
   permission: true,
@@ -11,7 +13,12 @@ const fullInclude = {
 // List rows only need the zone's NAME — `zone: true` would ship the zone's
 // boundary polygon with every building (duplicated per building, huge at
 // pageSize 500 for the map).
-const listInclude = { zone: { select: { id: true, name: true } }, details: true }
+const listInclude = {
+  zone: { select: { id: true, name: true } },
+  city: { select: { id: true, name: true } },
+  details: true,
+  contact: true,
+}
 
 export const buildingRepository = {
   create: (data) => prisma.building.create({ data, include: fullInclude }),

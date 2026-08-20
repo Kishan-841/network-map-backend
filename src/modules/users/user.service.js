@@ -4,7 +4,31 @@ import { toPublicUser } from '../auth/auth.service.js'
 
 const BCRYPT_ROUNDS = 10
 
-export function createUserService({ userRepository, zoneRepository }) {
+export function createUserService({ userRepository, zoneRepository, cityRepository }) {
+  // Acquisition agents cover one city + a set of pincodes. Stored as rows so
+  // an agent can hold several pincodes and the mapping stays queryable.
+  async function pincodeAssignment({ cityId, pincodes, role, userId }) {
+    if (role !== 'ACQUISITION_AGENT' || pincodes === undefined) return null
+    if (pincodes.length > 0 && !cityId) {
+      throw ApiError.badRequest('Select a city for the agent\'s pincodes')
+    }
+    if (cityId) {
+      const city = await cityRepository.findById(cityId)
+      if (!city) throw ApiError.badRequest('City does not exist')
+    }
+    const unique = [...new Set(pincodes)]
+    return { cityId, pincodes: unique, userId }
+  }
+
+  // Leads run the acquisition team only — they must never create or touch
+  // admins, managers or coverage surveyors.
+  function assertMayManage(actor, targetRole) {
+    if (actor?.role !== 'ACQUISITION_LEAD') return
+    if (targetRole !== 'ACQUISITION_AGENT') {
+      throw ApiError.forbidden('Acquisition leads can only manage acquisition agents')
+    }
+  }
+
   // zoneIds -> Prisma relation op, or undefined when not applicable
   // (assignments are stored only for surveyors).
   async function zoneAssignment(zoneIds, role, op) {
@@ -18,23 +42,34 @@ export function createUserService({ userRepository, zoneRepository }) {
   }
 
   return {
-    async createUser({ password, zoneIds, ...data }) {
+    async createUser({ password, zoneIds, cityId, pincodes, ...data }, actor) {
+      assertMayManage(actor, data.role)
       const existing = await userRepository.findByEmail(data.email)
       if (existing) throw ApiError.conflict('A user with this email already exists')
 
       const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS)
       const assignedZones = await zoneAssignment(zoneIds, data.role, 'connect')
+      const pin = await pincodeAssignment({ cityId, pincodes, role: data.role })
       const user = await userRepository.create({
         ...data,
         passwordHash,
         ...(assignedZones && { assignedZones }),
+        ...(pin && {
+          pincodes: {
+            create: pin.pincodes.map((pincode) => ({ pincode, cityId: pin.cityId })),
+          },
+        }),
       })
       return toPublicUser(user)
     },
 
-    async listUsers() {
+    async listUsers(actor) {
       const users = await userRepository.list()
-      return users.map(toPublicUser)
+      const scoped =
+        actor?.role === 'ACQUISITION_LEAD'
+          ? users.filter((u) => u.role === 'ACQUISITION_AGENT')
+          : users
+      return scoped.map(toPublicUser)
     },
 
     // Sheet-driven assignment: each row REPLACES that surveyor's zone set.
@@ -72,9 +107,10 @@ export function createUserService({ userRepository, zoneRepository }) {
       return { updated, skipped, total: assignments.length }
     },
 
-    async listUsersPaged({ page, pageSize, search, role }) {
+    async listUsersPaged({ page, pageSize, search, role }, actor) {
       const where = {
-        ...(role && { role }),
+        // A lead's directory is their own team, nobody else.
+        ...(actor?.role === 'ACQUISITION_LEAD' ? { role: 'ACQUISITION_AGENT' } : role && { role }),
         ...(search && {
           OR: [
             { name: { contains: search, mode: 'insensitive' } },
@@ -95,10 +131,13 @@ export function createUserService({ userRepository, zoneRepository }) {
       }
     },
 
-    async updateUser(id, { password, email, zoneIds, ...data }) {
+    async updateUser(id, { password, email, zoneIds, cityId, pincodes, ...data }, actor) {
       // Explicit existence check → 404 instead of a Prisma P2025 leaking as 500.
       const current = await userRepository.findById(id)
       if (!current) throw ApiError.notFound('User not found')
+      // A lead may edit agents only, and may not promote one out of the team.
+      assertMayManage(actor, current.role)
+      if (data.role) assertMayManage(actor, data.role)
       // Changing to an email another account already uses → clean 409.
       if (email) {
         const existing = await userRepository.findByEmail(email)
@@ -115,6 +154,20 @@ export function createUserService({ userRepository, zoneRepository }) {
         const targetRole = data.role ?? current.role
         const assignedZones = await zoneAssignment(zoneIds, targetRole, 'set')
         if (assignedZones) data.assignedZones = assignedZones
+      }
+
+      // pincodes replaces the agent's full set; omitting it leaves it as-is.
+      const targetRoleForPin = data.role ?? current.role
+      const pin = await pincodeAssignment({
+        cityId: cityId === undefined ? current.pincodes?.[0]?.cityId : cityId,
+        pincodes,
+        role: targetRoleForPin,
+      })
+      if (pin) {
+        data.pincodes = {
+          deleteMany: {},
+          create: pin.pincodes.map((pincode) => ({ pincode, cityId: pin.cityId })),
+        }
       }
 
       const user = await userRepository.update(id, data)

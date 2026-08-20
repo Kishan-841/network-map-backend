@@ -1,6 +1,15 @@
 import { z } from 'zod'
 
-const roleSchema = z.enum(['ADMIN', 'MANAGER', 'SURVEYOR'])
+const roleSchema = z.enum([
+  'ADMIN',
+  'MANAGER',
+  'SURVEYOR',
+  'ACQUISITION_AGENT',
+  'ACQUISITION_LEAD',
+])
+
+// Indian PIN codes: exactly 6 digits, never starting with 0.
+const pincodeSchema = z.string().trim().regex(/^[1-9][0-9]{5}$/, 'Must be a 6-digit PIN code')
 
 // Policy chosen for field teams: 8+ chars with a letter and a number —
 // balances account security with typability on mobile keyboards.
@@ -16,6 +25,9 @@ export const createUserSchema = z.object({
   password: passwordSchema,
   role: roleSchema,
   zoneIds: z.array(z.string().min(1)).max(200).optional(),
+  // Acquisition agents are mapped to one city + its pincodes.
+  cityId: z.string().min(1).nullish(),
+  pincodes: z.array(pincodeSchema).max(50).optional(),
 })
 
 export const bulkZoneAssignSchema = z.object({
@@ -45,5 +57,7 @@ export const updateUserSchema = z
     role: roleSchema,
     isActive: z.boolean(),
     zoneIds: z.array(z.string().min(1)).max(200),
+    cityId: z.string().min(1).nullable(),
+    pincodes: z.array(pincodeSchema).max(50),
   })
   .partial()

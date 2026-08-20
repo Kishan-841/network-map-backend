@@ -1,7 +1,7 @@
 import { Router } from 'express'
-import { requireAuth } from '../../middleware/auth.js'
+import { requireAuth, requireRole } from '../../middleware/auth.js'
 import { validateQuery } from '../../middleware/validate.js'
-import { dashboardQuerySchema } from './stats.schemas.js'
+import { dashboardQuerySchema, acquisitionQuerySchema } from './stats.schemas.js'
 import { statsController } from './stats.controller.js'
 
 export const statsRoutes = Router()
@@ -12,4 +12,13 @@ statsRoutes.get(
   requireAuth,
   validateQuery(dashboardQuerySchema),
   statsController.dashboard,
+)
+
+// Acquisition team analytics — leads and admins only.
+statsRoutes.get(
+  '/acquisition',
+  requireAuth,
+  requireRole('ADMIN', 'ACQUISITION_LEAD'),
+  validateQuery(acquisitionQuerySchema),
+  statsController.acquisition,
 )

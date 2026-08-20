@@ -13,9 +13,44 @@ export function createBuildingService({ buildingRepository, storage, userReposit
 
   return {
     async createBuilding(input, createdById, actor) {
-      const { details, permission, photos, ...building } = input
+      const { details, permission, photos, contact, ...building } = input
       photos?.forEach((photo) => assertOwnedUrl(photo.url))
       if (permission?.documentUrl) assertOwnedUrl(permission.documentUrl)
+
+      // --- Acquisition agents: contact person + proof photos are mandatory,
+      // territory comes from their pincode assignment (never the client).
+      if (actor?.role === 'ACQUISITION_AGENT') {
+        if (!contact) throw ApiError.badRequest('Contact person details are required')
+        const hasType = (type) => photos?.some((photo) => photo.type === type)
+        if (!hasType('SELFIE')) throw ApiError.badRequest('A selfie photo is required')
+        if (!hasType('CONTACT_PERSON')) {
+          throw ApiError.badRequest('A photo of the contact person is required')
+        }
+        const assigned = await userRepository.assignedPincodes(actor.id)
+        if (assigned.length === 0) {
+          throw ApiError.forbidden('No pincodes are assigned to you yet')
+        }
+        const match = assigned.find((a) => a.pincode === building.pincode)
+        if (!match) throw ApiError.forbidden('That pincode is not assigned to you')
+        return buildingRepository.create({
+          ...building,
+          pincode: match.pincode,
+          cityId: match.cityId,
+          zoneId: null, // acquisition buildings live outside coverage zones
+          source: 'ACQUISITION',
+          createdById,
+          feasibleStatus: 'SURVEY_PENDING',
+          surveyStatus: 'COMPLETED',
+          isLive: false,
+          details: details ? { create: details } : undefined,
+          contact: { create: contact },
+          photos: photos?.length ? { create: photos } : undefined,
+        })
+      }
+      if (contact) {
+        throw ApiError.badRequest('Contact details are only captured by acquisition agents')
+      }
+      if (!building.zoneId) throw ApiError.badRequest('Zone is required')
       // Permission records are legal artifacts — surveyors may not set them, the
       // same rule addPhoto enforces for permission letters.
       if (actor?.role === 'SURVEYOR') {
@@ -46,6 +81,8 @@ export function createBuildingService({ buildingRepository, storage, userReposit
 
     async listBuildings(filters = {}, actor) {
       const {
+        source,
+        pincode,
         zoneId,
         operatorId,
         cityId,
@@ -61,12 +98,29 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         pageSize = 20,
       } = filters
       const where = {}
+      // --- Acquisition visibility: agents see ONLY their own rows; leads see
+      // the whole acquisition registry and never the coverage one.
+      if (actor?.role === 'ACQUISITION_AGENT') {
+        where.createdById = actor.id
+        where.source = 'ACQUISITION'
+      } else if (actor?.role === 'ACQUISITION_LEAD') {
+        where.source = 'ACQUISITION'
+        if (createdById) where.createdById = createdById
+      } else if (source) {
+        where.source = source
+      }
+      if (pincode) where.pincode = pincode
       if (zoneId) where.zoneId = zoneId
       // Building → Operator → City are derived through the zone.
       if (operatorId) where.zone = { operatorId }
       if (cityId) where.zone = { ...where.zone, operator: { cityId } }
       if (status) where.feasibleStatus = status
-      if (createdById) where.createdById = createdById
+      if (createdById && !where.createdById) where.createdById = createdById
+      // The coverage registry (map, buildings list) excludes acquisition rows
+      // unless explicitly asked for.
+      if (!where.source && ['ADMIN', 'MANAGER', 'SURVEYOR'].includes(actor?.role)) {
+        where.source = 'COVERAGE'
+      }
       // Surveyors see their assigned zones plus their own buildings — via AND
       // because `search` below owns the top-level OR (spec 2026-08-14).
       if (actor?.role === 'SURVEYOR') {
@@ -120,6 +174,12 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       const building = await buildingRepository.findById(id)
       if (!building) throw ApiError.notFound('Building not found')
       // 404 (not 403) for out-of-scope buildings: don't leak existence.
+      if (actor?.role === 'ACQUISITION_AGENT' && building.createdById !== actor.id) {
+        throw ApiError.notFound('Building not found')
+      }
+      if (actor?.role === 'ACQUISITION_LEAD' && building.source !== 'ACQUISITION') {
+        throw ApiError.notFound('Building not found')
+      }
       if (actor?.role === 'SURVEYOR' && building.createdById !== actor.id) {
         const assigned = await userRepository.assignedZoneIds(actor.id)
         if (!assigned.includes(building.zoneId)) throw ApiError.notFound('Building not found')
@@ -197,10 +257,14 @@ export function createBuildingService({ buildingRepository, storage, userReposit
           // A surveyor must not learn ANYTHING about a building outside their
           // assigned zones beyond "one exists here" — return only distance +
           // duplicate signals, never address / coordinates / details / owner.
+          // Acquisition agents may only ever learn "something exists here".
+          const maskForAgent =
+            actor?.role === 'ACQUISITION_AGENT' && building.createdById !== actor.id
           if (
-            actor?.role === 'SURVEYOR' &&
-            building.createdById !== actor.id &&
-            !assigned.includes(building.zoneId)
+            maskForAgent ||
+            (actor?.role === 'SURVEYOR' &&
+              building.createdById !== actor.id &&
+              !assigned.includes(building.zoneId))
           ) {
             return {
               id: building.id,

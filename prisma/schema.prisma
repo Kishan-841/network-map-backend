@@ -11,6 +11,10 @@ enum Role {
   ADMIN
   MANAGER
   SURVEYOR
+  /// Acquisition team: walks buildings, records the contact person.
+  ACQUISITION_AGENT
+  /// Runs the acquisition team: creates agents, tracks their output.
+  ACQUISITION_LEAD
 }
 
 enum FeasibleStatus {
@@ -29,6 +33,27 @@ enum PhotoType {
   ENTRANCE
   PERMISSION_LETTER
   ADDITIONAL
+  /// Acquisition proof-of-visit: the agent's own selfie at the building.
+  SELFIE
+  /// The contact person the agent met.
+  CONTACT_PERSON
+}
+
+/// Which team logged the building — keeps the two registries separable.
+enum BuildingSource {
+  COVERAGE
+  ACQUISITION
+}
+
+enum ContactDesignation {
+  CHAIRMAN
+  SECRETARY
+  MANAGER
+  OWNER
+  TREASURER
+  COMMITTEE_MEMBER
+  WATCHMAN
+  OTHER
 }
 
 model User {
@@ -43,6 +68,21 @@ model User {
   buildings    Building[]
   /// Zones a SURVEYOR may work in; unused for other roles.
   assignedZones Zone[]    @relation("UserAssignedZones")
+  /// City + pincodes an ACQUISITION_AGENT covers; unused for other roles.
+  pincodes     UserPincode[]
+}
+
+/// One row per pincode an acquisition agent covers (within one city).
+model UserPincode {
+  id      String @id @default(cuid())
+  userId  String
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  cityId  String
+  city    City   @relation(fields: [cityId], references: [id], onDelete: Cascade)
+  pincode String
+
+  @@unique([userId, pincode])
+  @@index([cityId])
 }
 
 model BuildingType {
@@ -57,6 +97,8 @@ model City {
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   operators Operator[]
+  buildings Building[]
+  agents    UserPincode[]
 }
 
 model Operator {
@@ -112,8 +154,15 @@ model Building {
   formattedAddress String
   latitude         Float
   longitude        Float
-  zoneId           String
-  zone             Zone             @relation(fields: [zoneId], references: [id])
+  /// Coverage buildings belong to a zone; acquisition buildings use
+  /// city + pincode instead, so this is optional.
+  zoneId           String?
+  zone             Zone?            @relation(fields: [zoneId], references: [id])
+  /// Set for ACQUISITION buildings (agents are mapped by city + pincode).
+  cityId           String?
+  city             City?            @relation(fields: [cityId], references: [id])
+  pincode          String?
+  source           BuildingSource   @default(COVERAGE)
   feasibleStatus   FeasibleStatus   @default(SURVEY_PENDING)
   surveyStatus     SurveyStatus     @default(PENDING)
   /// Fiber connection is live at this building (drives the green/red marker).
@@ -124,9 +173,11 @@ model Building {
   updatedAt        DateTime         @updatedAt
   details          BuildingDetails?
   permission       Permission?
+  contact          BuildingContact?
   photos           Photo[]
 
   @@index([latitude, longitude])
+  @@index([source, createdById])
 }
 
 model BuildingDetails {
@@ -151,6 +202,21 @@ model Permission {
   ownerName        String?
   ownerMobile      String?
   documentUrl      String?
+}
+
+/// The decision-maker an acquisition agent met at the building.
+model BuildingContact {
+  id               String             @id @default(cuid())
+  buildingId       String             @unique
+  building         Building           @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  contactName      String
+  contactPhone     String
+  contactEmail     String?
+  designation      ContactDesignation
+  /// Free text when designation is OTHER.
+  designationOther String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
 }
 
 model Photo {

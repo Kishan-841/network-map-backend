@@ -12,8 +12,16 @@ export const updateStatusSchema = z
     message: 'Provide at least one field to update',
   })
 
+export const PHOTO_TYPES = [
+  'ENTRANCE',
+  'PERMISSION_LETTER',
+  'ADDITIONAL',
+  'SELFIE',
+  'CONTACT_PERSON',
+]
+
 export const addPhotoSchema = z.object({
-  type: z.enum(['ENTRANCE', 'PERMISSION_LETTER', 'ADDITIONAL']),
+  type: z.enum(PHOTO_TYPES),
   url: z.string().min(1).max(500),
 })
 
@@ -35,6 +43,8 @@ export const bulkBuildingsSchema = z.object({
 })
 
 export const listQuerySchema = z.object({
+  source: z.enum(['COVERAGE', 'ACQUISITION']).optional(),
+  pincode: z.string().optional(),
   zoneId: z.string().optional(),
   operatorId: z.string().optional(),
   cityId: z.string().optional(),
@@ -92,13 +102,40 @@ export const nearbyQuerySchema = z.object({
   placeId: z.string().optional(),
 })
 
+export const DESIGNATIONS = [
+  'CHAIRMAN',
+  'SECRETARY',
+  'MANAGER',
+  'OWNER',
+  'TREASURER',
+  'COMMITTEE_MEMBER',
+  'WATCHMAN',
+  'OTHER',
+]
+
+export const contactSchema = z
+  .object({
+    contactName: z.string().trim().min(1).max(120),
+    contactPhone: z.string().trim().min(6).max(20),
+    contactEmail: z.string().trim().email().max(150).nullish(),
+    designation: z.enum(DESIGNATIONS),
+    designationOther: z.string().trim().max(100).nullish(),
+  })
+  .refine((c) => c.designation !== 'OTHER' || Boolean(c.designationOther?.trim()), {
+    message: 'Describe the designation when choosing Other',
+    path: ['designationOther'],
+  })
+
 export const createBuildingSchema = z.object({
   placeId: z.string().min(1).nullish(),
   buildingName: z.string().min(1).max(200),
   formattedAddress: z.string().min(1).max(500),
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
-  zoneId: z.string().min(1),
+  // Coverage buildings carry a zone; acquisition buildings carry a pincode.
+  zoneId: z.string().min(1).nullish(),
+  pincode: z.string().trim().regex(/^[1-9][0-9]{5}$/).nullish(),
+  contact: contactSchema.nullish(),
   isLive: z.boolean().optional(), // fiber connection already live?
   details: z
     .object({
@@ -118,7 +155,7 @@ export const createBuildingSchema = z.object({
   photos: z
     .array(
       z.object({
-        type: z.enum(['ENTRANCE', 'PERMISSION_LETTER', 'ADDITIONAL']),
+        type: z.enum(PHOTO_TYPES),
         url: z.string().min(1).max(500),
       }),
     )
