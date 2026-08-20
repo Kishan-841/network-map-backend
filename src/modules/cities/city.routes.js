@@ -9,7 +9,7 @@ import { cityController } from './city.controller.js'
 export const cityRoutes = Router()
 
 cityRoutes.use(requireAuth)
-cityRoutes.get('/', requireRole('ADMIN', 'MANAGER'), cityController.list)
+cityRoutes.get('/', requireRole('ADMIN', 'MANAGER', 'ACQUISITION_LEAD'), cityController.list)
 cityRoutes.post(
   '/',
   requireRole('ADMIN'),
