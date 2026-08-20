@@ -8,5 +8,5 @@ export const dashboardQuerySchema = z.object({
 export const acquisitionQuerySchema = z.object({
   dateFrom: z.string().date().optional(),
   dateTo: z.string().date().optional(),
-  agentId: z.string().optional(),
+  agentId: z.string().cuid().optional(),
 })

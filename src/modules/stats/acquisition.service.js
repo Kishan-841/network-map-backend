@@ -3,6 +3,8 @@
  * logged in a date range. Reads only ACQUISITION rows — the coverage
  * registry is never touched here.
  */
+import { Prisma } from '@prisma/client'
+
 export function createAcquisitionService({ prisma }) {
   const rangeWhere = ({ dateFrom, dateTo, agentId }) => ({
     source: 'ACQUISITION',
@@ -62,15 +64,19 @@ export function createAcquisitionService({ prisma }) {
       )
 
       // Per-day trend for the chart (dates with zero rows are simply absent).
-      const trendRows = await prisma.$queryRawUnsafe(
-        `SELECT to_char(date_trunc('day', "createdAt"), 'YYYY-MM-DD') AS date, COUNT(*)::int AS count
-         FROM "Building"
-         WHERE "source" = 'ACQUISITION'
-           ${dateFrom ? `AND "createdAt" >= '${new Date(dateFrom).toISOString()}'` : ''}
-           ${dateTo ? `AND "createdAt" <= '${new Date(`${dateTo}T23:59:59.999Z`).toISOString()}'` : ''}
-           ${agentId ? `AND "createdById" = '${agentId.replace(/'/g, "''")}'` : ''}
-         GROUP BY 1 ORDER BY 1`,
-      )
+      // Values are BOUND, never interpolated — no string-built SQL.
+      const conditions = [Prisma.sql`"source" = 'ACQUISITION'`]
+      if (dateFrom) conditions.push(Prisma.sql`"createdAt" >= ${new Date(dateFrom)}`)
+      if (dateTo) {
+        conditions.push(Prisma.sql`"createdAt" <= ${new Date(`${dateTo}T23:59:59.999Z`)}`)
+      }
+      if (agentId) conditions.push(Prisma.sql`"createdById" = ${agentId}`)
+      const trendRows = await prisma.$queryRaw`
+        SELECT to_char(date_trunc('day', "createdAt"), 'YYYY-MM-DD') AS date,
+               COUNT(*)::int AS count
+        FROM "Building"
+        WHERE ${Prisma.join(conditions, ' AND ')}
+        GROUP BY 1 ORDER BY 1`
 
       return {
         totalInRange: inRange,
