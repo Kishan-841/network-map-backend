@@ -9,7 +9,8 @@ import { fiberRouteController } from './fiber-route.controller.js'
 export const fiberRouteRoutes = Router()
 
 fiberRouteRoutes.use(requireAuth)
-fiberRouteRoutes.get('/', fiberRouteController.list)
+// Coverage-only: the physical fiber layout is not acquisition-team data.
+fiberRouteRoutes.get('/', requireRole('ADMIN', 'MANAGER', 'SURVEYOR'), fiberRouteController.list)
 fiberRouteRoutes.post(
   '/',
   requireRole('ADMIN', 'MANAGER'),

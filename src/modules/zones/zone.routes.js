@@ -14,7 +14,14 @@ import { zoneRepository } from './zone.repository.js'
 export const zoneRoutes = Router()
 
 zoneRoutes.use(requireAuth)
-zoneRoutes.get('/', validateQuery(listZonesQuerySchema), zoneController.list)
+// Coverage-only: zone rows carry boundary polygons and operator links — the
+// acquisition team must never receive the coverage network layout.
+zoneRoutes.get(
+  '/',
+  requireRole('ADMIN', 'MANAGER', 'SURVEYOR'),
+  validateQuery(listZonesQuerySchema),
+  zoneController.list,
+)
 zoneRoutes.post(
   '/',
   requireRole('ADMIN', 'MANAGER'),

@@ -29,8 +29,11 @@ function fakeStatsRepo() {
 const fakeUserRepo = (zones = ['z1']) => ({ assignedZoneIds: async () => zones })
 
 const SURVEYOR_SCOPE = {
+  source: 'COVERAGE',
   OR: [{ zoneId: { in: ['z1'] } }, { createdById: 'u-surv' }],
 }
+// Coverage KPIs never count acquisition-team buildings.
+const COVERAGE_ONLY = { source: 'COVERAGE' }
 
 describe('dashboard stats scoping', () => {
   it('passes no building filter for admins and computes charts', async () => {
@@ -39,7 +42,7 @@ describe('dashboard stats scoping', () => {
       id: 'a',
       role: 'ADMIN',
     })
-    expect(repo.wheres.count).toBeUndefined()
+    expect(repo.wheres.count).toEqual(COVERAGE_ONLY)
     expect(result.operatorCount).toBe(7)
     expect(result.zoneCount).toBe(42)
     expect(repo.wheres.zone).toEqual({}) // no operator → all zones
@@ -69,8 +72,8 @@ describe('dashboard stats scoping', () => {
       { id: 'a', role: 'ADMIN' },
       { operatorId: 'op1' },
     )
-    expect(repo.wheres.count).toEqual({ zone: { operatorId: 'op1' } })
-    expect(repo.wheres.homePass).toEqual({ building: { zone: { operatorId: 'op1' } } })
+    expect(repo.wheres.count).toEqual({ ...COVERAGE_ONLY, zone: { operatorId: 'op1' } })
+    expect(repo.wheres.homePass).toEqual({ building: { ...COVERAGE_ONLY, zone: { operatorId: 'op1' } } })
     expect(repo.wheres.zone).toEqual({ operatorId: 'op1' })
     expect(repo.wheres.overTime.operatorId).toBe('op1')
   })
@@ -81,7 +84,7 @@ describe('dashboard stats scoping', () => {
       { id: 'a', role: 'ADMIN' },
       { cityId: 'c1' },
     )
-    expect(repo.wheres.count).toEqual({ zone: { operator: { cityId: 'c1' } } })
+    expect(repo.wheres.count).toEqual({ ...COVERAGE_ONLY, zone: { operator: { cityId: 'c1' } } })
     expect(repo.wheres.zone).toEqual({ operator: { cityId: 'c1' } })
     expect(repo.wheres.overTime.cityId).toBe('c1')
   })

@@ -11,11 +11,93 @@ export function createBuildingService({ buildingRepository, storage, userReposit
     }
   }
 
+  /**
+   * Edits echo back the signed URLs we served. Store the canonical form so a
+   * row never holds a link that expires.
+   */
+  const canonical = (url) => (storage?.canonicalUrl && url ? storage.canonicalUrl(url) : url)
+
+  /**
+   * Stored URLs are the object's identity, not a readable link — the bucket is
+   * private. Swap them for short-lived signed links on the way out, so nothing
+   * that leaves this service can be opened by anyone who merely has the URL.
+   * Applied only where photos are actually included (list rows carry none).
+   */
+  const signOne = async (url) => (storage?.readUrl && url ? storage.readUrl(url) : url)
+
+  async function signUrls(building) {
+    if (!building || !storage?.readUrl) return building
+    const [photos, documentUrl] = await Promise.all([
+      building.photos
+        ? Promise.all(
+            building.photos.map(async (photo) => ({
+              ...photo,
+              url: await signOne(photo.url),
+            })),
+          )
+        : building.photos,
+      signOne(building.permission?.documentUrl),
+    ])
+    return {
+      ...building,
+      ...(photos ? { photos } : {}),
+      ...(building.permission ? { permission: { ...building.permission, documentUrl } } : {}),
+    }
+  }
+
+  /**
+   * THE read rule for a single building — every endpoint that hands one back
+   * must go through this, or roles drift apart per endpoint (they did: /nearby
+   * and the photo routes each carried their own half-rule).
+   *
+   * Resolves the actor's scope once and answers synchronously, so /nearby can
+   * check a whole candidate list without a query per building. Fails closed:
+   * an unrecognised role sees nothing.
+   */
+  async function readScope(actor) {
+    const assignedZoneIds =
+      actor?.role === 'SURVEYOR' ? await userRepository.assignedZoneIds(actor.id) : []
+    return (building) => {
+      switch (actor?.role) {
+        case 'ADMIN':
+        case 'MANAGER':
+          return true
+        case 'SURVEYOR':
+          return building.createdById === actor.id || assignedZoneIds.includes(building.zoneId)
+        case 'ACQUISITION_AGENT':
+          return building.createdById === actor.id
+        case 'ACQUISITION_LEAD':
+          return building.source === 'ACQUISITION'
+        default:
+          return false
+      }
+    }
+  }
+
+  /**
+   * Writing to a building (photos) is stricter than reading it: field roles
+   * may only touch what they logged themselves, even inside a zone they can
+   * otherwise read.
+   */
+  async function assertMayModify(building, actor) {
+    if (['SURVEYOR', 'ACQUISITION_AGENT'].includes(actor?.role)) {
+      if (building.createdById !== actor.id) {
+        throw ApiError.forbidden('You can only change photos on your own buildings')
+      }
+      return
+    }
+    const canRead = await readScope(actor)
+    if (!canRead(building)) throw ApiError.forbidden('You cannot change this building')
+  }
+
   return {
     async createBuilding(input, createdById, actor) {
-      const { details, permission, photos, contact, ...building } = input
+      // eslint-disable-next-line prefer-const -- photos is normalised below
+      let { details, permission, photos, contact, ...building } = input
       photos?.forEach((photo) => assertOwnedUrl(photo.url))
       if (permission?.documentUrl) assertOwnedUrl(permission.documentUrl)
+      photos = photos?.map((photo) => ({ ...photo, url: canonical(photo.url) }))
+      if (permission?.documentUrl) permission.documentUrl = canonical(permission.documentUrl)
 
       // --- Acquisition agents: contact person + proof photos are mandatory,
       // territory comes from their pincode assignment (never the client).
@@ -32,7 +114,7 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         }
         const match = assigned.find((a) => a.pincode === building.pincode)
         if (!match) throw ApiError.forbidden('That pincode is not assigned to you')
-        return buildingRepository.create({
+        const created = await buildingRepository.create({
           ...building,
           pincode: match.pincode,
           cityId: match.cityId,
@@ -46,9 +128,16 @@ export function createBuildingService({ buildingRepository, storage, userReposit
           contact: { create: contact },
           photos: photos?.length ? { create: photos } : undefined,
         })
+        return signUrls(created)
       }
       if (contact) {
         throw ApiError.badRequest('Contact details are only captured by acquisition agents')
+      }
+      // Everything below this line writes a COVERAGE building. Leads run the
+      // acquisition team and can't even read the coverage registry, so they
+      // must not be able to silently write into it.
+      if (actor?.role === 'ACQUISITION_LEAD') {
+        throw ApiError.forbidden('Acquisition leads cannot add coverage buildings')
       }
       if (!building.zoneId) throw ApiError.badRequest('Zone is required')
       // Permission records are legal artifacts — surveyors may not set them, the
@@ -65,7 +154,7 @@ export function createBuildingService({ buildingRepository, storage, userReposit
           throw ApiError.forbidden('You are not assigned to this zone')
         }
       }
-      return buildingRepository.create({
+      const created = await buildingRepository.create({
         ...building,
         createdById,
         // A surveyor adding a building means: surveyed, and viable for fiber
@@ -77,6 +166,7 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         permission: permission ? { create: permission } : undefined,
         photos: photos?.length ? { create: photos } : undefined,
       })
+      return signUrls(created)
     },
 
     async listBuildings(filters = {}, actor) {
@@ -179,17 +269,9 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       const building = await buildingRepository.findById(id)
       if (!building) throw ApiError.notFound('Building not found')
       // 404 (not 403) for out-of-scope buildings: don't leak existence.
-      if (actor?.role === 'ACQUISITION_AGENT' && building.createdById !== actor.id) {
-        throw ApiError.notFound('Building not found')
-      }
-      if (actor?.role === 'ACQUISITION_LEAD' && building.source !== 'ACQUISITION') {
-        throw ApiError.notFound('Building not found')
-      }
-      if (actor?.role === 'SURVEYOR' && building.createdById !== actor.id) {
-        const assigned = await userRepository.assignedZoneIds(actor.id)
-        if (!assigned.includes(building.zoneId)) throw ApiError.notFound('Building not found')
-      }
-      return building
+      const canRead = await readScope(actor)
+      if (!canRead(building)) throw ApiError.notFound('Building not found')
+      return signUrls(building)
     },
 
     async updateBuilding(id, { details, permission, ...building }) {
@@ -212,7 +294,7 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         }
         data.permission = { upsert: { create: patch, update: patch } }
       }
-      return buildingRepository.update(id, data)
+      return signUrls(await buildingRepository.update(id, data))
     },
 
     async updateStatus(id, { feasibleStatus, surveyStatus, isLive }) {
@@ -251,26 +333,19 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         }
       }
 
-      const assigned =
-        actor?.role === 'SURVEYOR' ? await userRepository.assignedZoneIds(actor.id) : null
+      const canRead = await readScope(actor)
 
       return withinRadius
         .map((building) => {
           // Duplicate signals are computed from the real record first.
           const samePlaceId = Boolean(placeId) && building.placeId === placeId
           const similarName = name ? isSimilarName(name, building.buildingName) : false
-          // A surveyor must not learn ANYTHING about a building outside their
-          // assigned zones beyond "one exists here" — return only distance +
-          // duplicate signals, never address / coordinates / details / owner.
-          // Acquisition agents may only ever learn "something exists here".
-          const maskForAgent =
-            actor?.role === 'ACQUISITION_AGENT' && building.createdById !== actor.id
-          if (
-            maskForAgent ||
-            (actor?.role === 'SURVEYOR' &&
-              building.createdById !== actor.id &&
-              !assigned.includes(building.zoneId))
-          ) {
+          // Anyone who could not open this building must not learn ANYTHING
+          // about it beyond "one exists here" — only distance + duplicate
+          // signals, never name / address / coordinates / details / owner.
+          // /nearby is unauthenticated-by-scope otherwise: a caller could walk
+          // a grid of radius queries and rebuild the whole registry.
+          if (!canRead(building)) {
             return {
               id: building.id,
               distanceMeters: building.distanceMeters,
@@ -293,9 +368,7 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       }
       const building = await buildingRepository.findById(buildingId)
       if (!building) throw ApiError.notFound('Building not found')
-      if (user?.role === 'SURVEYOR' && building.createdById !== user.id) {
-        throw ApiError.forbidden('You can only add photos to your own buildings')
-      }
+      await assertMayModify(building, user)
       // A building has exactly one entrance photo and one permission letter;
       // only ADDITIONAL photos are unlimited. Delete the existing one to replace.
       if (type !== 'ADDITIONAL' && building.photos?.some((photo) => photo.type === type)) {
@@ -303,26 +376,25 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         throw ApiError.conflict(`${label} already exists — delete it first to replace it`)
       }
       assertOwnedUrl(url)
+      const storedUrl = canonical(url)
 
-      const photo = await buildingRepository.createPhoto({ buildingId, type, url })
+      const photo = await buildingRepository.createPhoto({ buildingId, type, url: storedUrl })
       if (type === 'PERMISSION_LETTER') {
-        await buildingRepository.upsertPermissionDocument(buildingId, url)
+        await buildingRepository.upsertPermissionDocument(buildingId, storedUrl)
       }
-      return photo
+      return { ...photo, url: await signOne(photo.url) }
     },
 
     async removePhoto(buildingId, photoId, user) {
       const photo = await buildingRepository.findPhotoById(photoId)
       if (!photo || photo.buildingId !== buildingId) throw ApiError.notFound('Photo not found')
 
-      // Surveyors may manage photos on their OWN buildings (so they can fix a
-      // wrong entrance/permission upload); admins/managers may manage any.
-      if (user?.role === 'SURVEYOR') {
-        const building = await buildingRepository.findById(buildingId)
-        if (!building || building.createdById !== user.id) {
-          throw ApiError.forbidden('You can only delete photos on your own buildings')
-        }
-      }
+      // Field roles may manage photos on their OWN buildings (so they can fix a
+      // wrong entrance/selfie upload); admins/managers may manage any. Without
+      // this the delete also destroys the file in object storage.
+      const building = await buildingRepository.findById(buildingId)
+      if (!building) throw ApiError.notFound('Photo not found')
+      await assertMayModify(building, user)
 
       await buildingRepository.deletePhoto(photoId)
       if (photo.type === 'PERMISSION_LETTER') {

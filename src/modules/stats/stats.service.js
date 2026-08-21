@@ -8,7 +8,10 @@ export function createStatsService({ statsRepository, userRepository }) {
 
       // KPI where merges surveyor ownership and the operator filter (operator is
       // reached through the building's zone).
-      const buildingWhere = {}
+      // Coverage KPIs count coverage buildings. Without this the acquisition
+      // team's rows inflate every total here while the buildings list (which
+      // defaults to COVERAGE) shows a different number.
+      const buildingWhere = { source: 'COVERAGE' }
       if (scoped) {
         // Same zone-or-own read scope the buildings list uses (spec 2026-08-14).
         const assigned = await userRepository.assignedZoneIds(actor.id)
@@ -16,9 +19,8 @@ export function createStatsService({ statsRepository, userRepository }) {
       }
       if (operatorId) buildingWhere.zone = { operatorId }
       if (cityId) buildingWhere.zone = { ...buildingWhere.zone, operator: { cityId } }
-      const hasBuildingWhere = Object.keys(buildingWhere).length > 0
-      const where = hasBuildingWhere ? buildingWhere : undefined
-      const nestedWhere = hasBuildingWhere ? { building: buildingWhere } : undefined
+      const where = buildingWhere
+      const nestedWhere = { building: buildingWhere }
 
       const [
         totalBuildings,

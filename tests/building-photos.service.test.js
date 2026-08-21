@@ -50,13 +50,15 @@ function fakeRepo({ building = { id: 'b1' }, photo } = {}) {
 const fakeStorage = () => ({
   delete: vi.fn(async () => {}),
   keyFromUrl: (url) => (url.includes('/uploads/') ? url.split('/uploads/')[1] : null),
+  // Reads are handed out signed; the fake marks them so tests can tell.
+  readUrl: async (url) => `${url}?signed=1`,
 })
 
 describe('building service photos', () => {
   it('adds a photo to an existing building', async () => {
     const repo = fakeRepo()
     const service = createBuildingService({ buildingRepository: repo, storage: fakeStorage() })
-    const photo = await service.addPhoto('b1', { type: 'ENTRANCE', url: '/uploads/a.jpg' })
+    const photo = await service.addPhoto('b1', { type: 'ENTRANCE', url: '/uploads/a.jpg' }, { id: 'u1', role: 'ADMIN' })
     expect(repo.createPhoto).toHaveBeenCalledWith({
       buildingId: 'b1',
       type: 'ENTRANCE',
@@ -68,10 +70,10 @@ describe('building service photos', () => {
   it('rejects a url that does not belong to our storage (XSS guard)', async () => {
     const service = createBuildingService({ buildingRepository: fakeRepo(), storage: fakeStorage() })
     await expect(
-      service.addPhoto('b1', { type: 'ENTRANCE', url: 'javascript:alert(1)' }),
+      service.addPhoto('b1', { type: 'ENTRANCE', url: 'javascript:alert(1)' }, { id: 'u1', role: 'ADMIN' }),
     ).rejects.toMatchObject({ status: 400 })
     await expect(
-      service.addPhoto('b1', { type: 'ENTRANCE', url: 'https://evil.example/x.jpg' }),
+      service.addPhoto('b1', { type: 'ENTRANCE', url: 'https://evil.example/x.jpg' }, { id: 'u1', role: 'ADMIN' }),
     ).rejects.toMatchObject({ status: 400 })
   })
 
@@ -80,7 +82,7 @@ describe('building service photos', () => {
       buildingRepository: fakeRepo({ building: null }),
       storage: fakeStorage(),
     })
-    await expect(service.addPhoto('nope', { type: 'ENTRANCE', url: 'x' })).rejects.toMatchObject({
+    await expect(service.addPhoto('nope', { type: 'ENTRANCE', url: 'x' }, { id: 'u1', role: 'ADMIN' })).rejects.toMatchObject({
       status: 404,
     })
   })
@@ -171,7 +173,7 @@ describe('building service photos', () => {
     const repo = fakeRepo({ photo })
     const storage = fakeStorage()
     const service = createBuildingService({ buildingRepository: repo, storage })
-    await service.removePhoto('b1', 'p9')
+    await service.removePhoto('b1', 'p9', { id: 'u1', role: 'ADMIN' })
     expect(repo.deletePhoto).toHaveBeenCalledWith('p9')
     expect(storage.delete).toHaveBeenCalledWith({ key: '2026/07/l.pdf' })
     expect(repo.clearPermissionDocument).toHaveBeenCalledWith('b1', photo.url)
@@ -183,7 +185,7 @@ describe('building service photos', () => {
       buildingRepository: fakeRepo({ photo }),
       storage: fakeStorage(),
     })
-    await expect(service.removePhoto('b1', 'p9')).rejects.toMatchObject({ status: 404 })
+    await expect(service.removePhoto('b1', 'p9', { id: 'u1', role: 'ADMIN' })).rejects.toMatchObject({ status: 404 })
   })
 
   it('still removes the DB row when file deletion fails', async () => {
@@ -196,7 +198,7 @@ describe('building service photos', () => {
       keyFromUrl: () => 'z.jpg',
     }
     const service = createBuildingService({ buildingRepository: repo, storage })
-    await service.removePhoto('b1', 'p9')
+    await service.removePhoto('b1', 'p9', { id: 'u1', role: 'ADMIN' })
     expect(repo.deletePhoto).toHaveBeenCalledWith('p9')
   })
 })

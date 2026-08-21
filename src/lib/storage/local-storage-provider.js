@@ -22,5 +22,19 @@ export function createLocalStorageProvider({ rootDir, baseUrl }) {
     keyFromUrl(url) {
       return keyFromPublicUrl(url, baseUrl)
     },
+
+    // The stable form we store. Read URLs handed to browsers are signed and
+    // expire; if one is posted back to us on an edit, this turns it back into
+    // the object's identity so we never persist a link that dies.
+    canonicalUrl(url) {
+      const key = keyFromPublicUrl(url, baseUrl)
+      return key ? `${baseUrl}/${key}` : url
+    },
+
+    // Dev serves uploads off the local disk behind the app itself — there is
+    // nothing to sign, so the canonical URL is already the read URL.
+    async readUrl(url) {
+      return url
+    },
   }
 }

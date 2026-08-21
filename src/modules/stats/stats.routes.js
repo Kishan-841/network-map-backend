@@ -6,10 +6,12 @@ import { statsController } from './stats.controller.js'
 
 export const statsRoutes = Router()
 
-// All roles may read: the service scopes surveyors to their own buildings.
+// Coverage KPIs. Surveyors are scoped to their own buildings inside the
+// service; the acquisition team has its own dashboard and must not read these.
 statsRoutes.get(
   '/dashboard',
   requireAuth,
+  requireRole('ADMIN', 'MANAGER', 'SURVEYOR'),
   validateQuery(dashboardQuerySchema),
   statsController.dashboard,
 )

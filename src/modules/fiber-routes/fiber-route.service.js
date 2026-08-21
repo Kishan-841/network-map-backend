@@ -29,16 +29,32 @@ export function createFiberRouteService(deps) {
     }
   }
 
+  /** Edits echo back the signed URLs we served — store the canonical form. */
+  function canonicalImages(data) {
+    if (!data.images || !storage?.canonicalUrl) return data
+    return { ...data, images: data.images.map((url) => storage.canonicalUrl(url)) }
+  }
+
+  /**
+   * Same rule as building photos: the stored URL is the object's identity, the
+   * link handed to a browser is short-lived and signed.
+   */
+  async function signImages(route) {
+    if (!route?.images?.length || !storage?.readUrl) return route
+    return { ...route, images: await Promise.all(route.images.map((u) => storage.readUrl(u))) }
+  }
+
   return {
     async listFiberRoutes() {
-      return fiberRouteRepository.list()
+      const routes = await fiberRouteRepository.list()
+      return Promise.all(routes.map(signImages))
     },
 
     async createFiberRoute(data) {
       await assertNameFree(data.name)
       await assertOperatorExists(data.operatorId)
       assertOwnedImages(data.images)
-      return fiberRouteRepository.create(data)
+      return signImages(await fiberRouteRepository.create(canonicalImages(data)))
     },
 
     async updateFiberRoute(id, data) {
@@ -47,7 +63,7 @@ export function createFiberRouteService(deps) {
       if (data.name) await assertNameFree(data.name, id)
       await assertOperatorExists(data.operatorId)
       assertOwnedImages(data.images)
-      return fiberRouteRepository.update(id, data)
+      return signImages(await fiberRouteRepository.update(id, canonicalImages(data)))
     },
 
     async deleteFiberRoute(id) {
