@@ -6,9 +6,10 @@
 import { Prisma } from '@prisma/client'
 
 export function createAcquisitionService({ prisma }) {
-  const rangeWhere = ({ dateFrom, dateTo, agentId }) => ({
+  const rangeWhere = ({ dateFrom, dateTo, agentId, cityId }) => ({
     source: 'ACQUISITION',
     ...(agentId && { createdById: agentId }),
+    ...(cityId && { cityId }),
     ...((dateFrom || dateTo) && {
       createdAt: {
         ...(dateFrom && { gte: new Date(dateFrom) }),
@@ -25,8 +26,8 @@ export function createAcquisitionService({ prisma }) {
   }
 
   return {
-    async getAcquisitionStats({ dateFrom, dateTo, agentId } = {}) {
-      const where = rangeWhere({ dateFrom, dateTo, agentId })
+    async getAcquisitionStats({ dateFrom, dateTo, agentId, cityId } = {}) {
+      const where = rangeWhere({ dateFrom, dateTo, agentId, cityId })
 
       // Previous window of equal length — powers the "vs previous" delta.
       const prevWindow = (() => {
@@ -61,7 +62,12 @@ export function createAcquisitionService({ prisma }) {
           where: { source: 'ACQUISITION', createdAt: { gte: startOf(29) } },
         }),
         prisma.user.findMany({
-          where: { role: 'ACQUISITION_AGENT' },
+          where: {
+            role: 'ACQUISITION_AGENT',
+            ...(agentId && { id: agentId }),
+            // Agents are mapped to a city through their pincode assignment.
+            ...(cityId && { pincodes: { some: { cityId } } }),
+          },
           select: {
             id: true,
             name: true,
@@ -112,6 +118,7 @@ export function createAcquisitionService({ prisma }) {
         conditions.push(Prisma.sql`"createdAt" <= ${new Date(`${dateTo}T23:59:59.999Z`)}`)
       }
       if (agentId) conditions.push(Prisma.sql`"createdById" = ${agentId}`)
+      if (cityId) conditions.push(Prisma.sql`"cityId" = ${cityId}`)
       const trendRows = await prisma.$queryRaw`
         SELECT to_char(date_trunc('day', "createdAt"), 'YYYY-MM-DD') AS date,
                COUNT(*)::int AS count
