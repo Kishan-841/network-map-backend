@@ -155,3 +155,15 @@ describe('acquisition map filters', () => {
     expect(whereUsed().createdById).toBe(AGENT.id)
   })
 })
+
+describe('acquisition list payload', () => {
+  it('list rows carry the creator so the Agent column can render', async () => {
+    const { buildingRepository } = await import('../src/modules/buildings/building.repository.js')
+    // Guard against the include being dropped: the repository must ask for it.
+    const src = (
+      await import('node:fs')
+    ).readFileSync('src/modules/buildings/building.repository.js', 'utf8')
+    expect(src).toMatch(/createdBy: \{ select: \{ id: true, name: true \} \}/)
+    expect(typeof buildingRepository.list).toBe('function')
+  })
+})

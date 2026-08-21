@@ -18,6 +18,8 @@ const listInclude = {
   city: { select: { id: true, name: true } },
   details: true,
   contact: true,
+  // Who logged it — the acquisition list shows this as the "Agent" column.
+  createdBy: { select: { id: true, name: true } },
 }
 
 export const buildingRepository = {
