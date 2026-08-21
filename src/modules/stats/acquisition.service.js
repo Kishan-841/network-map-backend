@@ -28,7 +28,28 @@ export function createAcquisitionService({ prisma }) {
     async getAcquisitionStats({ dateFrom, dateTo, agentId } = {}) {
       const where = rangeWhere({ dateFrom, dateTo, agentId })
 
-      const [inRange, today, week, month, agents, perAgent, contacts] = await Promise.all([
+      // Previous window of equal length — powers the "vs previous" delta.
+      const prevWindow = (() => {
+        if (!dateFrom || !dateTo) return null
+        const from = new Date(dateFrom)
+        const to = new Date(`${dateTo}T23:59:59.999Z`)
+        const span = to.getTime() - from.getTime()
+        return { gte: new Date(from.getTime() - span - 1), lte: new Date(from.getTime() - 1) }
+      })()
+
+      const [
+        inRange,
+        today,
+        week,
+        month,
+        agents,
+        perAgent,
+        contacts,
+        homePass,
+        designations,
+        pincodes,
+        previous,
+      ] = await Promise.all([
         prisma.building.count({ where }),
         prisma.building.count({
           where: { source: 'ACQUISITION', createdAt: { gte: startOf(0) } },
@@ -57,6 +78,26 @@ export function createAcquisitionService({ prisma }) {
           _max: { createdAt: true },
         }),
         prisma.buildingContact.count({ where: { building: where } }),
+        // Flats reached — the number the business actually cares about.
+        prisma.buildingDetails.aggregate({
+          _sum: { homePass: true },
+          where: { building: where },
+        }),
+        // Who agents are actually meeting (decision-maker quality).
+        prisma.buildingContact.groupBy({
+          by: ['designation'],
+          where: { building: where },
+          _count: { _all: true },
+        }),
+        // Which pincodes are being worked.
+        prisma.building.groupBy({
+          by: ['pincode'],
+          where,
+          _count: { _all: true },
+        }),
+        prevWindow
+          ? prisma.building.count({ where: { source: 'ACQUISITION', createdAt: prevWindow } })
+          : Promise.resolve(null),
       ])
 
       const statsById = new Map(
@@ -84,6 +125,16 @@ export function createAcquisitionService({ prisma }) {
         last7Days: week,
         last30Days: month,
         contactsCaptured: contacts,
+        homePassReached: homePass._sum.homePass ?? 0,
+        previousRangeTotal: previous,
+        byDesignation: designations
+          .map((d) => ({ designation: d.designation, count: d._count._all }))
+          .sort((a, b) => b.count - a.count),
+        byPincode: pincodes
+          .filter((p) => p.pincode)
+          .map((p) => ({ pincode: p.pincode, count: p._count._all }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 8),
         activeAgents: agents.filter((a) => a.isActive).length,
         agents: agents.map((agent) => ({
           id: agent.id,
