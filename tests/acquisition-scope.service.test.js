@@ -134,3 +134,24 @@ describe('acquisition visibility', () => {
     await expect(service.getBuilding('other-agent', LEAD)).resolves.toBeTruthy()
   })
 })
+
+describe('acquisition map filters', () => {
+  it('cityId filters acquisition rows directly, not through the zone', async () => {
+    const { service, whereUsed } = makeService()
+    await service.listBuildings({ cityId: 'c9' }, LEAD)
+    expect(whereUsed().cityId).toBe('c9')
+    expect(whereUsed().zone).toBeUndefined()
+  })
+
+  it('a lead can scope the map to one agent', async () => {
+    const { service, whereUsed } = makeService()
+    await service.listBuildings({ createdById: 'ag2' }, LEAD)
+    expect(whereUsed()).toMatchObject({ source: 'ACQUISITION', createdById: 'ag2' })
+  })
+
+  it('an agent cannot widen their scope with createdById', async () => {
+    const { service, whereUsed } = makeService()
+    await service.listBuildings({ createdById: 'someone-else' }, AGENT)
+    expect(whereUsed().createdById).toBe(AGENT.id)
+  })
+})

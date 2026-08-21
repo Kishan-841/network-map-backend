@@ -113,7 +113,12 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       if (zoneId) where.zoneId = zoneId
       // Building → Operator → City are derived through the zone.
       if (operatorId) where.zone = { operatorId }
-      if (cityId) where.zone = { ...where.zone, operator: { cityId } }
+      // Acquisition buildings carry cityId directly; coverage buildings reach
+      // their city through zone → operator.
+      if (cityId) {
+        if (where.source === 'ACQUISITION') where.cityId = cityId
+        else where.zone = { ...where.zone, operator: { cityId } }
+      }
       if (status) where.feasibleStatus = status
       if (createdById && !where.createdById) where.createdById = createdById
       // The coverage registry (map, buildings list) excludes acquisition rows
