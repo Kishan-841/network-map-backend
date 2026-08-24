@@ -33,6 +33,7 @@ export const buildingRepository = {
       take,
     }),
   count: (where = {}) => prisma.building.count({ where }),
+  updateMany: (where, data) => prisma.building.updateMany({ where, data }),
   findById: (id) => prisma.building.findUnique({ where: { id }, include: fullInclude }),
   update: (id, data) => prisma.building.update({ where: { id }, data, include: fullInclude }),
   delete: (id) => prisma.building.delete({ where: { id } }),

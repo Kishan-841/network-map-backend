@@ -42,6 +42,34 @@ export const bulkBuildingsSchema = z.object({
     .max(500),
 })
 
+/**
+ * Bulk go-live. Either an explicit list of ids, or the SAME filter shape the
+ * list uses — the filter form is what makes "select all 800 in Zone A" work
+ * without the client ever holding 800 rows.
+ */
+export const bulkStatusSchema = z
+  .object({
+    isLive: z.boolean(),
+    ids: z.array(z.string().min(1)).min(1).max(1000).optional(),
+    filter: z
+      .object({
+        source: z.enum(['COVERAGE', 'ACQUISITION']).optional(),
+        pincode: z.string().optional(),
+        zoneId: z.string().optional(),
+        operatorId: z.string().optional(),
+        cityId: z.string().optional(),
+        status: z.enum(['FEASIBLE', 'PERMISSION_PENDING', 'REJECTED', 'SURVEY_PENDING']).optional(),
+        createdById: z.string().optional(),
+        dateFrom: z.string().date().optional(),
+        dateTo: z.string().date().optional(),
+        search: z.string().max(200).optional(),
+      })
+      .optional(),
+  })
+  .refine((data) => Boolean(data.ids) !== Boolean(data.filter), {
+    message: 'Provide either ids or a filter, not both',
+  })
+
 export const listQuerySchema = z.object({
   source: z.enum(['COVERAGE', 'ACQUISITION']).optional(),
   pincode: z.string().optional(),

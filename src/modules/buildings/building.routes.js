@@ -9,6 +9,7 @@ import {
   updateStatusSchema,
   updateBuildingSchema,
   bulkBuildingsSchema,
+  bulkStatusSchema,
 } from './building.schemas.js'
 import { buildingController } from './building.controller.js'
 import { audit } from '../system-logs/audit.js'
@@ -36,6 +37,19 @@ buildingRoutes.post(
   }),
   validateBody(bulkBuildingsSchema),
   buildingController.bulk,
+)
+// Bulk go-live. Above /:id routes so 'bulk-status' is never read as an id.
+buildingRoutes.patch(
+  '/bulk-status',
+  requireRole('ADMIN', 'MANAGER'),
+  audit('Building', 'BulkStatusChange', {
+    describe: (req, old, body) =>
+      body?.data
+        ? `${body.data.count} building(s) marked ${body.data.isLive ? 'live' : 'not live'}`
+        : 'Bulk status change',
+  }),
+  validateBody(bulkStatusSchema),
+  buildingController.bulkStatus,
 )
 buildingRoutes.get('/', validateQuery(listQuerySchema), buildingController.list)
 // NOTE: /nearby must stay above /:id or Express matches it as an id.

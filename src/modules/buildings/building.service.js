@@ -46,6 +46,76 @@ export function createBuildingService({ buildingRepository, storage, userReposit
   }
 
   /**
+   * THE filter rule for building lists. Shared by listBuildings and the bulk
+   * status update so "mark everything in this filter live" acts on exactly the
+   * rows the list showed — if these ever drift, users would flip buildings
+   * they never saw.
+   */
+  async function buildListWhere(filters = {}, actor) {
+    const {
+      source,
+      pincode,
+      zoneId,
+      operatorId,
+      cityId,
+      status,
+      createdById,
+      dateFrom,
+      dateTo,
+      search,
+    } = filters
+    const where = {}
+    // --- Acquisition visibility: agents see ONLY their own rows; leads see
+    // the whole acquisition registry and never the coverage one.
+    if (actor?.role === 'ACQUISITION_AGENT') {
+      where.createdById = actor.id
+      where.source = 'ACQUISITION'
+    } else if (actor?.role === 'ACQUISITION_LEAD') {
+      where.source = 'ACQUISITION'
+      if (createdById) where.createdById = createdById
+    } else if (source) {
+      where.source = source
+    }
+    if (pincode) where.pincode = pincode
+    if (zoneId) where.zoneId = zoneId
+    // Building → Operator → City are derived through the zone.
+    if (operatorId) where.zone = { operatorId }
+    // Acquisition buildings carry cityId directly; coverage buildings reach
+    // their city through zone → operator.
+    if (cityId) {
+      if (where.source === 'ACQUISITION') where.cityId = cityId
+      else where.zone = { ...where.zone, operator: { cityId } }
+    }
+    if (status) where.feasibleStatus = status
+    if (createdById && !where.createdById) where.createdById = createdById
+    // The coverage registry (map, buildings list) excludes acquisition rows
+    // unless explicitly asked for.
+    if (!where.source && ['ADMIN', 'MANAGER', 'SURVEYOR'].includes(actor?.role)) {
+      where.source = 'COVERAGE'
+    }
+    // Surveyors see their assigned zones plus their own buildings — via AND
+    // because `search` below owns the top-level OR (spec 2026-08-14).
+    if (actor?.role === 'SURVEYOR') {
+      const assigned = await userRepository.assignedZoneIds(actor.id)
+      where.AND = [{ OR: [{ zoneId: { in: assigned } }, { createdById: actor.id }] }]
+    }
+    if (dateFrom || dateTo) {
+      where.createdAt = {}
+      if (dateFrom) where.createdAt.gte = new Date(dateFrom)
+      if (dateTo) where.createdAt.lte = new Date(`${dateTo}T23:59:59.999Z`)
+    }
+    if (search) {
+      where.OR = [
+        { buildingName: { contains: search, mode: 'insensitive' } },
+        { formattedAddress: { contains: search, mode: 'insensitive' } },
+        { zone: { name: { contains: search, mode: 'insensitive' } } },
+      ]
+    }
+
+    return where
+  }
+
+  /**
    * THE read rule for a single building — every endpoint that hands one back
    * must go through this, or roles drift apart per endpoint (they did: /nearby
    * and the photo routes each carried their own half-rule).
@@ -170,71 +240,8 @@ export function createBuildingService({ buildingRepository, storage, userReposit
     },
 
     async listBuildings(filters = {}, actor) {
-      const {
-        source,
-        pincode,
-        zoneId,
-        operatorId,
-        cityId,
-        status,
-        createdById,
-        dateFrom,
-        dateTo,
-        search,
-        latitude,
-        longitude,
-        radius,
-        page = 1,
-        pageSize = 20,
-      } = filters
-      const where = {}
-      // --- Acquisition visibility: agents see ONLY their own rows; leads see
-      // the whole acquisition registry and never the coverage one.
-      if (actor?.role === 'ACQUISITION_AGENT') {
-        where.createdById = actor.id
-        where.source = 'ACQUISITION'
-      } else if (actor?.role === 'ACQUISITION_LEAD') {
-        where.source = 'ACQUISITION'
-        if (createdById) where.createdById = createdById
-      } else if (source) {
-        where.source = source
-      }
-      if (pincode) where.pincode = pincode
-      if (zoneId) where.zoneId = zoneId
-      // Building → Operator → City are derived through the zone.
-      if (operatorId) where.zone = { operatorId }
-      // Acquisition buildings carry cityId directly; coverage buildings reach
-      // their city through zone → operator.
-      if (cityId) {
-        if (where.source === 'ACQUISITION') where.cityId = cityId
-        else where.zone = { ...where.zone, operator: { cityId } }
-      }
-      if (status) where.feasibleStatus = status
-      if (createdById && !where.createdById) where.createdById = createdById
-      // The coverage registry (map, buildings list) excludes acquisition rows
-      // unless explicitly asked for.
-      if (!where.source && ['ADMIN', 'MANAGER', 'SURVEYOR'].includes(actor?.role)) {
-        where.source = 'COVERAGE'
-      }
-      // Surveyors see their assigned zones plus their own buildings — via AND
-      // because `search` below owns the top-level OR (spec 2026-08-14).
-      if (actor?.role === 'SURVEYOR') {
-        const assigned = await userRepository.assignedZoneIds(actor.id)
-        where.AND = [{ OR: [{ zoneId: { in: assigned } }, { createdById: actor.id }] }]
-      }
-      if (dateFrom || dateTo) {
-        where.createdAt = {}
-        if (dateFrom) where.createdAt.gte = new Date(dateFrom)
-        if (dateTo) where.createdAt.lte = new Date(`${dateTo}T23:59:59.999Z`)
-      }
-      if (search) {
-        where.OR = [
-          { buildingName: { contains: search, mode: 'insensitive' } },
-          { formattedAddress: { contains: search, mode: 'insensitive' } },
-          { zone: { name: { contains: search, mode: 'insensitive' } } },
-        ]
-      }
-
+      const { latitude, longitude, radius, page = 1, pageSize = 20 } = filters
+      const where = await buildListWhere(filters, actor)
       const paginate = (total) => ({
         page,
         pageSize,
@@ -295,6 +302,21 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         data.permission = { upsert: { create: patch, update: patch } }
       }
       return signUrls(await buildingRepository.update(id, data))
+    },
+
+    /**
+     * Flip isLive on many buildings at once.
+     *
+     * `filter` is resolved server-side through the very same where-builder the
+     * list uses, so "select all in Zone A" covers every match — not just the
+     * page the client happened to load. `ids` is scoped by that builder too, so
+     * a caller can never reach a row their role could not list.
+     */
+    async bulkSetLive({ ids, filter, isLive }, actor) {
+      const scope = await buildListWhere(filter ?? {}, actor)
+      const where = ids ? { AND: [scope, { id: { in: ids } }] } : scope
+      const { count } = await buildingRepository.updateMany(where, { isLive })
+      return { count, isLive }
     },
 
     async updateStatus(id, { feasibleStatus, surveyStatus, isLive }) {

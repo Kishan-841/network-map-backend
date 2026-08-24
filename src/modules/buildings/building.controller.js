@@ -42,6 +42,15 @@ export const buildingController = {
     }
   },
 
+  async bulkStatus(req, res, next) {
+    try {
+      const result = await buildingService.bulkSetLive(req.body, req.user)
+      res.json({ success: true, data: result })
+    } catch (err) {
+      next(err)
+    }
+  },
+
   async nearby(req, res, next) {
     try {
       const { latitude, longitude, radius, name, placeId } = req.validatedQuery
