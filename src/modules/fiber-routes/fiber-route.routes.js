@@ -10,7 +10,7 @@ export const fiberRouteRoutes = Router()
 
 fiberRouteRoutes.use(requireAuth)
 // Coverage-only: the physical fiber layout is not acquisition-team data.
-fiberRouteRoutes.get('/', requireRole('ADMIN', 'MANAGER', 'SURVEYOR'), fiberRouteController.list)
+fiberRouteRoutes.get('/', requireRole('ADMIN', 'MANAGER', 'SURVEYOR', 'SUPERVISOR'), fiberRouteController.list)
 fiberRouteRoutes.post(
   '/',
   requireRole('ADMIN', 'MANAGER'),

@@ -76,29 +76,37 @@ export function createBuildingService({ buildingRepository, storage, userReposit
     } else if (source) {
       where.source = source
     }
+    // The coverage team's views exclude acquisition rows unless explicitly
+    // asked for. SUPERVISOR is deliberately absent: it spans both registries,
+    // so it gets no default and sees everything. Settled here, before the city
+    // filter reads it — that filter behaves differently per registry.
+    if (!where.source && ['ADMIN', 'MANAGER', 'SURVEYOR'].includes(actor?.role)) {
+      where.source = 'COVERAGE'
+    }
+    const andWhere = []
+
     if (pincode) where.pincode = pincode
     if (zoneId) where.zoneId = zoneId
     // Building → Operator → City are derived through the zone.
     if (operatorId) where.zone = { operatorId }
     // Acquisition buildings carry cityId directly; coverage buildings reach
-    // their city through zone → operator.
+    // their city through zone → operator. A viewer spanning both registries
+    // means either mapping, or a city filter would silently drop half the map.
     if (cityId) {
       if (where.source === 'ACQUISITION') where.cityId = cityId
-      else where.zone = { ...where.zone, operator: { cityId } }
+      else if (actor?.role === 'SUPERVISOR') {
+        andWhere.push({ OR: [{ cityId }, { zone: { operator: { cityId } } }] })
+      } else where.zone = { ...where.zone, operator: { cityId } }
     }
     if (status) where.feasibleStatus = status
     if (createdById && !where.createdById) where.createdById = createdById
-    // The coverage registry (map, buildings list) excludes acquisition rows
-    // unless explicitly asked for.
-    if (!where.source && ['ADMIN', 'MANAGER', 'SURVEYOR'].includes(actor?.role)) {
-      where.source = 'COVERAGE'
-    }
     // Surveyors see their assigned zones plus their own buildings — via AND
     // because `search` below owns the top-level OR (spec 2026-08-14).
     if (actor?.role === 'SURVEYOR') {
       const assigned = await userRepository.assignedZoneIds(actor.id)
-      where.AND = [{ OR: [{ zoneId: { in: assigned } }, { createdById: actor.id }] }]
+      andWhere.push({ OR: [{ zoneId: { in: assigned } }, { createdById: actor.id }] })
     }
+    if (andWhere.length) where.AND = andWhere
     if (dateFrom || dateTo) {
       where.createdAt = {}
       if (dateFrom) where.createdAt.gte = new Date(dateFrom)
@@ -131,6 +139,7 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       switch (actor?.role) {
         case 'ADMIN':
         case 'MANAGER':
+        case 'SUPERVISOR':
           return true
         case 'SURVEYOR':
           return building.createdById === actor.id || assignedZoneIds.includes(building.zoneId)
@@ -385,7 +394,7 @@ export function createBuildingService({ buildingRepository, storage, userReposit
 
     async addPhoto(buildingId, { type, url }, user) {
       // Permission letters feed the legal permission record — surveyors may not set them.
-      if (type === 'PERMISSION_LETTER' && !['ADMIN', 'MANAGER'].includes(user?.role)) {
+      if (type === 'PERMISSION_LETTER' && !['ADMIN', 'MANAGER', 'SUPERVISOR'].includes(user?.role)) {
         throw ApiError.forbidden('Only admins or managers can upload permission letters')
       }
       const building = await buildingRepository.findById(buildingId)

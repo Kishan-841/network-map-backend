@@ -18,7 +18,7 @@ zoneRoutes.use(requireAuth)
 // acquisition team must never receive the coverage network layout.
 zoneRoutes.get(
   '/',
-  requireRole('ADMIN', 'MANAGER', 'SURVEYOR'),
+  requireRole('ADMIN', 'MANAGER', 'SURVEYOR', 'SUPERVISOR'),
   validateQuery(listZonesQuerySchema),
   zoneController.list,
 )

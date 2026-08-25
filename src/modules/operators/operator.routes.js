@@ -16,7 +16,7 @@ export const operatorRoutes = Router()
 operatorRoutes.use(requireAuth)
 operatorRoutes.get(
   '/',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN', 'MANAGER', 'SUPERVISOR'),
   validateQuery(listOperatorsQuerySchema),
   operatorController.list,
 )

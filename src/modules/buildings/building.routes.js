@@ -41,7 +41,7 @@ buildingRoutes.post(
 // Bulk go-live. Above /:id routes so 'bulk-status' is never read as an id.
 buildingRoutes.patch(
   '/bulk-status',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN', 'MANAGER', 'SUPERVISOR'),
   audit('Building', 'BulkStatusChange', {
     describe: (req, old, body) =>
       body?.data
@@ -57,7 +57,7 @@ buildingRoutes.get('/nearby', validateQuery(nearbyQuerySchema), buildingControll
 buildingRoutes.get('/:id', buildingController.get)
 buildingRoutes.patch(
   '/:id/status',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN', 'MANAGER', 'SUPERVISOR'),
   audit('Building', 'StatusChange', {
     load: (req) => buildingRepository.findById(req.params.id),
     describe: (req, old) => `Building '${old?.buildingName ?? req.params.id}' status changed`,
@@ -67,7 +67,7 @@ buildingRoutes.patch(
 )
 buildingRoutes.patch(
   '/:id',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN', 'MANAGER', 'SUPERVISOR'),
   audit('Building', 'Update', {
     load: (req) => buildingRepository.findById(req.params.id),
     describe: (req, old) => `Building '${old?.buildingName ?? req.params.id}' updated`,

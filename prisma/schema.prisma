@@ -15,6 +15,10 @@ enum Role {
   ACQUISITION_AGENT
   /// Runs the acquisition team: creates agents, tracks their output.
   ACQUISITION_LEAD
+  /// Oversight across BOTH registries: sees every building whoever logged it,
+  /// and may add or edit any of them. Not a system administrator — no user,
+  /// zone, operator or log management.
+  SUPERVISOR
 }
 
 enum FeasibleStatus {
