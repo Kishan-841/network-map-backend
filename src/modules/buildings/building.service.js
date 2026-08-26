@@ -1,5 +1,5 @@
 import { ApiError } from '../../lib/api-error.js'
-import { homePassTier } from '../../lib/home-pass-tier.js'
+import { homePassTier, HOME_PASS_TIERS } from '../../lib/home-pass-tier.js'
 import { haversineMeters, boundingBox } from '../../lib/geo.js'
 import { isSimilarName } from '../../lib/name-similarity.js'
 
@@ -72,6 +72,7 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       dateFrom,
       dateTo,
       search,
+      tier,
     } = filters
     const where = {}
     // --- Acquisition visibility: agents see ONLY their own rows; leads see
@@ -109,6 +110,19 @@ export function createBuildingService({ buildingRepository, storage, userReposit
     }
     if (status) where.feasibleStatus = status
     if (createdById && !where.createdById) where.createdById = createdById
+    // Tier is a home-pass range, resolved from the shared definition. Pushed
+    // into AND because `search` owns the top-level OR, and UNRATED is itself
+    // an OR (no details row at all, or a details row with no figure).
+    if (tier === 'UNRATED') {
+      andWhere.push({ OR: [{ details: { is: null } }, { details: { homePass: null } }] })
+    } else if (tier) {
+      const range = HOME_PASS_TIERS.find((t) => t.key === tier)
+      if (range) {
+        andWhere.push({
+          details: { homePass: { gte: range.min, ...(range.max !== null && { lte: range.max }) } },
+        })
+      }
+    }
     // Surveyors see their assigned zones plus their own buildings — via AND
     // because `search` below owns the top-level OR (spec 2026-08-14).
     if (actor?.role === 'SURVEYOR') {

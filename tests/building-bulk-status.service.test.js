@@ -89,3 +89,50 @@ describe('bulkSetLive', () => {
     expect(result.isLive).toBe(false)
   })
 })
+
+describe('tier filter', () => {
+  const whereFor = async (filters, actor = ADMIN) => {
+    const { repo, service } = build()
+    await service.bulkSetLive({ filter: filters, isLive: true }, actor)
+    return repo.updateMany.mock.calls[0][0]
+  }
+
+  it('turns a tier into its home-pass range', async () => {
+    expect((await whereFor({ tier: 'SILVER' })).AND).toEqual([
+      { details: { homePass: { gte: 201, lte: 500 } } },
+    ])
+  })
+
+  it('leaves the top tier open-ended', async () => {
+    expect((await whereFor({ tier: 'PLATINUM' })).AND).toEqual([
+      { details: { homePass: { gte: 1001 } } },
+    ])
+  })
+
+  it('matches unrated buildings with or without a details row', async () => {
+    expect((await whereFor({ tier: 'UNRATED' })).AND).toEqual([
+      { OR: [{ details: { is: null } }, { details: { homePass: null } }] },
+    ])
+  })
+
+  it('composes with a zone filter rather than replacing it', async () => {
+    const where = await whereFor({ tier: 'GOLD', zoneId: 'z1' })
+    expect(where.zoneId).toBe('z1')
+    expect(where.AND).toEqual([{ details: { homePass: { gte: 501, lte: 1000 } } }])
+  })
+
+  it('composes with the surveyor scope instead of overwriting it', async () => {
+    const { repo, service } = build(['z1'])
+    await service.bulkSetLive({ filter: { tier: 'BRONZE' }, isLive: true }, SURVEYOR)
+    // Both predicates survive — a surveyor filtering by tier still only ever
+    // touches their own zones.
+    // Order within an AND carries no meaning — assert both survive.
+    expect(repo.updateMany.mock.calls[0][0].AND).toEqual(
+      expect.arrayContaining([
+        { OR: [{ zoneId: { in: ['z1'] } }, { createdById: 's1' }] },
+        { details: { homePass: { gte: 1, lte: 200 } } },
+      ]),
+    )
+    expect(repo.updateMany.mock.calls[0][0].AND).toHaveLength(2)
+  })
+})

@@ -1,4 +1,9 @@
 import { z } from 'zod'
+import { HOME_PASS_TIERS } from '../../lib/home-pass-tier.js'
+
+// UNRATED is a filterable state too — "nobody has measured this yet" is a
+// worklist, not an absence.
+const tierSchema = z.enum([...HOME_PASS_TIERS.map((t) => t.key), 'UNRATED'])
 
 export const updateStatusSchema = z
   .object({
@@ -63,6 +68,7 @@ export const bulkStatusSchema = z
         dateFrom: z.string().date().optional(),
         dateTo: z.string().date().optional(),
         search: z.string().max(200).optional(),
+        tier: tierSchema.optional(),
       })
       .optional(),
   })
@@ -81,6 +87,7 @@ export const listQuerySchema = z.object({
   dateFrom: z.string().date().optional(),
   dateTo: z.string().date().optional(),
   search: z.string().max(200).optional(),
+  tier: tierSchema.optional(),
   latitude: z.coerce.number().min(-90).max(90).optional(),
   longitude: z.coerce.number().min(-180).max(180).optional(),
   radius: z.coerce.number().int().positive().max(50000).optional(),
