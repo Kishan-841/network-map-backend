@@ -1,3 +1,5 @@
+import { HOME_PASS_TIERS } from '../../lib/home-pass-tier.js'
+
 const FEASIBLE_STATUSES = ['FEASIBLE', 'PERMISSION_PENDING', 'REJECTED', 'SURVEY_PENDING']
 const OVER_TIME_DAYS = 30
 
@@ -30,6 +32,9 @@ export function createStatsService({ statsRepository, userRepository }) {
         permissionCost,
         operatorCount,
         zoneCount,
+        tierCounts,
+        tierHomePass,
+        unratedBuildings,
       ] = await Promise.all([
         statsRepository.countBuildings(where),
         statsRepository.countsByStatus(where),
@@ -41,7 +46,22 @@ export function createStatsService({ statsRepository, userRepository }) {
           ...(operatorId && { operatorId }),
           ...(cityId && { operator: { cityId } }),
         }),
+        // Size mix: how the estate splits across the home-pass tiers, and how
+        // much home pass sits in each — a handful of buildings in the top tier
+        // can outweigh everything below it, which a count alone would hide.
+        Promise.all(HOME_PASS_TIERS.map((tier) => statsRepository.countBuildingsInHomePassRange(where, tier))),
+        Promise.all(HOME_PASS_TIERS.map((tier) => statsRepository.sumHomePassInRange(where, tier))),
+        statsRepository.countBuildingsUnrated(where),
       ])
+
+      const byHomePassTier = HOME_PASS_TIERS.map((tier, i) => ({
+        key: tier.key,
+        label: tier.label,
+        min: tier.min,
+        max: tier.max,
+        buildings: tierCounts[i],
+        homePass: tierHomePass[i],
+      }))
 
       const byStatus = Object.fromEntries(FEASIBLE_STATUSES.map((status) => [status, 0]))
       for (const row of statusCounts) byStatus[row.feasibleStatus] = row._count._all
@@ -75,6 +95,8 @@ export function createStatsService({ statsRepository, userRepository }) {
         totalPermissionCost: Number(permissionCost ?? 0),
         operatorCount,
         zoneCount,
+        byHomePassTier,
+        unratedBuildings,
         byOperator: byOperator.map((row) => ({ ...row, homePass: Number(row.homePass) })),
         overTime,
       }

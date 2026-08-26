@@ -13,6 +13,9 @@ function fakeStatsRepo() {
     sumHomePass: async (where) => ((wheres.homePass = where), 10),
     sumPermissionCost: async (where) => ((wheres.cost = where), 0),
     countOperators: async () => 7,
+    countBuildingsInHomePassRange: async () => 0,
+    sumHomePassInRange: async () => 0,
+    countBuildingsUnrated: async () => 0,
     countZones: async (where) => ((wheres.zone = where), 42),
     buildingsByOperator: async () => {
       calls.byOperator++

@@ -21,6 +21,9 @@ describe('stats service', () => {
         sumHomePass: async () => 48,
         sumPermissionCost: async () => '5000.50', // Prisma Decimal serializes to string
         countOperators: async () => 4,
+        countBuildingsInHomePassRange: async () => 0,
+        sumHomePassInRange: async () => 0,
+        countBuildingsUnrated: async () => 0,
         countZones: async () => 12,
         buildingsByOperator: async () => [
           { operatorId: 'op1', name: 'Op1', buildings: 3, homePass: '48' },
@@ -40,6 +43,15 @@ describe('stats service', () => {
       zoneCount: 12,
       byOperator: [{ operatorId: 'op1', name: 'Op1', buildings: 3, homePass: 48 }],
       overTime: [{ date: '2026-08-01', count: 3 }],
+      // Size mix — one row per tier, always all four so the chart never
+      // reshuffles when a tier happens to be empty.
+      byHomePassTier: [
+        { key: 'BRONZE', label: 'Bronze', min: 1, max: 200, buildings: 0, homePass: 0 },
+        { key: 'SILVER', label: 'Silver', min: 201, max: 500, buildings: 0, homePass: 0 },
+        { key: 'GOLD', label: 'Gold', min: 501, max: 1000, buildings: 0, homePass: 0 },
+        { key: 'PLATINUM', label: 'Platinum', min: 1001, max: null, buildings: 0, homePass: 0 },
+      ],
+      unratedBuildings: 0,
     })
   })
 
@@ -52,6 +64,12 @@ describe('stats service', () => {
         sumHomePass: async () => null,
         sumPermissionCost: async () => null,
         countOperators: async () => 0,
+        countBuildingsInHomePassRange: async () => 0,
+        sumHomePassInRange: async () => 0,
+        countBuildingsUnrated: async () => 0,
+    countBuildingsInHomePassRange: async () => 0,
+    sumHomePassInRange: async () => 0,
+    countBuildingsUnrated: async () => 0,
         countZones: async () => 0,
         buildingsByOperator: async () => [],
         buildingsOverTime: async () => [],

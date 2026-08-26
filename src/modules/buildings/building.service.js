@@ -1,4 +1,5 @@
 import { ApiError } from '../../lib/api-error.js'
+import { homePassTier } from '../../lib/home-pass-tier.js'
 import { haversineMeters, boundingBox } from '../../lib/geo.js'
 import { isSimilarName } from '../../lib/name-similarity.js'
 
@@ -23,6 +24,14 @@ export function createBuildingService({ buildingRepository, storage, userReposit
    * that leaves this service can be opened by anyone who merely has the URL.
    * Applied only where photos are actually included (list rows carry none).
    */
+  /**
+   * Home-pass tier travels with the row, derived not stored — a stored copy
+   * would drift the moment a tier boundary moved, and it is the API that owns
+   * the definition, not each client.
+   */
+  const withTier = (building) =>
+    building && { ...building, homePassTier: homePassTier(building.details?.homePass) }
+
   const signOne = async (url) => (storage?.readUrl && url ? storage.readUrl(url) : url)
 
   async function signUrls(building) {
@@ -271,14 +280,17 @@ export function createBuildingService({ buildingRepository, storage, userReposit
           (b) => haversineMeters(latitude, longitude, b.latitude, b.longitude) <= radius,
         )
         const start = (page - 1) * pageSize
-        return { items: filtered.slice(start, start + pageSize), pagination: paginate(filtered.length) }
+        return {
+          items: filtered.slice(start, start + pageSize).map(withTier),
+          pagination: paginate(filtered.length),
+        }
       }
 
       const [total, items] = await Promise.all([
         buildingRepository.count(where),
         buildingRepository.list(where, { skip: (page - 1) * pageSize, take: pageSize }),
       ])
-      return { items, pagination: paginate(total) }
+      return { items: items.map(withTier), pagination: paginate(total) }
     },
 
     async getBuilding(id, actor) {
@@ -287,7 +299,7 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       // 404 (not 403) for out-of-scope buildings: don't leak existence.
       const canRead = await readScope(actor)
       if (!canRead(building)) throw ApiError.notFound('Building not found')
-      return signUrls(building)
+      return signUrls(withTier(building))
     },
 
     async updateBuilding(id, { details, permission, ...building }) {

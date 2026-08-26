@@ -86,7 +86,8 @@ describe('building service listBuildings filters', () => {
 
     const listCall = repo.calls.find((c) => c.options)
     expect(listCall.options).toEqual({ skip: 40, take: 20 })
-    expect(result.items).toEqual(rows)
+    // Rows come back decorated with their derived home-pass tier.
+    expect(result.items).toEqual(rows.map((r) => ({ ...r, homePassTier: null })))
     expect(result.pagination).toEqual({ page: 3, pageSize: 20, total: 45, totalPages: 3 })
   })
 
