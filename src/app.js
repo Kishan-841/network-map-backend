@@ -17,6 +17,7 @@ import { cityRoutes } from './modules/cities/city.routes.js'
 import { fiberRouteRoutes } from './modules/fiber-routes/fiber-route.routes.js'
 import { partnerAuthRoutes } from './modules/partner-auth/partner-auth.routes.js'
 import { inviteRoutes } from './modules/partner-invites/invite.routes.js'
+import { partnerSelfRoutes, partnerAdminRoutes } from './modules/partners/partner.routes.js'
 
 export function createApp() {
   const app = express()
@@ -39,6 +40,8 @@ export function createApp() {
   // External partners — a separate auth surface with its own token audience.
   app.use('/api/v1/partner-auth', partnerAuthRoutes)
   app.use('/api/v1/partner-invites', inviteRoutes)
+  app.use('/api/v1/partner', partnerSelfRoutes)
+  app.use('/api/v1/partners', partnerAdminRoutes)
   app.use('/api/v1/users', userRoutes)
   app.use('/api/v1/zones', zoneRoutes)
   app.use('/api/v1/buildings', buildingRoutes)
