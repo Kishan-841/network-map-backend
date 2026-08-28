@@ -26,6 +26,15 @@ export const env = {
   },
   partnerInviteTtlDays: Number(process.env.PARTNER_INVITE_TTL_DAYS ?? 7),
   partnerJwtExpiresIn: process.env.PARTNER_JWT_EXPIRES_IN ?? '30d',
+  /**
+   * Where the BROWSER app lives — not APP_URL, which is this API. Partner
+   * invite links are opened by a person, so they must point at the site.
+   * Falls back to the first CORS origin, which is already the front end.
+   */
+  webUrl:
+    process.env.WEB_URL ??
+    (process.env.CORS_ORIGIN ?? '').split(',')[0].trim().replace(/\*$/, '') ??
+    'http://localhost:3000',
   r2: {
     // Endpoint: explicit R2_ENDPOINT, or derived from the account id.
     endpoint:

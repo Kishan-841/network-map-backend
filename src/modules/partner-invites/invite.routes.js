@@ -35,7 +35,7 @@ inviteRoutes.post(
       const invite = await inviteService.createInvite({ employeeId: req.user.id })
       res.status(201).json({
         success: true,
-        data: { ...invite, url: `${env.appUrl}/partner/join/${invite.token}` },
+        data: { ...invite, url: `${env.webUrl}/partner/join/${invite.token}` },
       })
     } catch (err) {
       next(err)
