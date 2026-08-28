@@ -81,6 +81,7 @@ model User {
   /// Partner network — see partner-network.md
   partnersOnboarded Partner[]       @relation("PartnerOnboardedBy")
   partnerInvites    PartnerInvite[] @relation("PartnerInvitesIssued")
+  leadsAttributed   Lead[]          @relation("LeadEmployee")
 }
 
 /// One row per pincode an acquisition agent covers (within one city).
@@ -189,6 +190,7 @@ model Building {
 
   @@index([latitude, longitude])
   @@index([source, createdById])
+  leads            Lead[]
 }
 
 model BuildingDetails {
@@ -326,8 +328,10 @@ model Partner {
   approvedAt      DateTime?
   rejectionReason String?
 
-  documents PartnerDocument[]
-  invite    PartnerInvite?
+  documents        PartnerDocument[]
+  invite           PartnerInvite?
+  leads            Lead[]
+  coverageRequests CoverageRequest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -377,4 +381,86 @@ model OtpChallenge {
   createdAt  DateTime  @default(now())
 
   @@index([identifier, createdAt])
+}
+
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  INTERESTED
+  CONVERTED
+  NOT_INTERESTED
+  UNREACHABLE
+  /// Someone else referred this customer first; the original keeps the claim.
+  DUPLICATE
+}
+
+/// A potential customer referred by a partner.
+model Lead {
+  id String @id @default(cuid())
+
+  partnerId String
+  partner   Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  /// SNAPSHOT of the partner's employee at the moment of referral. Not a
+  /// live lookup: re-assigning a partner later must never rewrite who
+  /// earned the leads they already sent.
+  employeeId String?
+  employee   User?   @relation("LeadEmployee", fields: [employeeId], references: [id], onDelete: SetNull)
+
+  /// The building we matched, when we hold one.
+  buildingId String?
+  building   Building? @relation(fields: [buildingId], references: [id], onDelete: SetNull)
+
+  customerName   String
+  customerMobile String
+  customerEmail  String?
+  address        String?
+  note           String?
+
+  status          LeadStatus @default(NEW)
+  duplicateOfId   String?
+  duplicateOf     Lead?      @relation("LeadDuplicate", fields: [duplicateOfId], references: [id], onDelete: SetNull)
+  duplicates      Lead[]     @relation("LeadDuplicate")
+
+  events    LeadStatusEvent[]
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@index([partnerId])
+  @@index([employeeId])
+  @@index([status])
+  @@index([customerMobile])
+}
+
+/// Every status change, with who and when. Commission may one day depend on
+/// CONVERTED, and that history cannot be reconstructed after the fact.
+model LeadStatusEvent {
+  id         String     @id @default(cuid())
+  leadId     String
+  lead       Lead       @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  fromStatus LeadStatus?
+  toStatus   LeadStatus
+  byUserId   String?
+  note       String?
+  createdAt  DateTime   @default(now())
+
+  @@index([leadId])
+}
+
+/// A building a partner asked about that we could not serve. Not a lead —
+/// a demand signal for network planning.
+model CoverageRequest {
+  id                String   @id @default(cuid())
+  partnerId         String?
+  partner           Partner? @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+  placeId           String?
+  name              String?
+  latitude          Float
+  longitude         Float
+  matchedBuildingId String?
+  createdAt         DateTime @default(now())
+
+  @@index([placeId])
+  @@index([createdAt])
 }

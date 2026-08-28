@@ -47,3 +47,17 @@ export const otpRequestLimiter = rateLimit({
   skip: () => process.env.NODE_ENV === 'test',
   handler: (req, res) => json(res, 'Too many code requests. Try again in a few minutes.'),
 })
+
+/**
+ * A partner asking "can you serve this building?" is legitimate. Asking it
+ * across a grid of coordinates is downloading our coverage map, so the
+ * feasibility check is capped well above honest use and far below scraping.
+ */
+export const feasibilityLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
+  handler: (req, res) => json(res, 'Too many checks. Try again in a few minutes.'),
+})
