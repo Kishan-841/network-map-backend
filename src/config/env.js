@@ -15,6 +15,16 @@ export const env = {
   appUrl: process.env.APP_URL ?? 'http://localhost:4000',
   uploadsDir: process.env.UPLOADS_DIR ?? 'uploads',
   storageDriver: process.env.STORAGE_DRIVER ?? 'local',
+  // Partner network. `console` prints the mail instead of sending it, so the
+  // OTP flow is fully testable without a provider account.
+  mailDriver: process.env.MAIL_DRIVER ?? 'console',
+  mailFrom: process.env.MAIL_FROM ?? 'no-reply@ispcoverage.local',
+  otp: {
+    ttlMinutes: Number(process.env.OTP_TTL_MINUTES ?? 5),
+    maxAttempts: Number(process.env.OTP_MAX_ATTEMPTS ?? 5),
+    resendCooldownSeconds: Number(process.env.OTP_RESEND_COOLDOWN ?? 60),
+  },
+  partnerInviteTtlDays: Number(process.env.PARTNER_INVITE_TTL_DAYS ?? 7),
   r2: {
     // Endpoint: explicit R2_ENDPOINT, or derived from the account id.
     endpoint:
