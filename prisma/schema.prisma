@@ -77,6 +77,10 @@ model User {
   assignedZones Zone[]    @relation("UserAssignedZones")
   /// City + pincodes an ACQUISITION_AGENT covers; unused for other roles.
   pincodes     UserPincode[]
+
+  /// Partner network — see partner-network.md
+  partnersOnboarded Partner[]       @relation("PartnerOnboardedBy")
+  partnerInvites    PartnerInvite[] @relation("PartnerInvitesIssued")
 }
 
 /// One row per pincode an acquisition agent covers (within one city).
@@ -264,4 +268,113 @@ model SystemLog {
   @@index([createdAt])
   @@index([userId])
   @@index([module, action])
+}
+
+
+// ---------------------------------------------------------------------------
+// Partner network — external referral partners recruited by our employees.
+// Deliberately separate from User: different identity, different auth,
+// different lifecycle, commercial terms later. See partner-network.md §2.2.
+// ---------------------------------------------------------------------------
+
+enum PartnerType {
+  AGENT
+  SOCIETY_REPRESENTATIVE
+  RETAIL_SHOP
+  DSA
+}
+
+enum PartnerStatus {
+  /// Account created, documents not uploaded yet.
+  REGISTERED
+  /// Documents in, waiting on an admin.
+  PENDING_APPROVAL
+  /// Cleared — the only state that may create leads.
+  APPROVED
+  /// Turned away with a reason; may re-upload.
+  REJECTED
+  /// Switched off by an admin; cannot even sign in.
+  SUSPENDED
+}
+
+enum PartnerDocumentType {
+  AADHAAR
+  PAN
+  GST
+}
+
+model Partner {
+  id           String        @id @default(cuid())
+  name         String
+  type         PartnerType
+  /// Company / society / shop / firm name, depending on the type.
+  companyName  String?
+  mobile       String
+  email        String        @unique
+  passwordHash String
+  status       PartnerStatus @default(REGISTERED)
+  /// Set by the partner at onboarding; makes the GST document required.
+  hasGst       Boolean       @default(false)
+
+  /// The employee who recruited them. Commission will depend on this, so it
+  /// is recorded whether it came from an invite link or an admin mapping.
+  onboardedById String?
+  onboardedBy   User?    @relation("PartnerOnboardedBy", fields: [onboardedById], references: [id], onDelete: SetNull)
+  onboardedAt   DateTime @default(now())
+
+  approvedById    String?
+  approvedAt      DateTime?
+  rejectionReason String?
+
+  documents PartnerDocument[]
+  invite    PartnerInvite?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([onboardedById])
+}
+
+model PartnerDocument {
+  id         String              @id @default(cuid())
+  partnerId  String
+  partner    Partner             @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  type       PartnerDocumentType
+  url        String
+  uploadedAt DateTime            @default(now())
+
+  /// One current document of each type per partner; re-upload replaces it.
+  @@unique([partnerId, type])
+}
+
+/// A one-use invite link. The token is stored HASHED — a leaked database
+/// dump must not hand anyone a working invite.
+model PartnerInvite {
+  id         String    @id @default(cuid())
+  tokenHash  String    @unique
+  employeeId String
+  employee   User      @relation("PartnerInvitesIssued", fields: [employeeId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  usedAt     DateTime?
+  usedById   String?   @unique
+  usedBy     Partner?  @relation(fields: [usedById], references: [id], onDelete: SetNull)
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([employeeId])
+}
+
+/// A pending one-time code: hashed, short-lived, attempt-capped.
+model OtpChallenge {
+  id         String    @id @default(cuid())
+  identifier String
+  channel    String
+  codeHash   String
+  expiresAt  DateTime
+  attempts   Int       @default(0)
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([identifier, createdAt])
 }
