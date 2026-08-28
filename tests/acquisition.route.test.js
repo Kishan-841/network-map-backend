@@ -14,7 +14,7 @@ const ownedUrl = (name) => {
   return probe ? `/uploads/${name}` : `${process.env.R2_PUBLIC_URL}/${name}`
 }
 
-const token = (user) => jwt.sign({ sub: user.id, role: user.role }, env.jwtSecret, { expiresIn: '1h' })
+const token = (user) => jwt.sign({ sub: user.id, role: user.role }, env.jwtSecret, { audience: 'staff', expiresIn: '1h' })
 const auth = (user) => ['Authorization', `Bearer ${token(user)}`]
 
 describe('acquisition team end-to-end', () => {

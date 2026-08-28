@@ -5,6 +5,7 @@ import { createApp } from '../src/app.js'
 import { env } from '../src/config/env.js'
 
 const adminToken = jwt.sign({ sub: 'test-admin', role: 'ADMIN' }, env.jwtSecret, {
+  audience: 'staff',
   expiresIn: '1h',
 })
 const get = (url) => request(createApp()).get(url).set('Authorization', `Bearer ${adminToken}`)

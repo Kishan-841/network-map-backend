@@ -6,7 +6,7 @@ import { env } from '../src/config/env.js'
 import { prisma } from '../src/lib/prisma.js'
 
 const tokenFor = (role) =>
-  jwt.sign({ sub: `test-${role.toLowerCase()}`, role }, env.jwtSecret, { expiresIn: '1h' })
+  jwt.sign({ sub: `test-${role.toLowerCase()}`, role }, env.jwtSecret, { audience: 'staff', expiresIn: '1h' })
 
 describe('operators API', () => {
   it('lists operators for MANAGER, blocks SURVEYOR', async () => {

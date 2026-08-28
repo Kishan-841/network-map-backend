@@ -10,7 +10,10 @@ export async function requireAuth(req, res, next) {
 
   let payload
   try {
-    payload = jwt.verify(token, env.jwtSecret)
+    // audience:'staff' — a PARTNER token fails here at signature
+    // verification rather than at a role check further in. The two token
+    // families are structurally incompatible, not merely policed.
+    payload = jwt.verify(token, env.jwtSecret, { audience: 'staff' })
   } catch {
     return next(ApiError.unauthorized('Invalid or expired token'))
   }

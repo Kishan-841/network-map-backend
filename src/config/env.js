@@ -25,6 +25,7 @@ export const env = {
     resendCooldownSeconds: Number(process.env.OTP_RESEND_COOLDOWN ?? 60),
   },
   partnerInviteTtlDays: Number(process.env.PARTNER_INVITE_TTL_DAYS ?? 7),
+  partnerJwtExpiresIn: process.env.PARTNER_JWT_EXPIRES_IN ?? '30d',
   r2: {
     // Endpoint: explicit R2_ENDPOINT, or derived from the account id.
     endpoint:

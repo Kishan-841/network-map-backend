@@ -24,3 +24,26 @@ export const uploadLimiter = rateLimit({
   skip: () => process.env.NODE_ENV === 'test',
   handler: (req, res) => json(res, 'Too many uploads. Slow down and try again shortly.'),
 })
+
+/**
+ * Partner sign-in. Separate bucket from staff login so a busy partner
+ * channel cannot lock our own team out.
+ */
+export const partnerLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
+  handler: (req, res) => json(res, 'Too many attempts. Try again in a few minutes.'),
+})
+
+/** OTP requests send real email on our account — kept deliberately tight. */
+export const otpRequestLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
+  handler: (req, res) => json(res, 'Too many code requests. Try again in a few minutes.'),
+})

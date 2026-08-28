@@ -6,7 +6,7 @@ import { env } from '../src/config/env.js'
 import { prisma } from '../src/lib/prisma.js'
 
 const tokenFor = (role) =>
-  jwt.sign({ sub: `test-${role.toLowerCase()}`, role }, env.jwtSecret, { expiresIn: '1h' })
+  jwt.sign({ sub: `test-${role.toLowerCase()}`, role }, env.jwtSecret, { audience: 'staff', expiresIn: '1h' })
 
 describe('POST /buildings/bulk', () => {
   it('is ADMIN-only', async () => {
@@ -23,7 +23,7 @@ describe('POST /buildings/bulk', () => {
     const stamp = Date.now()
     const app = createApp()
     const admin = await prisma.user.findFirst({ where: { role: 'ADMIN' } })
-    const token = jwt.sign({ sub: admin.id, role: 'ADMIN' }, env.jwtSecret, { expiresIn: '1h' })
+    const token = jwt.sign({ sub: admin.id, role: 'ADMIN' }, env.jwtSecret, { audience: 'staff', expiresIn: '1h' })
     const rows = [
       {
         buildingName: `BulkBldg-${stamp}`,

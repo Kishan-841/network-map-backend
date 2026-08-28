@@ -15,6 +15,7 @@ import { systemLogRoutes } from './modules/system-logs/system-log.routes.js'
 import { operatorRoutes } from './modules/operators/operator.routes.js'
 import { cityRoutes } from './modules/cities/city.routes.js'
 import { fiberRouteRoutes } from './modules/fiber-routes/fiber-route.routes.js'
+import { partnerAuthRoutes } from './modules/partner-auth/partner-auth.routes.js'
 
 export function createApp() {
   const app = express()
@@ -34,6 +35,8 @@ export function createApp() {
   })
 
   app.use('/api/v1/auth', authRoutes)
+  // External partners — a separate auth surface with its own token audience.
+  app.use('/api/v1/partner-auth', partnerAuthRoutes)
   app.use('/api/v1/users', userRoutes)
   app.use('/api/v1/zones', zoneRoutes)
   app.use('/api/v1/buildings', buildingRoutes)

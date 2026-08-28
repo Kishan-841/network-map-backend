@@ -12,7 +12,7 @@ vi.hoisted(() => {
 const { createApp } = await import('../src/app.js')
 const { env } = await import('../src/config/env.js')
 
-const token = jwt.sign({ sub: 'test-user', role: 'SURVEYOR' }, env.jwtSecret, { expiresIn: '1h' })
+const token = jwt.sign({ sub: 'test-user', role: 'SURVEYOR' }, env.jwtSecret, { audience: 'staff', expiresIn: '1h' })
 
 describe('POST /api/v1/uploads', () => {
   afterAll(() => rm('uploads', { recursive: true, force: true }))
