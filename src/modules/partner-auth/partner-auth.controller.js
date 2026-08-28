@@ -1,14 +1,13 @@
 import { createPartnerAuthService } from './partner-auth.service.js'
 import { partnerAuthRepository, otpRepository } from './partner-auth.repository.js'
 import { getMailer } from '../../lib/mailer/index.js'
+import { inviteService } from '../partner-invites/invite.service.js'
 
 const service = createPartnerAuthService({
   partnerRepository: partnerAuthRepository,
   otpRepository,
   mailer: getMailer(),
-  // Wired in Task 5. Until then an invite token is accepted and ignored:
-  // the partner still gets an account, just unattributed.
-  inviteService: undefined,
+  inviteService,
 })
 
 const handle = (fn) => async (req, res, next) => {
