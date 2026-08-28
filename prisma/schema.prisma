@@ -19,6 +19,9 @@ enum Role {
   /// and may add or edit any of them. Not a system administrator — no user,
   /// zone, operator or log management.
   SUPERVISOR
+  /// Recruits and supports external referral partners. No building, zone or
+  /// operator access at all — see partner-network.md §2.1.
+  PARTNER_MANAGER
 }
 
 enum FeasibleStatus {
