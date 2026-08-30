@@ -6,19 +6,30 @@ import { inviteRepository } from './invite.repository.js'
 import { env } from '../../config/env.js'
 import { ApiError } from '../../lib/api-error.js'
 
+/** Loopback only: http://localhost:3001, http://127.0.0.1:3000, … */
+const LOOPBACK_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/
+
 /**
  * Where the invite link should point.
  *
- * An explicit WEB_URL always wins — that is the production answer. Otherwise
- * fall back to the origin the employee is browsing from, which makes local
- * development work on whatever port Next happened to pick without anyone
- * having to remember a config value. Safe because the link is only ever shown
- * back to the employee who asked for it.
+ * This link carries a live invite token and is copied by an employee and sent
+ * to an outsider, so its base must never be attacker-influenceable:
+ *
+ *  - WEB_URL, when set, always wins. That is the production answer, and in
+ *    production nothing else is consulted.
+ *  - Outside production only, a LOOPBACK origin is accepted, so development
+ *    works on whatever port Next picked without anyone remembering a config
+ *    value. A real attacker origin is a routable domain, not localhost.
+ *  - Otherwise the configured fallback.
+ *
+ * A request header alone is not trusted input for this.
  */
-function inviteBaseUrl(req) {
+export function inviteBaseUrl(req, { nodeEnv = process.env.NODE_ENV } = {}) {
   if (process.env.WEB_URL) return process.env.WEB_URL
-  const origin = req.get('origin')
-  if (origin) return origin.replace(/\/$/, '')
+  if (nodeEnv !== 'production') {
+    const origin = (req.get?.('origin') ?? '').replace(/\/$/, '')
+    if (LOOPBACK_ORIGIN.test(origin)) return origin
+  }
   return env.webUrl
 }
 
