@@ -31,9 +31,12 @@ export const env = {
    * invite links are opened by a person, so they must point at the site.
    * Falls back to the first CORS origin, which is already the front end.
    */
+  // `||` not `??`: CORS_ORIGIN is '*' in development, which strips to an
+  // empty string — and an empty string is not nullish, so `??` would have
+  // handed out links with no host at all.
   webUrl:
-    process.env.WEB_URL ??
-    (process.env.CORS_ORIGIN ?? '').split(',')[0].trim().replace(/\*$/, '') ??
+    process.env.WEB_URL ||
+    (process.env.CORS_ORIGIN ?? '').split(',')[0].trim().replace(/\*/g, '') ||
     'http://localhost:3000',
   r2: {
     // Endpoint: explicit R2_ENDPOINT, or derived from the account id.

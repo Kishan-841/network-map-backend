@@ -6,6 +6,22 @@ import { inviteRepository } from './invite.repository.js'
 import { env } from '../../config/env.js'
 import { ApiError } from '../../lib/api-error.js'
 
+/**
+ * Where the invite link should point.
+ *
+ * An explicit WEB_URL always wins — that is the production answer. Otherwise
+ * fall back to the origin the employee is browsing from, which makes local
+ * development work on whatever port Next happened to pick without anyone
+ * having to remember a config value. Safe because the link is only ever shown
+ * back to the employee who asked for it.
+ */
+function inviteBaseUrl(req) {
+  if (process.env.WEB_URL) return process.env.WEB_URL
+  const origin = req.get('origin')
+  if (origin) return origin.replace(/\/$/, '')
+  return env.webUrl
+}
+
 export const inviteRoutes = Router()
 
 const MANAGES_PARTNERS = ['ADMIN', 'PARTNER_MANAGER']
@@ -35,7 +51,7 @@ inviteRoutes.post(
       const invite = await inviteService.createInvite({ employeeId: req.user.id })
       res.status(201).json({
         success: true,
-        data: { ...invite, url: `${env.webUrl}/partner/join/${invite.token}` },
+        data: { ...invite, url: `${inviteBaseUrl(req)}/partner/join/${invite.token}` },
       })
     } catch (err) {
       next(err)
