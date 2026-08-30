@@ -1,7 +1,22 @@
 import { haversineMeters, boundingBox } from '../../lib/geo.js'
 
-/** How close a pin has to be to count as the same building. */
+/**
+ * How close a pin has to be to count as the same building. Google's
+ * coordinate for a society is often the gate or the centroid, tens of metres
+ * from where our surveyor stood.
+ */
 const MATCH_RADIUS_METERS = 150
+
+/**
+ * What "we can serve this" means.
+ *
+ * NOT isLive. isLive means the fibre is lit TODAY — in the current registry
+ * that is 2 buildings out of 72, while 71 are FEASIBLE. Keying the answer off
+ * isLive told partners "not available" for seventy buildings our own
+ * surveyors had already confirmed we can serve, which is the opposite of the
+ * point. Feasibility is the survey verdict, and it is the right signal.
+ */
+const isServiceable = (building) => building?.feasibleStatus === 'FEASIBLE'
 
 export function createFeasibilityService({ buildingRepository, demandRepository }) {
   return {
@@ -20,14 +35,18 @@ export function createFeasibilityService({ buildingRepository, demandRepository 
       if (!match) {
         const box = boundingBox(latitude, longitude, MATCH_RADIUS_METERS)
         const nearby = await buildingRepository.findWithinBounds(box)
-        match =
-          nearby
-            .map((b) => ({ b, d: haversineMeters(latitude, longitude, b.latitude, b.longitude) }))
-            .filter(({ d }) => d <= MATCH_RADIUS_METERS)
-            .sort((x, y) => x.d - y.d)[0]?.b ?? null
+        const inRange = nearby
+          .map((b) => ({ b, d: haversineMeters(latitude, longitude, b.latitude, b.longitude) }))
+          .filter(({ d }) => d <= MATCH_RADIUS_METERS)
+          .sort((x, y) => x.d - y.d)
+
+        // A serviceable building in range beats a merely nearer one. Towers of
+        // the same complex sit metres apart; picking the closest pin was
+        // reporting "not available" for a society whose neighbour we serve.
+        match = (inRange.find(({ b }) => isServiceable(b)) ?? inRange[0])?.b ?? null
       }
 
-      if (match?.isLive) return { verdict: 'SERVICEABLE' }
+      if (isServiceable(match)) return { verdict: 'SERVICEABLE' }
 
       // Everything we cannot serve is worth knowing about: "fourteen people
       // asked about this society" is real input to network planning, and it

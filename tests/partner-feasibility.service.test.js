@@ -8,7 +8,11 @@ const live = {
   details: { homePass: 120 }, zone: { name: 'Zone A' },
   createdBy: { name: 'Rahul Surveyor' },
 }
-const notLive = { ...live, id: 'b2', placeId: 'place-2', isLive: false, buildingName: 'Pending Towers' }
+// Surveyed and viable, just not lit yet — still a good lead.
+const feasibleNotLive = { ...live, id: 'b2', placeId: 'place-2', isLive: false, buildingName: 'Feasible Towers' }
+// Surveyed and turned down — this is what "we cannot serve it" means.
+const rejected = { ...live, id: 'b3', placeId: 'place-3', isLive: false, feasibleStatus: 'REJECTED', buildingName: 'Rejected Block' }
+const notLive = rejected
 
 const svc = (buildings, demand) =>
   createFeasibilityService({
@@ -26,8 +30,25 @@ describe('the verdict', () => {
     expect((await svc([live]).check(at(live), 'p1')).verdict).toBe('SERVICEABLE')
   })
 
-  it('is NOT_SERVICEABLE for one we hold but do not serve', async () => {
-    expect((await svc([notLive]).check(at(notLive), 'p1')).verdict).toBe('NOT_SERVICEABLE')
+  it('is SERVICEABLE for a feasible building that is not lit yet', async () => {
+    // 71 of 72 real buildings are FEASIBLE and only 2 are live — keying this
+    // off isLive told partners "not available" for almost everything.
+    expect((await svc([feasibleNotLive]).check(at(feasibleNotLive), 'p1')).verdict).toBe(
+      'SERVICEABLE',
+    )
+  })
+
+  it('is NOT_SERVICEABLE for one we surveyed and turned down', async () => {
+    expect((await svc([rejected]).check(at(rejected), 'p1')).verdict).toBe('NOT_SERVICEABLE')
+  })
+
+  it('prefers a serviceable neighbour over a merely nearer unserviceable one', async () => {
+    // Same complex: the rejected block sits closer to the dropped pin than the
+    // feasible tower we actually serve.
+    const near = { ...rejected, latitude: 18.5200, longitude: 73.8500 }
+    const far = { ...feasibleNotLive, latitude: 18.5203, longitude: 73.8500 }
+    const out = await svc([near, far]).check({ latitude: 18.52, longitude: 73.85 }, 'p1')
+    expect(out.verdict).toBe('SERVICEABLE')
   })
 
   it('is NOT_SURVEYED when we hold nothing there', async () => {
