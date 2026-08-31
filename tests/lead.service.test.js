@@ -70,7 +70,9 @@ describe('a partner only ever sees their own leads', () => {
 describe('staff moving a lead along', () => {
   it('writes an event with the old and new status', async () => {
     const d = deps()
-    await createLeadService(d).changeStatus('l1', 'CONTACTED', 'user9', 'called them')
+    await createLeadService(d).changeStatus(
+      'l1', 'CONTACTED', { id: 'user9', role: 'ADMIN' }, 'called them',
+    )
     expect(d.leadRepository.recordEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         leadId: 'l1', fromStatus: 'NEW', toStatus: 'CONTACTED', byUserId: 'user9',
@@ -80,7 +82,7 @@ describe('staff moving a lead along', () => {
 
   it('rejects a status we do not have', async () => {
     await expect(
-      createLeadService(deps()).changeStatus('l1', 'WIZARD', 'user9'),
+      createLeadService(deps()).changeStatus('l1', 'WIZARD', { id: 'user9', role: 'ADMIN' }),
     ).rejects.toMatchObject({ status: 400 })
   })
 })

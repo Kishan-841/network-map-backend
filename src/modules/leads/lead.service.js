@@ -38,17 +38,31 @@ export function createLeadService({ leadRepository }) {
 
     listForPartner: (partnerId) => leadRepository.listByPartner(partnerId),
 
-    async changeStatus(leadId, toStatus, byUserId, note) {
+    /**
+     * Move a lead along.
+     *
+     * `actor` is the staff user, not an id: a partner manager may only work
+     * leads from the partners THEY onboarded, which is the same boundary the
+     * list enforces. Applied here too, because otherwise any employee could
+     * reach any lead by guessing an id.
+     *
+     * Out of scope answers 404, not 403 — someone else's lead should not be
+     * confirmed to exist.
+     */
+    async changeStatus(leadId, toStatus, actor, note) {
       if (!LEAD_STATUSES.includes(toStatus)) throw ApiError.badRequest('Unknown lead status')
+
       const lead = await leadRepository.findById(leadId)
-      if (!lead) throw ApiError.notFound('Lead not found')
+      const missing = () => ApiError.notFound('Lead not found')
+      if (!lead) throw missing()
+      if (actor?.role === 'PARTNER_MANAGER' && lead.employeeId !== actor.id) throw missing()
 
       const updated = await leadRepository.update(leadId, { status: toStatus })
       await leadRepository.recordEvent({
         leadId,
         fromStatus: lead.status,
         toStatus,
-        byUserId,
+        byUserId: actor?.id ?? null,
         note: note ?? null,
       })
       return updated

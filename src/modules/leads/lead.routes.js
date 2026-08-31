@@ -150,13 +150,15 @@ staffLeadRoutes.get('/', async (req, res, next) => {
 
 staffLeadRoutes.patch(
   '/:id/status',
-  requireRole('ADMIN', 'MANAGER', 'SUPERVISOR'),
+  // A partner manager works their own partners' leads; the service enforces
+  // which ones those are.
+  requireRole('ADMIN', 'MANAGER', 'SUPERVISOR', 'PARTNER_MANAGER'),
   audit('Lead', 'StatusChange', { describe: (req) => `Lead ${req.params.id} → ${req.body?.status}` }),
   validateBody(statusSchema),
   async (req, res, next) => {
     try {
       const lead = await leadService.changeStatus(
-        req.params.id, req.body.status, req.user.id, req.body.note,
+        req.params.id, req.body.status, req.user, req.body.note,
       )
       res.json({ success: true, data: { id: lead.id, status: lead.status } })
     } catch (err) {
