@@ -1,20 +1,18 @@
-import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { ApiError } from '../../lib/api-error.js'
 import { env } from '../../config/env.js'
-import { generateOtp, hashOtp, verifyOtp } from '../../lib/otp.js'
+import { generateOtp, hashOtp, verifyOtp as bcryptVerifyOtp } from '../../lib/otp.js'
 
-const BCRYPT_ROUNDS = 10
+// Indian mobile: 10 digits, never starting 0-5.
+const MOBILE = /^[6-9][0-9]{9}$/
 
-/** Never let a password hash out of this module. */
+/** Never let internal columns out of this module. */
 const toPublicPartner = ({ passwordHash, ...rest }) => rest
 
 /**
- * Partner tokens carry `aud: 'partner'`. Staff tokens carry `aud: 'staff'`.
- * The two are then structurally incompatible: a partner token does not fail
- * a role check on a staff route, it fails signature verification. That is a
- * far stronger guarantee than a check somebody has to remember to write —
- * which is exactly what drifted in the August audit.
+ * Partner tokens carry `aud: 'partner'`; staff tokens carry `aud: 'staff'`.
+ * A partner token presented on a staff route fails signature verification
+ * rather than a role check — structurally incompatible, not merely policed.
  */
 const signPartnerToken = (partner) =>
   jwt.sign({ sub: partner.id }, env.jwtSecret, {
@@ -22,94 +20,121 @@ const signPartnerToken = (partner) =>
     expiresIn: env.partnerJwtExpiresIn,
   })
 
-export function createPartnerAuthService({ partnerRepository, otpRepository, mailer, inviteService }) {
-  // ONE message for every credential failure. Distinguishing "no such
-  // account" from "wrong password" turns the endpoint into a directory of
-  // who our partners are.
-  const badCredentials = () => ApiError.unauthorized('Invalid email or password')
+/**
+ * Proof that THIS number just passed an OTP. Short-lived and bound to the
+ * number, so a signup cannot be completed for someone else's mobile.
+ */
+const signSignupToken = (mobile) =>
+  jwt.sign({ mobile }, env.jwtSecret, { audience: 'partner-signup', expiresIn: '15m' })
+
+export function createPartnerAuthService({
+  partnerRepository,
+  otpRepository,
+  mailer,
+  inviteService,
+  // Injected so tests can drive the compare; production uses bcrypt.
+  verifyCode = bcryptVerifyOtp,
+  showOtp = env.showOtpInResponse,
+}) {
   const badCode = () => ApiError.unauthorized('That code is invalid or has expired')
 
+  const assertMobile = (mobile) => {
+    if (!MOBILE.test(mobile ?? '')) {
+      throw ApiError.badRequest('Enter a 10-digit mobile number')
+    }
+  }
+
   return {
-    async register({ inviteToken, password, ...data }) {
-      const existing = await partnerRepository.findByEmail(data.email)
-      if (existing) throw ApiError.conflict('An account with this email already exists')
-
-      // A bad invite must not block the signup — the partner still gets an
-      // account, and an admin maps them to an employee later (spec §3.2).
-      let onboardedById = null
-      let invite = null
-      if (inviteToken && inviteService) {
-        invite = await inviteService.peekInvite(inviteToken)
-        onboardedById = invite?.employeeId ?? null
-      }
-
-      const partner = await partnerRepository.create({
-        ...data,
-        passwordHash: await bcrypt.hash(password, BCRYPT_ROUNDS),
-        onboardedById,
-      })
-      if (invite && inviteService) await inviteService.markUsed(invite.id, partner.id)
-
-      return { token: signPartnerToken(partner), partner: toPublicPartner(partner) }
-    },
-
-    async login({ email, password }) {
-      const partner = await partnerRepository.findByEmail(email)
-      // Compare against a dummy hash when the account is unknown so the
-      // response takes the same time either way.
-      const hash = partner?.passwordHash ?? '$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinv'
-      const ok = await bcrypt.compare(password, hash)
-      if (!partner || !ok) throw badCredentials()
-      if (partner.status === 'SUSPENDED') throw badCredentials()
-      return { token: signPartnerToken(partner), partner: toPublicPartner(partner) }
-    },
-
     /**
-     * Always resolves `{ sent: true }` — for a real partner, an unknown
-     * address, or a resend inside the cooldown. The caller learns nothing.
+     * One box, one button. The same call serves signing in and signing up —
+     * the partner never has to know which they are doing, and the response
+     * says whether we already know this number so the UI can follow up.
      */
-    async requestOtp({ email }) {
-      const partner = await partnerRepository.findByEmail(email)
-      if (!partner || partner.status === 'SUSPENDED') return { sent: true }
+    async requestOtp({ mobile }) {
+      assertMobile(mobile)
+      const partner = await partnerRepository.findByMobile(mobile)
+      if (partner?.status === 'SUSPENDED') throw ApiError.forbidden('This account is closed')
 
-      const last = await otpRepository.lastIssuedAt(email)
+      const last = await otpRepository.lastIssuedAt(mobile)
       if (last && Date.now() - new Date(last).getTime() < env.otp.resendCooldownSeconds * 1000) {
-        return { sent: true }
+        // Silently succeed rather than explain — a resend timer is one more
+        // thing to understand, and the previous code still works.
+        return { sent: true, registered: Boolean(partner) }
       }
 
       const code = generateOtp()
       await otpRepository.create({
-        identifier: email,
-        channel: 'EMAIL',
+        identifier: mobile,
+        channel: 'MOBILE',
         codeHash: await hashOtp(code),
         expiresAt: new Date(Date.now() + env.otp.ttlMinutes * 60 * 1000),
       })
-      await mailer.send({
-        to: email,
-        subject: 'Your sign-in code',
-        text:
-          `Your sign-in code is ${code}\n\n` +
-          `It expires in ${env.otp.ttlMinutes} minutes. If you did not ask for it, ignore this email.`,
-      })
-      return { sent: true }
+
+      // Email is a courtesy while there is no SMS; it is never the only path.
+      if (partner?.email && mailer) {
+        await mailer
+          .send({
+            to: partner.email,
+            subject: 'Your sign-in code',
+            text: `Your sign-in code is ${code}\n\nIt expires in ${env.otp.ttlMinutes} minutes.`,
+          })
+          .catch(() => {})
+      }
+
+      return {
+        sent: true,
+        registered: Boolean(partner),
+        // TESTING ONLY. Guarded at startup so it cannot be on in production.
+        ...(showOtp && { devCode: code }),
+      }
     },
 
-    async verifyOtp({ email, code }) {
-      const challenge = await otpRepository.findActive(email)
+    async verifyOtp({ mobile, code }) {
+      assertMobile(mobile)
+      const challenge = await otpRepository.findActive(mobile)
       if (!challenge) throw badCode()
-      // At the cap the code is dead. Return before counting, so a flood of
-      // guesses cannot keep the row alive or inflate the counter forever.
       if (challenge.attempts >= env.otp.maxAttempts) throw badCode()
-
-      if (!(await verifyOtp(code, challenge.codeHash))) {
+      if (!(await verifyCode(code, challenge.codeHash))) {
         await otpRepository.bumpAttempts(challenge.id)
         throw badCode()
       }
-
-      const partner = await partnerRepository.findByEmail(email)
-      if (!partner || partner.status === 'SUSPENDED') throw badCode()
-
       await otpRepository.consume(challenge.id)
+
+      const partner = await partnerRepository.findByMobile(mobile)
+      if (!partner) {
+        // A verified number we do not know yet: hand back proof so the signup
+        // form can finish without asking for the code a second time.
+        return { needsSignup: true, signupToken: signSignupToken(mobile), mobile }
+      }
+      if (partner.status === 'SUSPENDED') throw ApiError.forbidden('This account is closed')
+      return { token: signPartnerToken(partner), partner: toPublicPartner(partner) }
+    },
+
+    /** Only reachable with a signup token, so the number is already proven. */
+    async register({ signupToken, mobile, inviteToken, ...data }) {
+      let claimed
+      try {
+        claimed = jwt.verify(signupToken ?? '', env.jwtSecret, { audience: 'partner-signup' })
+      } catch {
+        throw ApiError.badRequest('Please verify your mobile number first')
+      }
+      // Bound to the number that passed the OTP — a token for one mobile can
+      // never open an account for another.
+      if (claimed.mobile !== mobile) throw ApiError.badRequest('Please verify your mobile number first')
+
+      const existing = await partnerRepository.findByMobile(mobile)
+      if (existing) throw ApiError.conflict('This number is already registered')
+
+      let onboardedById = null
+      let invite = null
+      if (inviteToken && inviteService) {
+        invite = await inviteService.peekInvite(inviteToken).catch(() => null)
+        onboardedById = invite?.employeeId ?? null
+      }
+
+      const partner = await partnerRepository.create({ ...data, mobile, onboardedById })
+      if (invite && inviteService) await inviteService.markUsed(invite.id, partner.id)
+
       return { token: signPartnerToken(partner), partner: toPublicPartner(partner) }
     },
   }

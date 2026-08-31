@@ -1,7 +1,7 @@
 import { prisma } from '../../lib/prisma.js'
 
 export const partnerAuthRepository = {
-  findByEmail: (email) => prisma.partner.findUnique({ where: { email } }),
+  findByMobile: (mobile) => prisma.partner.findUnique({ where: { mobile } }),
   findById: (id) => prisma.partner.findUnique({ where: { id } }),
   create: (data) => prisma.partner.create({ data }),
 }

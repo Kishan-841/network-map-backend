@@ -1,25 +1,25 @@
 import { z } from 'zod'
 
-const email = z.string().trim().toLowerCase().email()
-// Indian mobile: 10 digits, never starting 0-5.
+// Indian mobile: 10 digits, never starting 0-5. The partner's identity.
 const mobile = z.string().trim().regex(/^[6-9][0-9]{9}$/, 'Enter a 10-digit mobile number')
-const password = z
-  .string()
-  .min(8, 'At least 8 characters')
-  .regex(/[a-zA-Z]/, 'Must contain a letter')
-  .regex(/[0-9]/, 'Must contain a number')
+const email = z.string().trim().toLowerCase().email()
 
+export const otpRequestSchema = z.object({ mobile })
+export const otpVerifySchema = z.object({ mobile, code: z.string().trim().regex(/^\d{6}$/) })
+
+/**
+ * Signup asks for as little as possible (partner-network.md §0). No password —
+ * there is no such thing — and email is optional, because many partners have
+ * none. The signupToken proves the number already passed a code.
+ */
 export const registerSchema = z.object({
+  signupToken: z.string().min(10),
+  mobile,
   name: z.string().trim().min(1).max(120),
   type: z.enum(['AGENT', 'SOCIETY_REPRESENTATIVE', 'RETAIL_SHOP', 'DSA']),
   companyName: z.string().trim().max(150).optional(),
-  mobile,
-  email,
-  password,
+  email: email.optional().or(z.literal('')),
   hasGst: z.boolean().optional().default(false),
+  preferredLanguage: z.enum(['EN', 'HI', 'MR']).optional().default('EN'),
   inviteToken: z.string().trim().min(10).max(200).optional(),
 })
-
-export const loginSchema = z.object({ email, password: z.string().min(1) })
-export const otpRequestSchema = z.object({ email })
-export const otpVerifySchema = z.object({ email, code: z.string().trim().regex(/^\d{6}$/) })

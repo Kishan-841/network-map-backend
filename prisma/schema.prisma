@@ -311,10 +311,14 @@ model Partner {
   type         PartnerType
   /// Company / society / shop / firm name, depending on the type.
   companyName  String?
-  mobile       String
-  email        String        @unique
-  passwordHash String
+  /// THE identity. The one thing this audience always knows and never
+  /// forgets — see partner-network.md §0.
+  mobile       String        @unique
+  /// Optional: many partners have no email at all.
+  email        String?       @unique
   status       PartnerStatus @default(REGISTERED)
+  /// EN | HI | MR — the portal speaks their language.
+  preferredLanguage String    @default("EN")
   /// Set by the partner at onboarding; makes the GST document required.
   hasGst       Boolean       @default(false)
 

@@ -2,29 +2,15 @@ import { Router } from 'express'
 import { validateBody } from '../../middleware/validate.js'
 import { requirePartner } from '../../middleware/partner-auth.js'
 import { otpRequestLimiter, partnerLoginLimiter } from '../../middleware/rate-limit.js'
-import {
-  registerSchema,
-  loginSchema,
-  otpRequestSchema,
-  otpVerifySchema,
-} from './partner-auth.schemas.js'
+import { otpRequestSchema, otpVerifySchema, registerSchema } from './partner-auth.schemas.js'
 import { partnerAuthController } from './partner-auth.controller.js'
 
 export const partnerAuthRoutes = Router()
 
-partnerAuthRoutes.post(
-  '/register',
-  partnerLoginLimiter,
-  validateBody(registerSchema),
-  partnerAuthController.register,
-)
-partnerAuthRoutes.post(
-  '/login',
-  partnerLoginLimiter,
-  validateBody(loginSchema),
-  partnerAuthController.login,
-)
-// Tighter than login: this one sends email on our account.
+/**
+ * One box, one button. The same two calls serve signing in and signing up —
+ * the partner never has to know which they are doing.
+ */
 partnerAuthRoutes.post(
   '/otp/request',
   otpRequestLimiter,
@@ -36,5 +22,11 @@ partnerAuthRoutes.post(
   partnerLoginLimiter,
   validateBody(otpVerifySchema),
   partnerAuthController.verifyOtp,
+)
+partnerAuthRoutes.post(
+  '/register',
+  partnerLoginLimiter,
+  validateBody(registerSchema),
+  partnerAuthController.register,
 )
 partnerAuthRoutes.get('/me', requirePartner, partnerAuthController.me)

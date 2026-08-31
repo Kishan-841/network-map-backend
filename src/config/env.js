@@ -27,6 +27,13 @@ export const env = {
   partnerInviteTtlDays: Number(process.env.PARTNER_INVITE_TTL_DAYS ?? 7),
   partnerJwtExpiresIn: process.env.PARTNER_JWT_EXPIRES_IN ?? '30d',
   /**
+   * TESTING ONLY: return the OTP in the API response so it can be shown on
+   * screen. Off unless explicitly enabled, and refused outright in production
+   * (see the guard below) — with this on, anyone who types a partner's mobile
+   * number is handed the code to sign in as them.
+   */
+  showOtpInResponse: process.env.SHOW_OTP_IN_RESPONSE === 'true',
+  /**
    * Where the BROWSER app lives — not APP_URL, which is this API. Partner
    * invite links are opened by a person, so they must point at the site.
    * Falls back to the first CORS origin, which is already the front end.
@@ -78,4 +85,13 @@ if (env.storageDriver === 'r2') {
         .join(', ')}`,
     )
   }
+}
+
+// A deployment that forgets to unset this must FAIL, not quietly run wide
+// open. Refusing to boot is the only version of this guard that works.
+if (env.showOtpInResponse && env.nodeEnv === 'production') {
+  throw new Error(
+    'SHOW_OTP_IN_RESPONSE=true is not permitted in production: it would hand ' +
+      "anyone the code to sign in as any partner. Unset it and redeploy.",
+  )
 }

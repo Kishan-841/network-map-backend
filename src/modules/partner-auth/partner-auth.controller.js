@@ -21,12 +21,12 @@ const handle = (fn) => async (req, res, next) => {
 export const partnerAuthController = {
   register: async (req, res, next) => {
     try {
-      res.status(201).json({ success: true, data: await service.register(req.body) })
+      const body = { ...req.body, email: req.body.email || undefined }
+      res.status(201).json({ success: true, data: await service.register(body) })
     } catch (err) {
       next(err)
     }
   },
-  login: handle((req) => service.login(req.body)),
   requestOtp: handle((req) => service.requestOtp(req.body)),
   verifyOtp: handle((req) => service.verifyOtp(req.body)),
   me: handle((req) => {
