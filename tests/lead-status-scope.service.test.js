@@ -84,3 +84,94 @@ describe('the record of the change', () => {
     ).rejects.toMatchObject({ status: 400 })
   })
 })
+
+/**
+ * Converting a lead is the moment money comes into existence, so the status
+ * change and the earning have to succeed or fail together.
+ */
+describe('converting a lead', () => {
+  const withEarnings = (lead = { id: 'l1', status: 'CONTACTED', partnerId: 'p1', employeeId: 'e1' }) => {
+    const d = deps(lead)
+    const earnings = {
+      recordConversion: vi.fn(async () => ({ id: 'earn1', amount: 750 })),
+      revokeConversion: vi.fn(async () => null),
+    }
+    return { d, earnings, service: createLeadService({ ...d, earningService: earnings }) }
+  }
+
+  it('records the earning for the plan that was sold', async () => {
+    const { earnings, service } = withEarnings()
+    await service.changeStatus('l1', 'CONVERTED', ADMIN, null, {
+      speedMbps: 400, billingPeriod: 'YEARLY',
+    })
+    expect(earnings.recordConversion).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'l1' }),
+      { speedMbps: 400, billingPeriod: 'YEARLY' },
+    )
+  })
+
+  it('will not convert without knowing what the customer bought', async () => {
+    const { d, earnings, service } = withEarnings()
+    await expect(
+      service.changeStatus('l1', 'CONVERTED', ADMIN),
+    ).rejects.toMatchObject({ status: 400 })
+    // The status must not move either — a Converted lead with no earning is
+    // exactly the silent gap this whole change exists to close.
+    expect(d.leadRepository.update).not.toHaveBeenCalled()
+    expect(earnings.recordConversion).not.toHaveBeenCalled()
+  })
+
+  it('leaves the lead alone when the earning cannot be created', async () => {
+    const { d, earnings, service } = withEarnings()
+    earnings.recordConversion.mockRejectedValue(Object.assign(new Error('no rate'), { status: 400 }))
+    await expect(
+      service.changeStatus('l1', 'CONVERTED', ADMIN, null, { speedMbps: 300, billingPeriod: 'QUARTERLY' }),
+    ).rejects.toMatchObject({ status: 400 })
+    expect(d.leadRepository.update).not.toHaveBeenCalled()
+  })
+
+  it('takes the earning back when the lead moves out of Converted', async () => {
+    const { earnings, service } = withEarnings({
+      id: 'l1', status: 'CONVERTED', partnerId: 'p1', employeeId: 'e1',
+    })
+    await service.changeStatus('l1', 'NOT_INTERESTED', ADMIN)
+    expect(earnings.revokeConversion).toHaveBeenCalledWith('l1')
+  })
+
+  it('does not revoke when the lead was never converted', async () => {
+    const { earnings, service } = withEarnings()
+    await service.changeStatus('l1', 'INTERESTED', ADMIN)
+    expect(earnings.revokeConversion).not.toHaveBeenCalled()
+  })
+
+  it('refuses to move a lead whose earning is already paid', async () => {
+    const { d, earnings, service } = withEarnings({
+      id: 'l1', status: 'CONVERTED', partnerId: 'p1', employeeId: 'e1',
+    })
+    earnings.revokeConversion.mockRejectedValue(
+      Object.assign(new Error('already paid'), { status: 409 }),
+    )
+    await expect(
+      service.changeStatus('l1', 'CONTACTED', ADMIN),
+    ).rejects.toMatchObject({ status: 409 })
+    expect(d.leadRepository.update).not.toHaveBeenCalled()
+  })
+
+  it('ignores a plan on a status that is not Converted', async () => {
+    const { earnings, service } = withEarnings()
+    await service.changeStatus('l1', 'INTERESTED', ADMIN, null, {
+      speedMbps: 400, billingPeriod: 'YEARLY',
+    })
+    expect(earnings.recordConversion).not.toHaveBeenCalled()
+  })
+
+  it('is a no-op on the earning when Converted is re-selected', async () => {
+    const { earnings, service } = withEarnings({
+      id: 'l1', status: 'CONVERTED', partnerId: 'p1', employeeId: 'e1',
+    })
+    await service.changeStatus('l1', 'CONVERTED', ADMIN, null, {
+      speedMbps: 100, billingPeriod: 'HALF_YEARLY',
+    })
+    expect(earnings.revokeConversion).not.toHaveBeenCalled()
+  })
+})

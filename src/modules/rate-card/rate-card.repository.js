@@ -6,6 +6,18 @@ export const rateCardRepository = {
    * row with a later effectiveFrom, so a quote given last month can still be
    * explained.
    */
+  /**
+   * The one rate in force for a speed and period, WITH its amount — what an
+   * earning is snapshotted from. Separate from current() because that one
+   * strips ids and shapes the grid; this one answers "what is this worth".
+   */
+  async findRate(speedMbps, billingPeriod, at = new Date()) {
+    return prisma.rateCard.findFirst({
+      where: { speedMbps, billingPeriod, effectiveFrom: { lte: at } },
+      orderBy: { effectiveFrom: 'desc' },
+    })
+  },
+
   async current(at = new Date()) {
     const rows = await prisma.rateCard.findMany({
       where: { effectiveFrom: { lte: at } },

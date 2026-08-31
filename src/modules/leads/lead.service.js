@@ -4,7 +4,7 @@ export const LEAD_STATUSES = [
   'NEW', 'CONTACTED', 'INTERESTED', 'CONVERTED', 'NOT_INTERESTED', 'UNREACHABLE', 'DUPLICATE',
 ]
 
-export function createLeadService({ leadRepository }) {
+export function createLeadService({ leadRepository, earningService }) {
   return {
     async createLead(input, partner) {
       // The gate again, on the server. A partner who is not approved has no
@@ -48,14 +48,31 @@ export function createLeadService({ leadRepository }) {
      *
      * Out of scope answers 404, not 403 — someone else's lead should not be
      * confirmed to exist.
+     *
+     * CONVERTED is the moment money comes into existence, so the earning is
+     * settled BEFORE the status moves. A lead sitting in Converted with no
+     * earning behind it is the exact silent gap this is here to close, and a
+     * lead whose earning is already paid cannot be moved out at all
+     * (partner-network.md §6.2).
      */
-    async changeStatus(leadId, toStatus, actor, note) {
+    async changeStatus(leadId, toStatus, actor, note, plan) {
       if (!LEAD_STATUSES.includes(toStatus)) throw ApiError.badRequest('Unknown lead status')
 
       const lead = await leadRepository.findById(leadId)
       const missing = () => ApiError.notFound('Lead not found')
       if (!lead) throw missing()
       if (actor?.role === 'PARTNER_MANAGER' && lead.employeeId !== actor.id) throw missing()
+
+      if (earningService) {
+        if (toStatus === 'CONVERTED' && lead.status !== 'CONVERTED') {
+          if (!plan?.speedMbps || !plan?.billingPeriod) {
+            throw ApiError.badRequest('Record which plan the customer took before converting')
+          }
+          await earningService.recordConversion(lead, plan)
+        } else if (lead.status === 'CONVERTED' && toStatus !== 'CONVERTED') {
+          await earningService.revokeConversion(leadId)
+        }
+      }
 
       const updated = await leadRepository.update(leadId, { status: toStatus })
       await leadRepository.recordEvent({

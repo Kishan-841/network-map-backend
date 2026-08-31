@@ -64,24 +64,26 @@ enum ContactDesignation {
 }
 
 model User {
-  id           String     @id @default(cuid())
-  name         String
-  email        String     @unique
-  passwordHash String
-  role         Role       @default(SURVEYOR)
-  isActive     Boolean    @default(true)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  buildings    Building[]
+  id            String        @id @default(cuid())
+  name          String
+  email         String        @unique
+  passwordHash  String
+  role          Role          @default(SURVEYOR)
+  isActive      Boolean       @default(true)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  buildings     Building[]
   /// Zones a SURVEYOR may work in; unused for other roles.
-  assignedZones Zone[]    @relation("UserAssignedZones")
+  assignedZones Zone[]        @relation("UserAssignedZones")
   /// City + pincodes an ACQUISITION_AGENT covers; unused for other roles.
-  pincodes     UserPincode[]
+  pincodes      UserPincode[]
 
   /// Partner network — see partner-network.md
-  partnersOnboarded Partner[]       @relation("PartnerOnboardedBy")
-  partnerInvites    PartnerInvite[] @relation("PartnerInvitesIssued")
-  leadsAttributed   Lead[]          @relation("LeadEmployee")
+  partnersOnboarded  Partner[]        @relation("PartnerOnboardedBy")
+  partnerInvites     PartnerInvite[]  @relation("PartnerInvitesIssued")
+  leadsAttributed    Lead[]           @relation("LeadEmployee")
+  earningsAttributed PartnerEarning[] @relation("EarningEmployee")
+  earningsMarkedPaid PartnerEarning[] @relation("EarningPaidBy")
 }
 
 /// One row per pincode an acquisition agent covers (within one city).
@@ -104,10 +106,10 @@ model BuildingType {
 }
 
 model City {
-  id        String     @id @default(cuid())
-  name      String     @unique
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  id        String        @id @default(cuid())
+  name      String        @unique
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
   operators Operator[]
   buildings Building[]
   agents    UserPincode[]
@@ -120,43 +122,43 @@ model Operator {
   zones       Zone[]
   fiberRoutes FiberRoute[]
   /// Groups operators under a city; null for operators with no city yet.
-  cityId    String?
-  city      City?    @relation(fields: [cityId], references: [id], onDelete: SetNull)
+  cityId      String?
+  city        City?        @relation(fields: [cityId], references: [id], onDelete: SetNull)
 }
 
 model Zone {
-  id        String     @id @default(cuid())
-  name      String     @unique
-  city      String
+  id            String     @id @default(cuid())
+  name          String     @unique
+  city          String
   /// Ordered polygon vertices [{ latitude, longitude }, ...], min 3 when set
-  boundary  Json?
-  createdAt DateTime   @default(now())
-  buildings Building[]
-  assignedUsers User[] @relation("UserAssignedZones")
+  boundary      Json?
+  createdAt     DateTime   @default(now())
+  buildings     Building[]
+  assignedUsers User[]     @relation("UserAssignedZones")
   /// Groups zones under an operator; null for zones with no operator yet.
-  operatorId String?
-  operator   Operator? @relation(fields: [operatorId], references: [id], onDelete: SetNull)
+  operatorId    String?
+  operator      Operator?  @relation(fields: [operatorId], references: [id], onDelete: SetNull)
 }
 
 model FiberRoute {
-  id        String   @id @default(cuid())
-  name      String   @unique
+  id         String    @id @default(cuid())
+  name       String    @unique
   /// Typed polylines: [ { fiberType, points: [ {latitude, longitude}, ... ] }, ... ].
   /// fiberType: '2 core' … '48 core' (render color derives from it). A branch
   /// is a segment whose first point sits on another segment's vertex.
-  segments  Json
+  segments   Json
   /// Field/asset identifier printed on the cable or duct.
-  fiberId   String?
+  fiberId    String?
   /// 'IN' | 'OUT'.
-  placement String?
+  placement  String?
   /// Owning operator; null for shared/unassigned routes.
   operatorId String?
   operator   Operator? @relation(fields: [operatorId], references: [id], onDelete: SetNull)
-  remark    String?
+  remark     String?
   /// Upload URLs from our uploads API (photos of the laid fiber).
-  images    Json?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  images     Json?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 }
 
 model Building {
@@ -187,10 +189,10 @@ model Building {
   permission       Permission?
   contact          BuildingContact?
   photos           Photo[]
+  leads            Lead[]
 
   @@index([latitude, longitude])
   @@index([source, createdById])
-  leads            Lead[]
 }
 
 model BuildingDetails {
@@ -272,7 +274,6 @@ model SystemLog {
   @@index([module, action])
 }
 
-
 // ---------------------------------------------------------------------------
 // Partner network — external referral partners recruited by our employees.
 // Deliberately separate from User: different identity, different auth,
@@ -305,19 +306,19 @@ enum PartnerDocumentType {
 }
 
 model Partner {
-  id           String        @id @default(cuid())
-  name         String
-  type         PartnerType
+  id                String        @id @default(cuid())
+  name              String
+  type              PartnerType
   /// Company / society / shop / firm name, depending on the type.
-  companyName  String?
+  companyName       String?
   /// THE identity. The one thing this audience always knows and never
   /// forgets — see partner-network.md §0.
-  mobile       String        @unique
+  mobile            String        @unique
   /// Optional: many partners have no email at all.
-  email        String?       @unique
-  status       PartnerStatus @default(REGISTERED)
+  email             String?       @unique
+  status            PartnerStatus @default(REGISTERED)
   /// EN | HI | MR — the portal speaks their language.
-  preferredLanguage String    @default("EN")
+  preferredLanguage String        @default("EN")
 
   /// The employee who recruited them. Commission will depend on this, so it
   /// is recorded whether it came from an invite link or an admin mapping.
@@ -332,6 +333,7 @@ model Partner {
   documents        PartnerDocument[]
   invite           PartnerInvite?
   leads            Lead[]
+  earnings         PartnerEarning[]
   coverageRequests CoverageRequest[]
 
   createdAt DateTime @default(now())
@@ -384,7 +386,6 @@ model OtpChallenge {
   @@index([identifier, createdAt])
 }
 
-
 /// How the searched building lined up with our registry, at the moment the
 /// lead was captured. Green, amber, red.
 enum BuildingMatch {
@@ -424,11 +425,11 @@ model Lead {
   buildingId String?
   building   Building? @relation(fields: [buildingId], references: [id], onDelete: SetNull)
 
-  customerName   String
-  customerMobile String
-  customerEmail  String?
-  address        String?
-  note           String?
+  customerName    String
+  customerMobile  String
+  customerEmail   String?
+  address         String?
+  note            String?
   /// What speed they asked for: 100 / 200 / 300 / 400.
   requirementMbps Int?
 
@@ -438,12 +439,13 @@ model Lead {
   searchedPlaceName String?
   buildingMatch     BuildingMatch?
 
-  status          LeadStatus @default(NEW)
-  duplicateOfId   String?
-  duplicateOf     Lead?      @relation("LeadDuplicate", fields: [duplicateOfId], references: [id], onDelete: SetNull)
-  duplicates      Lead[]     @relation("LeadDuplicate")
+  status        LeadStatus @default(NEW)
+  duplicateOfId String?
+  duplicateOf   Lead?      @relation("LeadDuplicate", fields: [duplicateOfId], references: [id], onDelete: SetNull)
+  duplicates    Lead[]     @relation("LeadDuplicate")
 
   events    LeadStatusEvent[]
+  earning   PartnerEarning?
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt
 
@@ -456,14 +458,14 @@ model Lead {
 /// Every status change, with who and when. Commission may one day depend on
 /// CONVERTED, and that history cannot be reconstructed after the fact.
 model LeadStatusEvent {
-  id         String     @id @default(cuid())
+  id         String      @id @default(cuid())
   leadId     String
-  lead       Lead       @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  lead       Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
   fromStatus LeadStatus?
   toStatus   LeadStatus
   byUserId   String?
   note       String?
-  createdAt  DateTime   @default(now())
+  createdAt  DateTime    @default(now())
 
   @@index([leadId])
 }
@@ -485,7 +487,6 @@ model CoverageRequest {
   @@index([createdAt])
 }
 
-
 enum BillingPeriod {
   QUARTERLY
   HALF_YEARLY
@@ -506,4 +507,53 @@ model RateCard {
 
   @@unique([speedMbps, billingPeriod, effectiveFrom])
   @@index([effectiveFrom])
+}
+
+/// What a partner is owed for one converted lead.
+///
+/// One row per converted lead, and the lead id is unique: converting the same
+/// customer twice must never pay twice. Every figure is a SNAPSHOT taken at
+/// conversion - the speed and period the customer actually bought, and the
+/// rate in force that day - so a later price change cannot rewrite what was
+/// already earned, and the employee attribution survives re-assignment.
+model PartnerEarning {
+  id String @id @default(cuid())
+
+  partnerId String
+  partner   Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  /// One earning per lead. The whole no-double-pay rule is this constraint.
+  leadId String @unique
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  /// Snapshot of the partner's employee, mirroring Lead.employeeId.
+  employeeId String?
+  employee   User?   @relation("EarningEmployee", fields: [employeeId], references: [id], onDelete: SetNull)
+
+  /// What the customer ACTUALLY took, which is not always what they asked for.
+  speedMbps     Int
+  billingPeriod BillingPeriod
+  /// Rupees, snapshotted from the rate card at conversion.
+  amount        Int
+
+  /// The month this counts towards. Set from the conversion, not from a live
+  /// clock, so a backdated correction lands in the month it belongs to.
+  earnedAt DateTime @default(now())
+
+  status   EarningStatus @default(AWAITING_PAYMENT)
+  paidAt   DateTime?
+  paidById String?
+  paidBy   User?         @relation("EarningPaidBy", fields: [paidById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([partnerId, earnedAt])
+  @@index([employeeId])
+  @@index([status])
+}
+
+enum EarningStatus {
+  AWAITING_PAYMENT
+  PAID
 }

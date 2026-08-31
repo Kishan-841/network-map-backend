@@ -9,12 +9,17 @@ import { createLeadService, LEAD_STATUSES } from './lead.service.js'
 import { leadRepository, demandRepository } from './lead.repository.js'
 import { createLeadCaptureService } from './lead-capture.service.js'
 import { createBuildingSearchService } from '../partners/building-search.service.js'
+import { BILLING_PERIODS } from '../rate-card/rate-card.service.js'
 import { createPartnerService } from '../partners/partner.service.js'
 import { partnerRepository } from '../partners/partner.repository.js'
 import { buildingRepository } from '../buildings/building.repository.js'
+import { createEarningService } from '../earnings/earning.service.js'
+import { earningRepository } from '../earnings/earning.repository.js'
+import { rateCardRepository } from '../rate-card/rate-card.repository.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
 
-const leadService = createLeadService({ leadRepository })
+const earningService = createEarningService({ earningRepository, rateCardRepository })
+const leadService = createLeadService({ leadRepository, earningService })
 const capture = createLeadCaptureService({ buildingRepository, leadRepository })
 const buildingSearch = createBuildingSearchService({ buildingRepository })
 const partners = createPartnerService({ partnerRepository, storage: getStorageProvider() })
@@ -45,9 +50,20 @@ const leadSchema = z.object({
   note: z.string().trim().max(500).optional(),
 })
 
+/**
+ * Converting a lead needs the plan the customer actually took — the lead only
+ * ever recorded what they asked for, and the rate card is keyed on speed AND
+ * billing period. The service rejects CONVERTED without it.
+ */
+const planSchema = z.object({
+  speedMbps: z.coerce.number().int().positive(),
+  billingPeriod: z.enum(BILLING_PERIODS),
+})
+
 const statusSchema = z.object({
   status: z.enum(LEAD_STATUSES),
   note: z.string().trim().max(500).optional(),
+  plan: planSchema.optional(),
 })
 
 // ---------------------------------------------------------------------------
@@ -128,6 +144,16 @@ partnerLeadRoutes.get('/leads', async (req, res, next) => {
   }
 })
 
+/** The Earnings tab: month by month, and what we still owe. */
+partnerLeadRoutes.get('/earnings', async (req, res, next) => {
+  try {
+    partners.assertApproved(req.partner)
+    res.json({ success: true, data: await earningService.statementFor(req.partner.id) })
+  } catch (err) {
+    next(err)
+  }
+})
+
 // ---------------------------------------------------------------------------
 // Staff-facing
 // ---------------------------------------------------------------------------
@@ -158,7 +184,7 @@ staffLeadRoutes.patch(
   async (req, res, next) => {
     try {
       const lead = await leadService.changeStatus(
-        req.params.id, req.body.status, req.user, req.body.note,
+        req.params.id, req.body.status, req.user, req.body.note, req.body.plan,
       )
       res.json({ success: true, data: { id: lead.id, status: lead.status } })
     } catch (err) {
