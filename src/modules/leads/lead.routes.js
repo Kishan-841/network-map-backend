@@ -8,6 +8,7 @@ import { audit } from '../system-logs/audit.js'
 import { createLeadService, LEAD_STATUSES } from './lead.service.js'
 import { leadRepository, demandRepository } from './lead.repository.js'
 import { createFeasibilityService } from '../partners/feasibility.service.js'
+import { createBuildingSearchService } from '../partners/building-search.service.js'
 import { createPartnerService } from '../partners/partner.service.js'
 import { partnerRepository } from '../partners/partner.repository.js'
 import { buildingRepository } from '../buildings/building.repository.js'
@@ -15,6 +16,7 @@ import { getStorageProvider } from '../../lib/storage/index.js'
 
 const leadService = createLeadService({ leadRepository })
 const feasibility = createFeasibilityService({ buildingRepository, demandRepository })
+const buildingSearch = createBuildingSearchService({ buildingRepository })
 const partners = createPartnerService({ partnerRepository, storage: getStorageProvider() })
 
 const feasibilitySchema = z.object({
@@ -44,6 +46,20 @@ const statusSchema = z.object({
 export const partnerLeadRoutes = Router()
 partnerLeadRoutes.use(requirePartner)
 
+/**
+ * Search OUR registry. Replaces the Google Places lookup the referral flow
+ * used to run: a partner picks a building we actually hold, so there is no
+ * coordinate-matching step to get wrong.
+ */
+partnerLeadRoutes.get('/buildings/search', feasibilityLimiter, async (req, res, next) => {
+  try {
+    partners.assertApproved(req.partner)
+    res.json({ success: true, data: await buildingSearch.search(req.query.q) })
+  } catch (err) {
+    next(err)
+  }
+})
+
 partnerLeadRoutes.post(
   '/feasibility',
   feasibilityLimiter,
@@ -60,6 +76,9 @@ partnerLeadRoutes.post(
 
 partnerLeadRoutes.post('/leads', validateBody(leadSchema), async (req, res, next) => {
   try {
+    // The client says which building was picked; the server decides whether we
+    // serve it. Never trust a flag that came back from the browser.
+    if (req.body.buildingId) await buildingSearch.assertServiceable(req.body.buildingId)
     const body = { ...req.body, customerEmail: req.body.customerEmail || null }
     const lead = await leadService.createLead(body, req.partner)
     // Never echo the internal attribution back to the partner.

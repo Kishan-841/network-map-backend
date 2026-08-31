@@ -30,11 +30,11 @@ describe('the verdict', () => {
     expect((await svc([live]).check(at(live), 'p1')).verdict).toBe('SERVICEABLE')
   })
 
-  it('is SERVICEABLE for a feasible building that is not lit yet', async () => {
-    // 71 of 72 real buildings are FEASIBLE and only 2 are live — keying this
-    // off isLive told partners "not available" for almost everything.
+  it('is NOT_SERVICEABLE for a building that is not lit yet', async () => {
+    // A partner promising service needs the fibre to be live today; a
+    // surveyed-but-unbuilt building would have them promise a wait.
     expect((await svc([feasibleNotLive]).check(at(feasibleNotLive), 'p1')).verdict).toBe(
-      'SERVICEABLE',
+      'NOT_SERVICEABLE',
     )
   })
 
@@ -43,10 +43,10 @@ describe('the verdict', () => {
   })
 
   it('prefers a serviceable neighbour over a merely nearer unserviceable one', async () => {
-    // Same complex: the rejected block sits closer to the dropped pin than the
-    // feasible tower we actually serve.
+    // Same complex: the unlit block sits closer to the dropped pin than the
+    // live tower we actually serve.
     const near = { ...rejected, latitude: 18.5200, longitude: 73.8500 }
-    const far = { ...feasibleNotLive, latitude: 18.5203, longitude: 73.8500 }
+    const far = { ...live, id: 'b9', latitude: 18.5203, longitude: 73.8500 }
     const out = await svc([near, far]).check({ latitude: 18.52, longitude: 73.85 }, 'p1')
     expect(out.verdict).toBe('SERVICEABLE')
   })

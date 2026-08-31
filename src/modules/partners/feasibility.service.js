@@ -1,4 +1,5 @@
 import { haversineMeters, boundingBox } from '../../lib/geo.js'
+import { isServiceable } from '../../lib/serviceable.js'
 
 /**
  * How close a pin has to be to count as the same building. Google's
@@ -6,17 +7,6 @@ import { haversineMeters, boundingBox } from '../../lib/geo.js'
  * from where our surveyor stood.
  */
 const MATCH_RADIUS_METERS = 150
-
-/**
- * What "we can serve this" means.
- *
- * NOT isLive. isLive means the fibre is lit TODAY — in the current registry
- * that is 2 buildings out of 72, while 71 are FEASIBLE. Keying the answer off
- * isLive told partners "not available" for seventy buildings our own
- * surveyors had already confirmed we can serve, which is the opposite of the
- * point. Feasibility is the survey verdict, and it is the right signal.
- */
-const isServiceable = (building) => building?.feasibleStatus === 'FEASIBLE'
 
 export function createFeasibilityService({ buildingRepository, demandRepository }) {
   return {
