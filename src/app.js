@@ -19,6 +19,7 @@ import { partnerAuthRoutes } from './modules/partner-auth/partner-auth.routes.js
 import { inviteRoutes } from './modules/partner-invites/invite.routes.js'
 import { partnerSelfRoutes, partnerAdminRoutes } from './modules/partners/partner.routes.js'
 import { partnerLeadRoutes, staffLeadRoutes } from './modules/leads/lead.routes.js'
+import { partnerRateCardRoutes, staffRateCardRoutes } from './modules/rate-card/rate-card.routes.js'
 
 export function createApp() {
   const app = express()
@@ -45,6 +46,8 @@ export function createApp() {
   app.use('/api/v1/partners', partnerAdminRoutes)
   app.use('/api/v1/partner', partnerLeadRoutes)
   app.use('/api/v1/leads', staffLeadRoutes)
+  app.use('/api/v1/partner', partnerRateCardRoutes)
+  app.use('/api/v1/rate-card', staffRateCardRoutes)
   app.use('/api/v1/users', userRoutes)
   app.use('/api/v1/zones', zoneRoutes)
   app.use('/api/v1/buildings', buildingRoutes)

@@ -468,3 +468,26 @@ model CoverageRequest {
   @@index([placeId])
   @@index([createdAt])
 }
+
+
+enum BillingPeriod {
+  QUARTERLY
+  HALF_YEARLY
+  YEARLY
+}
+
+/// What a partner earns for one connection, by speed and billing period.
+/// A table rather than constants: prices change, and a hardcoded number
+/// becomes a bug the day they do (partner-network.md §3.2).
+model RateCard {
+  id            String        @id @default(cuid())
+  speedMbps     Int
+  billingPeriod BillingPeriod
+  /// Rupees, per customer.
+  amount        Int
+  effectiveFrom DateTime      @default(now())
+  createdAt     DateTime      @default(now())
+
+  @@unique([speedMbps, billingPeriod, effectiveFrom])
+  @@index([effectiveFrom])
+}
