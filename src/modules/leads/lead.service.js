@@ -64,12 +64,20 @@ export function createLeadService({ leadRepository, earningService }) {
       if (actor?.role === 'PARTNER_MANAGER' && lead.employeeId !== actor.id) throw missing()
 
       if (earningService) {
-        if (toStatus === 'CONVERTED' && lead.status !== 'CONVERTED') {
-          if (!plan?.speedMbps || !plan?.billingPeriod) {
-            throw ApiError.badRequest('Record which plan the customer took before converting')
+        if (toStatus === 'CONVERTED') {
+          // Keyed on whether the EARNING exists, not on whether the status is
+          // changing. Leads converted before earnings were built sit in
+          // CONVERTED with nothing behind them, and re-picking Converted is
+          // how that gets repaired — a no-op there would leave real money
+          // permanently invisible.
+          const existing = await earningService.findForLead(leadId)
+          if (!existing) {
+            if (!plan?.speedMbps || !plan?.billingPeriod) {
+              throw ApiError.badRequest('Record which plan the customer took before converting')
+            }
+            await earningService.recordConversion(lead, plan)
           }
-          await earningService.recordConversion(lead, plan)
-        } else if (lead.status === 'CONVERTED' && toStatus !== 'CONVERTED') {
+        } else if (lead.status === 'CONVERTED') {
           await earningService.revokeConversion(leadId)
         }
       }

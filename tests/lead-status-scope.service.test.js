@@ -93,6 +93,8 @@ describe('converting a lead', () => {
   const withEarnings = (lead = { id: 'l1', status: 'CONTACTED', partnerId: 'p1', employeeId: 'e1' }) => {
     const d = deps(lead)
     const earnings = {
+      // No earning yet: this is a lead about to be converted for the first time.
+      findForLead: vi.fn(async () => null),
       recordConversion: vi.fn(async () => ({ id: 'earn1', amount: 750 })),
       revokeConversion: vi.fn(async () => null),
     }
@@ -169,9 +171,52 @@ describe('converting a lead', () => {
     const { earnings, service } = withEarnings({
       id: 'l1', status: 'CONVERTED', partnerId: 'p1', employeeId: 'e1',
     })
+    earnings.findForLead.mockResolvedValue({ id: 'earn1', amount: 750 })
     await service.changeStatus('l1', 'CONVERTED', ADMIN, null, {
       speedMbps: 100, billingPeriod: 'HALF_YEARLY',
     })
     expect(earnings.revokeConversion).not.toHaveBeenCalled()
+    expect(earnings.recordConversion).not.toHaveBeenCalled()
+  })
+})
+
+/**
+ * Leads converted before earnings existed sit in CONVERTED with no earning
+ * behind them. The money is real and unrecorded, so re-picking Converted has
+ * to be the repair path rather than a no-op.
+ */
+describe('a lead converted before its earning existed', () => {
+  const missingEarning = () => {
+    const lead = { id: 'l1', status: 'CONVERTED', partnerId: 'p1', employeeId: 'e1' }
+    const d = deps(lead)
+    const earnings = {
+      findForLead: vi.fn(async () => null),
+      recordConversion: vi.fn(async () => ({ id: 'earn1', amount: 750 })),
+      revokeConversion: vi.fn(async () => null),
+    }
+    return { d, earnings, service: createLeadService({ ...d, earningService: earnings }) }
+  }
+
+  it('records the earning when Converted is picked again', async () => {
+    const { earnings, service } = missingEarning()
+    await service.changeStatus('l1', 'CONVERTED', ADMIN, null, {
+      speedMbps: 100, billingPeriod: 'HALF_YEARLY',
+    })
+    expect(earnings.recordConversion).toHaveBeenCalled()
+  })
+
+  it('still insists on knowing the plan', async () => {
+    const { earnings, service } = missingEarning()
+    await expect(service.changeStatus('l1', 'CONVERTED', ADMIN)).rejects.toMatchObject({
+      status: 400,
+    })
+    expect(earnings.recordConversion).not.toHaveBeenCalled()
+  })
+
+  it('does not ask again once the earning is there', async () => {
+    const { earnings, service } = missingEarning()
+    earnings.findForLead.mockResolvedValue({ id: 'earn1', amount: 750 })
+    await service.changeStatus('l1', 'CONVERTED', ADMIN)
+    expect(earnings.recordConversion).not.toHaveBeenCalled()
   })
 })

@@ -36,6 +36,9 @@ export const leadRepository = {
         partner: { select: { id: true, name: true, type: true } },
         employee: { select: { id: true, name: true } },
         building: { select: { id: true, buildingName: true } },
+        // So a converted lead with no earning behind it is visible as such,
+        // rather than looking identical to one that paid out.
+        earning: { select: { amount: true, status: true } },
       },
     }),
 }

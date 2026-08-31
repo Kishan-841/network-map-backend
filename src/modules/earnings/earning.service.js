@@ -8,6 +8,9 @@ const monthKey = (date) => {
 
 export function createEarningService({ earningRepository, rateCardRepository }) {
   return {
+    /** The earning behind a lead, if one was ever recorded. */
+    findForLead: (leadId) => earningRepository.findByLeadId(leadId),
+
     /**
      * Turn a converted lead into money owed.
      *
