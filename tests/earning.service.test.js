@@ -124,6 +124,16 @@ describe('the partner’s month-by-month statement', () => {
     expect(months[0].status).toBe('AWAITING_PAYMENT')
   })
 
+  it('splits each month into paid and outstanding, for the chart', async () => {
+    const { earningRepository, service } = build()
+    earningRepository.listForPartner.mockResolvedValue([
+      { ...rows[0] },                                  // Aug, ₹750, PAID
+      { ...rows[1], status: 'AWAITING_PAYMENT' },      // Aug, ₹1,200, awaiting
+    ])
+    const { months } = await service.statementFor('p1')
+    expect(months[0]).toMatchObject({ total: 1950, paid: 750, outstanding: 1200 })
+  })
+
   it('reports the lifetime and outstanding totals', async () => {
     const out = await statement()
     expect(out.total).toBe(4050)

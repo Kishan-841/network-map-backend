@@ -102,6 +102,12 @@ export function createEarningService({ earningRepository, rateCardRepository }) 
         .map((m) => ({
           ...m,
           status: m.lines.every((l) => l.status === 'PAID') ? 'PAID' : 'AWAITING_PAYMENT',
+          // Split out so a month can be drawn as what has landed versus what
+          // is still coming, rather than one undifferentiated total.
+          paid: m.lines.filter((l) => l.status === 'PAID').reduce((s, l) => s + l.amount, 0),
+          outstanding: m.lines
+            .filter((l) => l.status !== 'PAID')
+            .reduce((s, l) => s + l.amount, 0),
         }))
 
       return {
