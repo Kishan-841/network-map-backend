@@ -7,7 +7,7 @@ import { feasibilityLimiter } from '../../middleware/rate-limit.js'
 import { audit } from '../system-logs/audit.js'
 import { createLeadService, LEAD_STATUSES } from './lead.service.js'
 import { leadRepository, demandRepository } from './lead.repository.js'
-import { createFeasibilityService } from '../partners/feasibility.service.js'
+import { createLeadCaptureService } from './lead-capture.service.js'
 import { createBuildingSearchService } from '../partners/building-search.service.js'
 import { createPartnerService } from '../partners/partner.service.js'
 import { partnerRepository } from '../partners/partner.repository.js'
@@ -15,24 +15,34 @@ import { buildingRepository } from '../buildings/building.repository.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
 
 const leadService = createLeadService({ leadRepository })
-const feasibility = createFeasibilityService({ buildingRepository, demandRepository })
+const capture = createLeadCaptureService({ buildingRepository, leadRepository })
 const buildingSearch = createBuildingSearchService({ buildingRepository })
 const partners = createPartnerService({ partnerRepository, storage: getStorageProvider() })
 
-const feasibilitySchema = z.object({
+const placeSchema = z.object({
   placeId: z.string().trim().max(200).optional(),
   latitude: z.coerce.number().min(-90).max(90),
   longitude: z.coerce.number().min(-180).max(180),
-  name: z.string().trim().max(200).optional(),
+  placeName: z.string().trim().max(200).optional(),
 })
 
+/**
+ * What the partner fills in. Deliberately short — every field we remove is a
+ * partner who finishes (partner-network.md §0). No email, and no buildingId:
+ * the server decides which building this is, not the browser.
+ */
 const leadSchema = z.object({
   customerName: z.string().trim().min(1).max(120),
   customerMobile: z.string().trim().regex(/^[6-9][0-9]{9}$/, 'Enter a 10-digit mobile number'),
-  customerEmail: z.string().trim().toLowerCase().email().optional().or(z.literal('')),
+  requirementMbps: z.coerce.number().int().refine((n) => [100, 200, 300, 400].includes(n), {
+    message: 'Pick a speed',
+  }),
+  placeId: z.string().trim().max(200).optional(),
+  placeName: z.string().trim().max(200).optional(),
   address: z.string().trim().max(300).optional(),
+  latitude: z.coerce.number().min(-90).max(90).optional(),
+  longitude: z.coerce.number().min(-180).max(180).optional(),
   note: z.string().trim().max(500).optional(),
-  buildingId: z.string().trim().optional(),
 })
 
 const statusSchema = z.object({
@@ -60,14 +70,31 @@ partnerLeadRoutes.get('/buildings/search', feasibilityLimiter, async (req, res, 
   }
 })
 
+/**
+ * The green / amber / red signal for a searched building. Returns a single
+ * word — never the building itself, which is why the buildingId that
+ * matchPlace also produces is dropped here.
+ */
 partnerLeadRoutes.post(
-  '/feasibility',
+  '/building-signal',
   feasibilityLimiter,
-  validateBody(feasibilitySchema),
+  validateBody(placeSchema),
   async (req, res, next) => {
     try {
       partners.assertApproved(req.partner)
-      res.json({ success: true, data: await feasibility.check(req.body, req.partner.id) })
+      const { match } = await capture.matchPlace(req.body)
+      if (match === 'NOT_FOUND' && demandRepository) {
+        // Worth knowing what people are asking for, even when the answer is no.
+        await demandRepository.record({
+          partnerId: req.partner.id,
+          placeId: req.body.placeId ?? null,
+          name: req.body.placeName ?? null,
+          latitude: req.body.latitude,
+          longitude: req.body.longitude,
+          matchedBuildingId: null,
+        })
+      }
+      res.json({ success: true, data: { match } })
     } catch (err) {
       next(err)
     }
@@ -76,15 +103,16 @@ partnerLeadRoutes.post(
 
 partnerLeadRoutes.post('/leads', validateBody(leadSchema), async (req, res, next) => {
   try {
-    // The client says which building was picked; the server decides whether we
-    // serve it. Never trust a flag that came back from the browser.
-    if (req.body.buildingId) await buildingSearch.assertServiceable(req.body.buildingId)
-    const body = { ...req.body, customerEmail: req.body.customerEmail || null }
-    const lead = await leadService.createLead(body, req.partner)
+    const lead = await capture.capture(req.body, req.partner)
     // Never echo the internal attribution back to the partner.
     res.status(201).json({
       success: true,
-      data: { id: lead.id, status: lead.status, customerName: lead.customerName },
+      data: {
+        id: lead.id,
+        status: lead.status,
+        customerName: lead.customerName,
+        buildingMatch: lead.buildingMatch,
+      },
     })
   } catch (err) {
     next(err)

@@ -385,6 +385,17 @@ model OtpChallenge {
 }
 
 
+/// How the searched building lined up with our registry, at the moment the
+/// lead was captured. Green, amber, red.
+enum BuildingMatch {
+  /// We serve it today.
+  LIVE
+  /// Surveyed and viable, not lit yet — "coming soon".
+  IN_REGISTRY
+  /// We hold nothing there. The lead is still worth having.
+  NOT_FOUND
+}
+
 enum LeadStatus {
   NEW
   CONTACTED
@@ -418,6 +429,14 @@ model Lead {
   customerEmail  String?
   address        String?
   note           String?
+  /// What speed they asked for: 100 / 200 / 300 / 400.
+  requirementMbps Int?
+
+  /// What the partner actually searched for. Kept even when we matched
+  /// nothing, so an unknown building can be reconciled later rather than lost.
+  searchedPlaceId   String?
+  searchedPlaceName String?
+  buildingMatch     BuildingMatch?
 
   status          LeadStatus @default(NEW)
   duplicateOfId   String?
