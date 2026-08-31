@@ -31,17 +31,24 @@ export const uploadLimiter = rateLimit({
  */
 export const partnerLoginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 20,
+  // Tight where it matters; workable locally. A developer fighting their own
+  // rate limiter learns nothing about the real one.
+  limit: process.env.NODE_ENV === 'production' ? 20 : 200,
   standardHeaders: true,
   legacyHeaders: false,
   skip: () => process.env.NODE_ENV === 'test',
   handler: (req, res) => json(res, 'Too many attempts. Try again in a few minutes.'),
 })
 
-/** OTP requests send real email on our account — kept deliberately tight. */
+/**
+ * OTP requests cost us money in production (SMS, email) and are the obvious
+ * thing to abuse, so the cap is tight there. In development the same cap
+ * makes the flow untestable after a handful of runs, and a developer working
+ * around their own rate limiter learns nothing about the real one.
+ */
 export const otpRequestLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 5,
+  limit: process.env.NODE_ENV === 'production' ? 5 : 100,
   standardHeaders: true,
   legacyHeaders: false,
   skip: () => process.env.NODE_ENV === 'test',
