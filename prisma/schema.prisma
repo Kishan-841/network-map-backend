@@ -79,11 +79,12 @@ model User {
   pincodes      UserPincode[]
 
   /// Partner network — see partner-network.md
-  partnersOnboarded  Partner[]        @relation("PartnerOnboardedBy")
-  partnerInvites     PartnerInvite[]  @relation("PartnerInvitesIssued")
-  leadsAttributed    Lead[]           @relation("LeadEmployee")
-  earningsAttributed PartnerEarning[] @relation("EarningEmployee")
-  earningsMarkedPaid PartnerEarning[] @relation("EarningPaidBy")
+  partnersOnboarded  Partner[]         @relation("PartnerOnboardedBy")
+  partnerInvites     PartnerInvite[]   @relation("PartnerInvitesIssued")
+  leadsAttributed    Lead[]            @relation("LeadEmployee")
+  earningsAttributed PartnerEarning[]  @relation("EarningEmployee")
+  partnerReferrals   PartnerReferral[] @relation("PartnerReferralEmployee")
+  earningsMarkedPaid PartnerEarning[]  @relation("EarningPaidBy")
 }
 
 /// One row per pincode an acquisition agent covers (within one city).
@@ -330,11 +331,13 @@ model Partner {
   approvedAt      DateTime?
   rejectionReason String?
 
-  documents        PartnerDocument[]
-  invite           PartnerInvite?
-  leads            Lead[]
-  earnings         PartnerEarning[]
-  coverageRequests CoverageRequest[]
+  documents         PartnerDocument[]
+  invite            PartnerInvite?
+  leads             Lead[]
+  earnings          PartnerEarning[]
+  introductionsMade PartnerReferral[] @relation("PartnerReferralBy")
+  introducedAs      PartnerReferral?  @relation("PartnerReferralJoined")
+  coverageRequests  CoverageRequest[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -556,4 +559,59 @@ model PartnerEarning {
 enum EarningStatus {
   AWAITING_PAYMENT
   PAID
+}
+
+/// Someone a partner has introduced who could also send us customers
+/// (partner-network.md §7).
+///
+/// Deliberately NOT a Partner row: these people have agreed to nothing yet,
+/// and half of them never will. Turning an introduction into an account is a
+/// separate act with its own consent.
+///
+/// §7.1 leaves who follows up, whether the referrer earns anything, and
+/// whether chains exist all open. None of that blocks capture — losing the
+/// introduction is worse than not yet paying for it — so the record carries
+/// what a later commission rule would need (`joinedPartnerId`) and decides
+/// nothing.
+model PartnerReferral {
+  id String @id @default(cuid())
+
+  /// Who made the introduction.
+  referredById String
+  referredBy   Partner @relation("PartnerReferralBy", fields: [referredById], references: [id], onDelete: Cascade)
+
+  /// SNAPSHOT of the referring partner's employee at the moment of
+  /// introduction — the §7.1 proposal is that follow-up lands with them, and
+  /// re-assigning the partner later must not move work already queued.
+  employeeId String?
+  employee   User?   @relation("PartnerReferralEmployee", fields: [employeeId], references: [id], onDelete: SetNull)
+
+  name   String
+  type   PartnerType
+  mobile String
+  email  String?
+  note   String?
+
+  status PartnerReferralStatus @default(NEW)
+
+  /// Set when this introduction actually became a partner. Kept so a future
+  /// referral reward has the link it needs without re-deriving it from a
+  /// mobile number.
+  joinedPartnerId String?  @unique
+  joinedPartner   Partner? @relation("PartnerReferralJoined", fields: [joinedPartnerId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([referredById])
+  @@index([employeeId])
+  @@index([status])
+  @@index([mobile])
+}
+
+enum PartnerReferralStatus {
+  NEW
+  CONTACTED
+  JOINED
+  DECLINED
 }
