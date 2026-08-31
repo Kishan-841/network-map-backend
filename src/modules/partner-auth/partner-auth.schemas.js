@@ -19,7 +19,6 @@ export const registerSchema = z.object({
   type: z.enum(['AGENT', 'SOCIETY_REPRESENTATIVE', 'RETAIL_SHOP', 'DSA']),
   companyName: z.string().trim().max(150).optional(),
   email: email.optional().or(z.literal('')),
-  hasGst: z.boolean().optional().default(false),
   preferredLanguage: z.enum(['EN', 'HI', 'MR']).optional().default('EN'),
   inviteToken: z.string().trim().min(10).max(200).optional(),
 })

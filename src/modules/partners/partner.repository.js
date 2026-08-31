@@ -2,7 +2,7 @@ import { prisma } from '../../lib/prisma.js'
 
 const publicSelect = {
   id: true, name: true, type: true, companyName: true, mobile: true, email: true,
-  status: true, hasGst: true, onboardedAt: true, approvedAt: true, rejectionReason: true,
+  status: true, onboardedAt: true, approvedAt: true, rejectionReason: true,
   onboardedBy: { select: { id: true, name: true } },
 }
 

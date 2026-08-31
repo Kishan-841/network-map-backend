@@ -11,7 +11,7 @@ import { getStorageProvider } from '../../lib/storage/index.js'
 const service = createPartnerService({ partnerRepository, storage: getStorageProvider() })
 
 const documentSchema = z.object({
-  type: z.enum(['AADHAAR', 'PAN', 'GST']),
+  type: z.enum(['AADHAAR', 'PAN']),
   url: z.string().url(),
 })
 const rejectSchema = z.object({ reason: z.string().trim().min(3).max(500) })
@@ -29,9 +29,8 @@ partnerSelfRoutes.get('/onboarding', async (req, res, next) => {
       success: true,
       data: {
         status: req.partner.status,
-        hasGst: req.partner.hasGst,
         rejectionReason: req.partner.rejectionReason,
-        required: service.requiredDocuments(req.partner),
+        required: service.requiredDocuments(),
         documents,
       },
     })

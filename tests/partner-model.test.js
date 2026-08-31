@@ -16,7 +16,6 @@ describe('Partner model', () => {
       },
     })
     expect(p.status).toBe('REGISTERED')
-    expect(p.hasGst).toBe(false)
     expect(p.onboardedById).toBeNull()
   })
 

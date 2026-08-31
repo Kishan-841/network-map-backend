@@ -302,7 +302,6 @@ enum PartnerStatus {
 enum PartnerDocumentType {
   AADHAAR
   PAN
-  GST
 }
 
 model Partner {
@@ -319,8 +318,6 @@ model Partner {
   status       PartnerStatus @default(REGISTERED)
   /// EN | HI | MR — the portal speaks their language.
   preferredLanguage String    @default("EN")
-  /// Set by the partner at onboarding; makes the GST document required.
-  hasGst       Boolean       @default(false)
 
   /// The employee who recruited them. Commission will depend on this, so it
   /// is recorded whether it came from an invite link or an admin mapping.

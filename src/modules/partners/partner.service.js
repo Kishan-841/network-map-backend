@@ -1,10 +1,10 @@
 import { ApiError } from '../../lib/api-error.js'
 
-const DOC_LABEL = { AADHAAR: 'Aadhaar card', PAN: 'PAN card', GST: 'GST certificate' }
+const DOC_LABEL = { AADHAAR: 'Aadhaar card', PAN: 'PAN card' }
 
-/** Aadhaar and PAN always; GST only when the partner says they have one. */
-export const requiredDocuments = (partner) =>
-  partner?.hasGst ? ['AADHAAR', 'PAN', 'GST'] : ['AADHAAR', 'PAN']
+/** Aadhaar and PAN. Nothing else — every extra document is a partner who
+ *  does not finish (partner-network.md §0). */
+export const requiredDocuments = () => ['AADHAAR', 'PAN']
 
 export function createPartnerService({ partnerRepository, storage }) {
   return {
@@ -40,7 +40,7 @@ export function createPartnerService({ partnerRepository, storage }) {
       if (!partner) throw ApiError.notFound('Partner not found')
 
       const have = new Set((await partnerRepository.listDocuments(partnerId)).map((d) => d.type))
-      const missing = requiredDocuments(partner).filter((t) => !have.has(t))
+      const missing = requiredDocuments().filter((t) => !have.has(t))
       if (missing.length) {
         throw ApiError.badRequest(
           `Still needed: ${missing.map((t) => DOC_LABEL[t]).join(', ')}`,

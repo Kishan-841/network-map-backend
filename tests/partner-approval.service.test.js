@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createPartnerService } from '../src/modules/partners/partner.service.js'
 
-const base = { id: 'p1', status: 'REGISTERED', hasGst: false }
+const base = { id: 'p1', status: 'REGISTERED' }
 const doc = (type) => ({ type, url: 'https://cdn/uploads/x.jpg' })
 
 const deps = (partner, docs = []) => ({
@@ -36,20 +36,17 @@ describe('submitting documents for approval', () => {
     expect(msg).toMatch(/PAN/i)
   })
 
-  it('accepts Aadhaar + PAN when GST does not apply', async () => {
+  it('accepts Aadhaar + PAN', async () => {
     const d = deps(base, [doc('AADHAAR'), doc('PAN')])
     await createPartnerService(d).submitDocuments('p1')
     expect(d.partnerRepository.update).toHaveBeenCalledWith('p1', { status: 'PENDING_APPROVAL' })
   })
 
-  it('requires GST when the partner said they have one', async () => {
-    const svc = createPartnerService(deps({ ...base, hasGst: true }, [doc('AADHAAR'), doc('PAN')]))
-    await expect(svc.submitDocuments('p1')).rejects.toMatchObject({ status: 400 })
-  })
-
-  it('accepts all three when GST applies', async () => {
-    const d = deps({ ...base, hasGst: true }, [doc('AADHAAR'), doc('PAN'), doc('GST')])
-    await createPartnerService(d).submitDocuments('p1')
+  it('asks for Aadhaar and PAN only — nothing else', async () => {
+    const d = deps(base, [doc('AADHAAR'), doc('PAN')])
+    const svc = createPartnerService(d)
+    expect(svc.requiredDocuments()).toEqual(['AADHAAR', 'PAN'])
+    await svc.submitDocuments('p1')
     expect(d.partnerRepository.update).toHaveBeenCalledWith('p1', { status: 'PENDING_APPROVAL' })
   })
 
