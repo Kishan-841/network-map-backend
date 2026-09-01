@@ -20,7 +20,12 @@ const app = createApp()
 const tokenFor = (id, role) =>
   jwt.sign({ sub: id, role }, env.jwtSecret, { audience: 'staff', expiresIn: '1h' })
 
+const SHUT_OUT = ['SURVEYOR', 'MANAGER', 'SUPERVISOR', 'ACQUISITION_AGENT', 'ACQUISITION_LEAD']
+
 let A, B, pA, pB, lA, lB, iA, iB, tokA, tokB, tokAdmin
+/** Real users per role — requireAuth re-reads the user, so a synthetic
+ *  subject would be refused 401 and prove nothing about the role check. */
+const shutOutTokens = {}
 
 beforeAll(async () => {
   const mkUser = (name, role) =>
@@ -55,6 +60,11 @@ beforeAll(async () => {
     })
   iA = await mkIntro(pA, A, `intro-a-${TAG}`)
   iB = await mkIntro(pB, B, `intro-b-${TAG}`)
+
+  for (const role of SHUT_OUT) {
+    const u = await mkUser(`shut-${role.toLowerCase()}`, role)
+    shutOutTokens[role] = tokenFor(u.id, role)
+  }
 
   tokA = tokenFor(A.id, 'PARTNER_MANAGER')
   tokB = tokenFor(B.id, 'PARTNER_MANAGER')
@@ -181,14 +191,40 @@ describe('introductions follow the same boundary', () => {
   })
 })
 
+/**
+ * Who may reach the partner network at all.
+ *
+ * Only the admin and the partner managers. A manager or supervisor oversees
+ * the building registry, not other people's customers — and a lead carries a
+ * member of the public's name and mobile number, so reaching it needs a
+ * reason rather than a senior-sounding role.
+ */
 describe('roles with no business here', () => {
-  it.each(['/api/v1/partners', '/api/v1/leads', '/api/v1/partner-referrals'])(
-    'a surveyor is refused %s',
-    async (path) => {
+  const PATHS = ['/api/v1/partners', '/api/v1/leads', '/api/v1/partner-referrals']
+
+  for (const role of SHUT_OUT) {
+    it.each(PATHS)(`a ${role} is refused %s`, async (path) => {
       const res = await request(app)
         .get(path)
-        .set('Authorization', `Bearer ${tokenFor('test-surveyor', 'SURVEYOR')}`)
+        .set('Authorization', `Bearer ${shutOutTokens[role]}`)
+      // 403, not 401: these are real, signed-in, active users. The refusal is
+      // about the role, which is what this asserts.
       expect(res.status).toBe(403)
-    },
-  )
+    })
+  }
+
+  it.each(SHUT_OUT)('a %s cannot move a lead either', async (role) => {
+    const res = await request(app)
+      .patch(`/api/v1/leads/${lA.id}/status`)
+      .set('Authorization', `Bearer ${shutOutTokens[role]}`)
+      .send({ status: 'CONTACTED' })
+    expect(res.status).toBe(403)
+    expect((await prisma.lead.findUnique({ where: { id: lA.id } })).status).toBe('NEW')
+  })
+
+  it('every one of these paths needs a token at all', async () => {
+    for (const path of PATHS) {
+      expect((await request(app).get(path)).status).toBe(401)
+    }
+  })
 })

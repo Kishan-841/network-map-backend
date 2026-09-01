@@ -63,10 +63,8 @@ partnerReferralRoutes.get('/partner-referrals', async (req, res, next) => {
 // Staff-facing
 // ---------------------------------------------------------------------------
 export const staffPartnerReferralRoutes = Router()
-staffPartnerReferralRoutes.use(
-  requireAuth,
-  requireRole('ADMIN', 'MANAGER', 'PARTNER_MANAGER', 'SUPERVISOR'),
-)
+// Same audience as leads: the admin and the partner managers, nobody else.
+staffPartnerReferralRoutes.use(requireAuth, requireRole('ADMIN', 'PARTNER_MANAGER'))
 
 staffPartnerReferralRoutes.get('/', async (req, res, next) => {
   try {

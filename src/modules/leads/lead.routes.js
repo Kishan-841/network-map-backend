@@ -158,7 +158,11 @@ partnerLeadRoutes.get('/earnings', async (req, res, next) => {
 // Staff-facing
 // ---------------------------------------------------------------------------
 export const staffLeadRoutes = Router()
-staffLeadRoutes.use(requireAuth, requireRole('ADMIN', 'MANAGER', 'PARTNER_MANAGER', 'SUPERVISOR'))
+// The partner network is run by the admin and the partner managers. A
+// manager or supervisor oversees the building registry, not other people's
+// customers — a lead carries a member of the public's name and mobile number,
+// so reaching it needs a reason, not just a senior-sounding role.
+staffLeadRoutes.use(requireAuth, requireRole('ADMIN', 'PARTNER_MANAGER'))
 
 staffLeadRoutes.get('/', async (req, res, next) => {
   try {
@@ -178,7 +182,7 @@ staffLeadRoutes.patch(
   '/:id/status',
   // A partner manager works their own partners' leads; the service enforces
   // which ones those are.
-  requireRole('ADMIN', 'MANAGER', 'SUPERVISOR', 'PARTNER_MANAGER'),
+  requireRole('ADMIN', 'PARTNER_MANAGER'),
   audit('Lead', 'StatusChange', { describe: (req) => `Lead ${req.params.id} → ${req.body?.status}` }),
   validateBody(statusSchema),
   async (req, res, next) => {
