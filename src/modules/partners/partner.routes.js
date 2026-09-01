@@ -99,7 +99,7 @@ partnerAdminRoutes.get('/', async (req, res, next) => {
       // An employee sees only the partners they recruited.
       ...(req.user.role !== 'ADMIN' && { onboardedById: req.user.id }),
     }
-    res.json({ success: true, data: await partnerRepository.list(where) })
+    res.json({ success: true, data: await partnerRepository.listWithTotals(where) })
   } catch (err) {
     next(err)
   }
