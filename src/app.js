@@ -26,7 +26,16 @@ export function createApp() {
   // Restrict which browser origins may call the API. '*' in dev; a specific
   // list in production (CORS_ORIGIN, wildcards allowed for Vercel previews).
   // We authenticate via bearer tokens, not cookies, so credentials stay off.
-  app.use(cors({ origin: buildCorsOrigin(env.corsOrigin) }))
+  app.use(
+    cors({
+      origin: buildCorsOrigin(env.corsOrigin),
+      // A browser hides every response header from JS except a short safe
+      // list, so a cross-origin download would arrive with no filename and no
+      // row count. The API and the web app are on different origins in every
+      // environment, so these have to be named explicitly.
+      exposedHeaders: ['Content-Disposition', 'X-Export-Rows', 'X-Export-Truncated'],
+    }),
+  )
   app.use(express.json({ limit: '1mb' }))
 
   app.get('/api/v1/health', (req, res) => {
