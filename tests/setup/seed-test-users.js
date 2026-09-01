@@ -10,6 +10,8 @@ const TEST_USERS = [
   { id: 'test-user', role: 'SURVEYOR' },
 ]
 
+const TEST_IDS = TEST_USERS.map((u) => u.id)
+
 export async function setup() {
   for (const { id, role } of TEST_USERS) {
     await prisma.user.upsert({
@@ -25,4 +27,19 @@ export async function setup() {
       },
     })
   }
+}
+
+/**
+ * Put the database back.
+ *
+ * Without this the four fixtures survived every run and showed up in the real
+ * Users screen alongside actual staff — and the audited routes they exercise
+ * had written thousands of system-log rows under their names, burying the
+ * genuine audit trail. Tests share the dev database here, so cleaning up is
+ * part of running.
+ */
+export async function teardown() {
+  await prisma.systemLog.deleteMany({ where: { userId: { in: TEST_IDS } } })
+  await prisma.user.deleteMany({ where: { id: { in: TEST_IDS } } })
+  await prisma.$disconnect()
 }
