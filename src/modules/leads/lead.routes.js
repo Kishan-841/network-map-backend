@@ -43,9 +43,20 @@ const placeSchema = z.object({
 const leadSchema = z.object({
   customerName: z.string().trim().min(1).max(120),
   customerMobile: z.string().trim().regex(/^[6-9][0-9]{9}$/, 'Enter a 10-digit mobile number'),
-  requirementMbps: z.coerce.number().int().refine((n) => [100, 200, 300, 400].includes(n), {
-    message: 'Pick a speed',
-  }),
+  // Optional: a partner standing in front of a customer often has a name and
+  // a number before anyone has discussed a plan, and refusing the lead over a
+  // missing speed loses the whole lead. Whoever calls them settles it.
+  // preprocess, not a union: z.coerce turns '' and null into 0 BEFORE any
+  // branch can catch them, and 0 is a valid int — so an empty field would
+  // arrive as a speed of zero rather than as no answer.
+  requirementMbps: z.preprocess(
+    (value) => (value === '' || value == null ? undefined : value),
+    z.coerce
+      .number()
+      .int()
+      .refine((n) => [100, 200, 300, 400].includes(n), { message: 'Pick a speed we sell' })
+      .optional(),
+  ),
   placeId: z.string().trim().max(200).optional(),
   placeName: z.string().trim().max(200).optional(),
   address: z.string().trim().max(300).optional(),
