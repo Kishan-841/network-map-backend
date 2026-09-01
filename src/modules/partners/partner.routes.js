@@ -7,8 +7,15 @@ import { audit } from '../system-logs/audit.js'
 import { createPartnerService } from './partner.service.js'
 import { partnerRepository } from './partner.repository.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
+import { env } from '../../config/env.js'
+import { createApprovalBypassService } from './approval-bypass.service.js'
+import { partnerAuthRepository } from '../partner-auth/partner-auth.repository.js'
 
 const service = createPartnerService({ partnerRepository, storage: getStorageProvider() })
+const approvalBypass = createApprovalBypassService({
+  partnerAuthRepository,
+  allowed: env.allowApprovalBypass,
+})
 
 const documentSchema = z.object({
   type: z.enum(['AADHAAR', 'PAN']),
@@ -32,6 +39,9 @@ partnerSelfRoutes.get('/onboarding', async (req, res, next) => {
         rejectionReason: req.partner.rejectionReason,
         required: service.requiredDocuments(),
         documents,
+        // The browser cannot be trusted to know whether the shortcut is on,
+        // so the server says. False in production, always.
+        bypassAvailable: env.allowApprovalBypass === true,
       },
     })
   } catch (err) {
@@ -46,6 +56,26 @@ partnerSelfRoutes.post('/documents', validateBody(documentSchema), async (req, r
     next(err)
   }
 })
+
+/**
+ * TESTING ONLY — approve yourself and skip the upload entirely. 404s unless
+ * ALLOW_APPROVAL_BYPASS is set, and the server refuses to boot with that set
+ * in production. Audited, so a use of it is never silent.
+ */
+partnerSelfRoutes.post(
+  '/documents/bypass',
+  audit('Partner', 'ApprovalBypass', {
+    describe: (req) => `Partner ${req.partner?.id} self-approved (testing bypass)`,
+  }),
+  async (req, res, next) => {
+    try {
+      const updated = await approvalBypass.approveSelf(req.partner)
+      res.json({ success: true, data: { status: updated.status } })
+    } catch (err) {
+      next(err)
+    }
+  },
+)
 
 partnerSelfRoutes.post('/documents/submit', async (req, res, next) => {
   try {

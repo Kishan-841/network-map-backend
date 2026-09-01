@@ -34,6 +34,12 @@ export const env = {
    */
   showOtpInResponse: process.env.SHOW_OTP_IN_RESPONSE === 'true',
   /**
+   * TESTING ONLY. Lets a partner approve themselves without uploading
+   * documents, so testing does not mean putting a real identity document into
+   * a bucket that is still public. Guarded at startup below.
+   */
+  allowApprovalBypass: process.env.ALLOW_APPROVAL_BYPASS === 'true',
+  /**
    * Where the BROWSER app lives — not APP_URL, which is this API. Partner
    * invite links are opened by a person, so they must point at the site.
    * Falls back to the first CORS origin, which is already the front end.
@@ -93,5 +99,13 @@ if (env.showOtpInResponse && env.nodeEnv === 'production') {
   throw new Error(
     'SHOW_OTP_IN_RESPONSE=true is not permitted in production: it would hand ' +
       "anyone the code to sign in as any partner. Unset it and redeploy.",
+  )
+}
+
+if (env.allowApprovalBypass && env.nodeEnv === 'production') {
+  throw new Error(
+    'ALLOW_APPROVAL_BYPASS=true is not permitted in production: it would let ' +
+      'any partner approve themselves and start creating leads without ever ' +
+      'showing us a document. Unset it and redeploy.',
   )
 }

@@ -4,6 +4,7 @@ export const partnerAuthRepository = {
   findByMobile: (mobile) => prisma.partner.findUnique({ where: { mobile } }),
   findById: (id) => prisma.partner.findUnique({ where: { id } }),
   create: (data) => prisma.partner.create({ data }),
+  update: (id, data) => prisma.partner.update({ where: { id }, data }),
 }
 
 export const otpRepository = {
