@@ -313,10 +313,12 @@ export function createBuildingService({ buildingRepository, storage, userReposit
      */
     async exportBuildings(filters = {}, actor) {
       const where = await buildListWhere(filters, actor)
-      const found = await buildingRepository.list(where, { skip: 0, take: EXPORT_LIMIT })
+      const found = await buildingRepository.listForExport(where, { take: EXPORT_LIMIT })
 
+      // Operator is appended rather than slotted beside Zone: anyone already
+      // working from an exported file keeps their column positions.
       return {
-        columns: ['Building name', 'Address', 'Pincode', 'Home pass', 'Zone'],
+        columns: ['Building name', 'Address', 'Pincode', 'Home pass', 'Zone', 'Operator'],
         rows: found.map((b) => [
           // Blank, never the string "null" — a spreadsheet cell with nothing
           // in it reads as nothing; one containing "null" reads as data.
@@ -328,6 +330,9 @@ export function createBuildingService({ buildingRepository, storage, userReposit
           // Home pass stays numeric so the column can be summed and sorted.
           b.details?.homePass ?? '',
           b.zone?.name ?? '',
+          // Reached through the zone — a building has no operator of its own,
+          // and a zone may not have one assigned yet.
+          b.zone?.operator?.name ?? '',
         ]),
         truncated: found.length === EXPORT_LIMIT,
       }

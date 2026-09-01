@@ -22,8 +22,30 @@ const listInclude = {
   createdBy: { select: { id: true, name: true } },
 }
 
+/**
+ * Exactly the fields the spreadsheet writes, and nothing else.
+ *
+ * Separate from `listInclude` on purpose: that one carries contact, city,
+ * photos and createdBy for the screen, and the operator join added there
+ * would ride along on every map request too.
+ */
+const exportSelect = {
+  buildingName: true,
+  formattedAddress: true,
+  pincode: true,
+  details: { select: { homePass: true } },
+  zone: { select: { name: true, operator: { select: { name: true } } } },
+}
+
 export const buildingRepository = {
   create: (data) => prisma.building.create({ data, include: fullInclude }),
+  listForExport: (where = {}, { take = 1000 } = {}) =>
+    prisma.building.findMany({
+      where,
+      select: exportSelect,
+      orderBy: { buildingName: 'asc' },
+      take,
+    }),
   list: (where = {}, { skip = 0, take = 100 } = {}) =>
     prisma.building.findMany({
       where,
