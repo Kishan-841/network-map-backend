@@ -6,7 +6,7 @@ const monthKey = (date) => {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
 }
 
-export function createEarningService({ earningRepository, rateCardRepository }) {
+export function createEarningService({ earningRepository, rateCardRepository, leadRepository }) {
   return {
     /** The earning behind a lead, if one was ever recorded. */
     findForLead: (leadId) => earningRepository.findByLeadId(leadId),
@@ -74,16 +74,38 @@ export function createEarningService({ earningRepository, rateCardRepository }) 
      * What the partner sees on the Earnings tab: month by month, newest
      * first, with whether we have settled it.
      */
+    /**
+     * What the partner sees on the Earnings tab: month by month, newest
+     * first, with whether we have settled it.
+     *
+     * Two clocks meet here. A customer is ADDED when the partner sends them
+     * in and ACTIVATED when they sign up, which is often a different month —
+     * so a month can have leads and no earnings, and must still appear.
+     * Dropping it would make the table claim the partner did nothing.
+     */
     async statementFor(partnerId) {
-      const rows = await earningRepository.listForPartner(partnerId)
+      const [rows, leads] = await Promise.all([
+        earningRepository.listForPartner(partnerId),
+        leadRepository?.listCreatedAtForPartner(partnerId) ?? [],
+      ])
 
       const byMonth = new Map()
+      const slot = (key) => {
+        if (!byMonth.has(key)) {
+          byMonth.set(key, {
+            month: key, added: 0, activated: 0, total: 0, count: 0, lines: [],
+          })
+        }
+        return byMonth.get(key)
+      }
+
+      for (const lead of leads) slot(monthKey(lead.createdAt)).added += 1
+
       for (const row of rows) {
-        const key = monthKey(row.earnedAt)
-        if (!byMonth.has(key)) byMonth.set(key, { month: key, total: 0, count: 0, lines: [] })
-        const month = byMonth.get(key)
+        const month = slot(monthKey(row.earnedAt))
         month.total += row.amount
         month.count += 1
+        month.activated += 1
         month.lines.push({
           id: row.id,
           customerName: row.lead?.customerName ?? null,
@@ -97,25 +119,31 @@ export function createEarningService({ earningRepository, rateCardRepository }) 
 
       const months = [...byMonth.values()]
         .sort((a, b) => b.month.localeCompare(a.month))
-        // A month is only paid once every line in it is. Anything else would
-        // show "Paid" over a total the partner has not fully received.
         .map((m) => ({
           ...m,
-          status: m.lines.every((l) => l.status === 'PAID') ? 'PAID' : 'AWAITING_PAYMENT',
-          // Split out so a month can be drawn as what has landed versus what
-          // is still coming, rather than one undifferentiated total.
+          // A month is only paid once every line in it is. Anything else
+          // would show "Paid" over a total not fully received. A month with
+          // no earnings at all is not "paid" — it is simply awaiting.
+          status:
+            m.lines.length && m.lines.every((l) => l.status === 'PAID')
+              ? 'PAID'
+              : 'AWAITING_PAYMENT',
           paid: m.lines.filter((l) => l.status === 'PAID').reduce((s, l) => s + l.amount, 0),
           outstanding: m.lines
             .filter((l) => l.status !== 'PAID')
             .reduce((s, l) => s + l.amount, 0),
         }))
 
+      const sum = (list) => list.reduce((total, r) => total + r.amount, 0)
       return {
         months,
-        total: rows.reduce((sum, r) => sum + r.amount, 0),
-        outstanding: rows
-          .filter((r) => r.status !== 'PAID')
-          .reduce((sum, r) => sum + r.amount, 0),
+        added: leads.length,
+        // One earning per converted lead, so this counts customers who
+        // actually signed up.
+        activated: rows.length,
+        total: sum(rows),
+        paid: sum(rows.filter((r) => r.status === 'PAID')),
+        outstanding: sum(rows.filter((r) => r.status !== 'PAID')),
         count: rows.length,
       }
     },

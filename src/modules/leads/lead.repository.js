@@ -23,6 +23,9 @@ export const leadRepository = {
       orderBy: { createdAt: 'desc' },
       select: partnerView,
     }),
+  /** Just the dates — the earnings statement counts leads per month. */
+  listCreatedAtForPartner: (partnerId) =>
+    prisma.lead.findMany({ where: { partnerId }, select: { createdAt: true } }),
   findById: (id) => prisma.lead.findUnique({ where: { id } }),
   update: (id, data) => prisma.lead.update({ where: { id }, data }),
   recordEvent: (data) => prisma.leadStatusEvent.create({ data }),

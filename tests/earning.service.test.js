@@ -143,8 +143,112 @@ describe('the partner’s month-by-month statement', () => {
   it('has an empty statement, not a crash, for a partner who has earned nothing', async () => {
     const { earningRepository, service } = build()
     earningRepository.listForPartner.mockResolvedValue([])
-    expect(await service.statementFor('p1')).toEqual({
-      months: [], total: 0, outstanding: 0, count: 0,
+    // toMatchObject, not toEqual: the statement carries added/activated too,
+    // and this test is about the empty case, not the exact shape.
+    expect(await service.statementFor('p1')).toMatchObject({
+      months: [], total: 0, outstanding: 0, count: 0, added: 0, activated: 0, paid: 0,
     })
+  })
+})
+
+/**
+ * The month-by-month table on the Earnings tab.
+ *
+ * Two different clocks meet here: a customer is ADDED when the partner sends
+ * them in, and ACTIVATED when they sign up — which can be a different month
+ * entirely. A month with three added and one activated is the normal case,
+ * and collapsing them into one number would hide exactly the lag a partner
+ * wants to see.
+ */
+describe('customers added versus activated', () => {
+  const earnings = [
+    { id: 'a', amount: 750, status: 'PAID', earnedAt: new Date('2026-08-04T10:00:00Z'),
+      lead: { customerName: 'Anita' }, speedMbps: 100, billingPeriod: 'HALF_YEARLY' },
+    { id: 'b', amount: 1200, status: 'AWAITING_PAYMENT', earnedAt: new Date('2026-08-20T10:00:00Z'),
+      lead: { customerName: 'Rohit' }, speedMbps: 100, billingPeriod: 'YEARLY' },
+  ]
+  // Three sent in during July; one of them only signed up in August.
+  const leadDates = [
+    { createdAt: new Date('2026-07-02T10:00:00Z') },
+    { createdAt: new Date('2026-07-19T10:00:00Z') },
+    { createdAt: new Date('2026-07-28T10:00:00Z') },
+    { createdAt: new Date('2026-08-06T10:00:00Z') },
+  ]
+
+  const statement = async () => {
+    const earningRepository = {
+      listForPartner: vi.fn(async () => earnings),
+      findByLeadId: vi.fn(), create: vi.fn(), deleteByLeadId: vi.fn(),
+    }
+    const leadRepository = { listCreatedAtForPartner: vi.fn(async () => leadDates) }
+    const service = createEarningService({
+      earningRepository, rateCardRepository: { findRate: vi.fn() }, leadRepository,
+    })
+    return service.statementFor('p1')
+  }
+
+  it('counts what was added in a month from when the lead arrived', async () => {
+    const { months } = await statement()
+    expect(months.find((m) => m.month === '2026-07').added).toBe(3)
+    expect(months.find((m) => m.month === '2026-08').added).toBe(1)
+  })
+
+  it('counts what was activated from when the earning was made', async () => {
+    const { months } = await statement()
+    expect(months.find((m) => m.month === '2026-08').activated).toBe(2)
+    expect(months.find((m) => m.month === '2026-07').activated).toBe(0)
+  })
+
+  it('keeps a month that had leads but no earnings', async () => {
+    // July earned nothing. Dropping it would make the table claim the partner
+    // did nothing that month.
+    const { months } = await statement()
+    expect(months.map((m) => m.month)).toEqual(['2026-08', '2026-07'])
+    expect(months.find((m) => m.month === '2026-07')).toMatchObject({ total: 0, paid: 0 })
+  })
+
+  it('splits each month into what was paid and what is still owed', async () => {
+    const { months } = await statement()
+    expect(months.find((m) => m.month === '2026-08')).toMatchObject({
+      total: 1950, paid: 750, outstanding: 1200,
+    })
+  })
+
+  it('reports the three headline totals', async () => {
+    const out = await statement()
+    expect(out).toMatchObject({
+      activated: 2,   // customers who signed up, ever
+      total: 1950,    // earned in all
+      paid: 750,      // of that, actually received
+      outstanding: 1200,
+      added: 4,
+    })
+  })
+
+  it('works when the partner has sent nobody in at all', async () => {
+    const earningRepository = {
+      listForPartner: vi.fn(async () => []),
+      findByLeadId: vi.fn(), create: vi.fn(), deleteByLeadId: vi.fn(),
+    }
+    const service = createEarningService({
+      earningRepository, rateCardRepository: { findRate: vi.fn() },
+      leadRepository: { listCreatedAtForPartner: vi.fn(async () => []) },
+    })
+    expect(await service.statementFor('p1')).toMatchObject({
+      months: [], total: 0, paid: 0, outstanding: 0, added: 0, activated: 0,
+    })
+  })
+
+  it('still works with no lead repository at all', async () => {
+    const earningRepository = {
+      listForPartner: vi.fn(async () => earnings),
+      findByLeadId: vi.fn(), create: vi.fn(), deleteByLeadId: vi.fn(),
+    }
+    const service = createEarningService({
+      earningRepository, rateCardRepository: { findRate: vi.fn() },
+    })
+    const out = await service.statementFor('p1')
+    expect(out.added).toBe(0)
+    expect(out.total).toBe(1950)
   })
 })

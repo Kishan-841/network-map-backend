@@ -18,7 +18,11 @@ import { earningRepository } from '../earnings/earning.repository.js'
 import { rateCardRepository } from '../rate-card/rate-card.repository.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
 
-const earningService = createEarningService({ earningRepository, rateCardRepository })
+const earningService = createEarningService({
+  earningRepository,
+  rateCardRepository,
+  leadRepository,
+})
 const leadService = createLeadService({ leadRepository, earningService })
 const capture = createLeadCaptureService({ buildingRepository, leadRepository })
 const buildingSearch = createBuildingSearchService({ buildingRepository })
