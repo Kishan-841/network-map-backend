@@ -361,8 +361,15 @@ model PartnerDocument {
 /// A one-use invite link. The token is stored HASHED — a leaked database
 /// dump must not hand anyone a working invite.
 model PartnerInvite {
-  id         String    @id @default(cuid())
-  tokenHash  String    @unique
+  id        String @id @default(cuid())
+  tokenHash String @unique
+
+  /// The introduction this link was raised for, when it came from one.
+  /// Not unique: a link that expires is replaced by a new one, and the old
+  /// row stays as history. The live invite is the newest unrevoked one.
+  referralId String?
+  referral   PartnerReferral? @relation(fields: [referralId], references: [id], onDelete: SetNull)
+
   employeeId String
   employee   User      @relation("PartnerInvitesIssued", fields: [employeeId], references: [id], onDelete: Cascade)
   expiresAt  DateTime
@@ -373,6 +380,7 @@ model PartnerInvite {
   createdAt  DateTime  @default(now())
 
   @@index([employeeId])
+  @@index([referralId])
 }
 
 /// A pending one-time code: hashed, short-lived, attempt-capped.
@@ -599,6 +607,9 @@ model PartnerReferral {
   /// mobile number.
   joinedPartnerId String?  @unique
   joinedPartner   Partner? @relation("PartnerReferralJoined", fields: [joinedPartnerId], references: [id], onDelete: SetNull)
+
+  /// Invite links raised for this person, newest last.
+  invites PartnerInvite[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

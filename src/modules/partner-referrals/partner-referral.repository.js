@@ -31,9 +31,21 @@ export const partnerReferralRepository = {
       include: {
         referredBy: { select: { id: true, name: true, type: true } },
         employee: { select: { id: true, name: true } },
+        joinedPartner: { select: { id: true, name: true, status: true } },
+        // Newest first, so the client reads [0] as the current link. The raw
+        // token is never stored, so nothing secret travels here.
+        invites: {
+          orderBy: { createdAt: 'desc' },
+          select: { id: true, expiresAt: true, usedAt: true, revokedAt: true, createdAt: true },
+        },
       },
     }),
 
-  findById: (id) => prisma.partnerReferral.findUnique({ where: { id } }),
+  findById: (id) =>
+    prisma.partnerReferral.findUnique({
+      where: { id },
+      // inviteFor needs to see a live link before raising another.
+      include: { invites: { orderBy: { createdAt: 'desc' } } },
+    }),
   update: (id, data) => prisma.partnerReferral.update({ where: { id }, data }),
 }

@@ -8,10 +8,13 @@ import { createPartnerReferralService, REFERRAL_STATUSES } from './partner-refer
 import { partnerReferralRepository } from './partner-referral.repository.js'
 // Lookup-by-mobile lives on the auth repository, not the profile one.
 import { partnerAuthRepository } from '../partner-auth/partner-auth.repository.js'
+import { inviteService } from '../partner-invites/invite.service.js'
+import { env } from '../../config/env.js'
 
 const service = createPartnerReferralService({
   partnerReferralRepository,
   partnerRepository: partnerAuthRepository,
+  inviteService,
 })
 
 const introductionSchema = z.object({
@@ -78,6 +81,34 @@ staffPartnerReferralRoutes.get('/', async (req, res, next) => {
     next(err)
   }
 })
+
+/**
+ * Raise a join link for someone who was introduced.
+ *
+ * The raw token is returned exactly once and never stored, so the response
+ * carries the only copy — the client has to show it there and then.
+ */
+staffPartnerReferralRoutes.post(
+  '/:id/invite',
+  audit('PartnerReferral', 'InviteCreate', {
+    describe: (req) => `Invite link raised for introduction ${req.params.id}`,
+  }),
+  async (req, res, next) => {
+    try {
+      const invite = await service.inviteFor(req.params.id, req.user)
+      res.status(201).json({
+        success: true,
+        data: {
+          id: invite.id,
+          expiresAt: invite.expiresAt,
+          url: `${env.webUrl}/partner/join/${invite.token}`,
+        },
+      })
+    } catch (err) {
+      next(err)
+    }
+  },
+)
 
 staffPartnerReferralRoutes.patch(
   '/:id/status',

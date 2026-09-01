@@ -16,12 +16,15 @@ export function createInviteService({ inviteRepository }) {
   const dead = () => ApiError.badRequest('This invite link is no longer valid')
 
   return {
-    async createInvite({ employeeId }) {
+    async createInvite({ employeeId, referralId = null }) {
       const token = randomBytes(24).toString('hex')
       const expiresAt = new Date(Date.now() + env.partnerInviteTtlDays * 24 * 60 * 60 * 1000)
       const invite = await inviteRepository.create({
         tokenHash: hashToken(token),
         employeeId,
+        // Set when the link was raised for a specific introduction, so using
+        // it can close that introduction out.
+        referralId,
         expiresAt,
       })
       // The raw token is returned exactly once and never stored. If the
@@ -40,6 +43,7 @@ export function createInviteService({ inviteRepository }) {
     },
 
     markUsed: (inviteId, partnerId) => inviteRepository.markUsed(inviteId, partnerId),
+    revoke: (inviteId) => inviteRepository.revoke(inviteId),
   }
 }
 

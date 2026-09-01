@@ -32,6 +32,7 @@ export function createPartnerAuthService({
   otpRepository,
   mailer,
   inviteService,
+  partnerReferralService,
   // Injected so tests can drive the compare; production uses bcrypt.
   verifyCode = bcryptVerifyOtp,
   showOtp = env.showOtpInResponse,
@@ -133,7 +134,15 @@ export function createPartnerAuthService({
       }
 
       const partner = await partnerRepository.create({ ...data, mobile, onboardedById })
-      if (invite && inviteService) await inviteService.markUsed(invite.id, partner.id)
+      if (invite && inviteService) {
+        await inviteService.markUsed(invite.id, partner.id)
+        // A link raised from an introduction closes that introduction out.
+        // Wrapped: the account exists by this point, and failing to tidy up
+        // the introduction must never turn a successful signup into an error.
+        if (invite.referralId && partnerReferralService) {
+          await partnerReferralService.markJoined(invite.referralId, partner.id).catch(() => {})
+        }
+      }
 
       return { token: signPartnerToken(partner), partner: toPublicPartner(partner) }
     },

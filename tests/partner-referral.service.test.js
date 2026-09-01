@@ -148,3 +148,114 @@ describe('the real repositories satisfy what the service calls', () => {
     expect(typeof partnerAuthRepository.findByMobile).toBe('function')
   })
 })
+
+/**
+ * Turning an introduction into a partner.
+ *
+ * The partner manager calls the person, then sends them a join link. The
+ * introduction is "onboarded" only when that link has actually been used —
+ * issuing one proves nothing.
+ */
+describe('inviting someone who was introduced', () => {
+  const REF = { id: 'ref1', name: 'Suresh Kale', status: 'NEW', employeeId: 'e1', invites: [] }
+  const OWNER = { id: 'e1', role: 'PARTNER_MANAGER' }
+  const OTHER = { id: 'e2', role: 'PARTNER_MANAGER' }
+  const ADMIN = { id: 'a1', role: 'ADMIN' }
+
+  const withInvites = (referral = REF) => {
+    const repo = {
+      findById: vi.fn(async () => referral),
+      update: vi.fn(async (id, data) => ({ id, ...data })),
+      create: vi.fn(),
+      findOpenByMobile: vi.fn(),
+      listForPartner: vi.fn(),
+      listForStaff: vi.fn(),
+    }
+    const invites = {
+      createInvite: vi.fn(async () => ({ id: 'inv1', token: 'tok', expiresAt: new Date('2026-09-08') })),
+      revoke: vi.fn(async () => ({})),
+    }
+    return { repo, invites,
+      service: createPartnerReferralService({
+        partnerReferralRepository: repo, partnerRepository: { findByMobile: vi.fn() },
+        inviteService: invites,
+      }) }
+  }
+
+  it('raises a link bound to the introduction and the manager', async () => {
+    const { invites, service } = withInvites()
+    const out = await service.inviteFor('ref1', OWNER)
+    expect(invites.createInvite).toHaveBeenCalledWith({ employeeId: 'e1', referralId: 'ref1' })
+    expect(out.token).toBe('tok')
+  })
+
+  it('moves a new introduction to Contacted — a link means they were reached', async () => {
+    const { repo, service } = withInvites()
+    await service.inviteFor('ref1', OWNER)
+    expect(repo.update).toHaveBeenCalledWith('ref1', { status: 'CONTACTED' })
+  })
+
+  it('leaves a status alone once it has moved past New', async () => {
+    const { repo, service } = withInvites({ ...REF, status: 'CONTACTED' })
+    await service.inviteFor('ref1', OWNER)
+    expect(repo.update).not.toHaveBeenCalled()
+  })
+
+  it('revokes a live link before issuing another, so only one can be used', async () => {
+    const live = { id: 'old', usedAt: null, revokedAt: null, expiresAt: new Date(Date.now() + 8.64e7) }
+    const { invites, service } = withInvites({ ...REF, invites: [live] })
+    await service.inviteFor('ref1', OWNER)
+    expect(invites.revoke).toHaveBeenCalledWith('old')
+  })
+
+  it('does not revoke a link that was already used', async () => {
+    const used = { id: 'old', usedAt: new Date(), revokedAt: null, expiresAt: new Date() }
+    const { invites, service } = withInvites({ ...REF, invites: [used] })
+    await service.inviteFor('ref1', OWNER)
+    expect(invites.revoke).not.toHaveBeenCalled()
+  })
+
+  it('refuses to invite someone who has already joined', async () => {
+    const { invites, service } = withInvites({ ...REF, status: 'JOINED' })
+    await expect(service.inviteFor('ref1', OWNER)).rejects.toMatchObject({ status: 409 })
+    expect(invites.createInvite).not.toHaveBeenCalled()
+  })
+
+  it('a partner manager cannot invite from another manager’s introduction', async () => {
+    const { invites, service } = withInvites()
+    await expect(service.inviteFor('ref1', OTHER)).rejects.toMatchObject({ status: 404 })
+    expect(invites.createInvite).not.toHaveBeenCalled()
+  })
+
+  it('an admin may invite from any', async () => {
+    const { invites, service } = withInvites({ ...REF, employeeId: 'someone-else' })
+    await service.inviteFor('ref1', ADMIN)
+    expect(invites.createInvite).toHaveBeenCalled()
+  })
+})
+
+describe('when the link is actually used', () => {
+  it('marks the introduction joined and records which partner they became', async () => {
+    const repo = {
+      findById: vi.fn(async () => ({ id: 'ref1', status: 'CONTACTED' })),
+      update: vi.fn(async (id, data) => ({ id, ...data })),
+    }
+    const service = createPartnerReferralService({
+      partnerReferralRepository: repo, partnerRepository: {},
+    })
+    await service.markJoined('ref1', 'p9')
+    expect(repo.update).toHaveBeenCalledWith('ref1', {
+      status: 'JOINED',
+      joinedPartnerId: 'p9',
+    })
+  })
+
+  it('is a quiet no-op when the introduction has gone', async () => {
+    const repo = { findById: vi.fn(async () => null), update: vi.fn() }
+    const service = createPartnerReferralService({
+      partnerReferralRepository: repo, partnerRepository: {},
+    })
+    await expect(service.markJoined('gone', 'p9')).resolves.toBeNull()
+    expect(repo.update).not.toHaveBeenCalled()
+  })
+})
