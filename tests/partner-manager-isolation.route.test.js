@@ -199,8 +199,29 @@ describe('introductions follow the same boundary', () => {
  * member of the public's name and mobile number, so reaching it needs a
  * reason rather than a senior-sounding role.
  */
+describe('the rate card is part of the partner network', () => {
+  it('an admin can read it', async () => {
+    const res = await request(app)
+      .get('/api/v1/rate-card')
+      .set('Authorization', `Bearer ${tokAdmin}`)
+    expect(res.status).toBe(200)
+  })
+
+  it('a partner manager can read it', async () => {
+    const res = await request(app).get('/api/v1/rate-card').set('Authorization', `Bearer ${tokA}`)
+    expect(res.status).toBe(200)
+  })
+})
+
 describe('roles with no business here', () => {
-  const PATHS = ['/api/v1/partners', '/api/v1/leads', '/api/v1/partner-referrals']
+  const PATHS = [
+    '/api/v1/partners',
+    '/api/v1/leads',
+    '/api/v1/partner-referrals',
+    // The rate card is the commission structure, so it belongs behind the
+    // same door as the rest of it.
+    '/api/v1/rate-card',
+  ]
 
   for (const role of SHUT_OUT) {
     it.each(PATHS)(`a ${role} is refused %s`, async (path) => {

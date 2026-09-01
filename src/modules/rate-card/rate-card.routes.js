@@ -27,6 +27,8 @@ export const staffRateCardRoutes = Router()
 staffRateCardRoutes.get(
   '/',
   requireAuth,
-  requireRole('ADMIN', 'PARTNER_MANAGER', 'MANAGER', 'SUPERVISOR'),
+  // The rate card IS the commission structure — what every partner is paid.
+  // Same audience as the rest of the partner network.
+  requireRole('ADMIN', 'PARTNER_MANAGER'),
   serve,
 )
