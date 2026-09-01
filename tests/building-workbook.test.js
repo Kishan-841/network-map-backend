@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import ExcelJS from 'exceljs'
 import { buildingsWorkbook, workbookFilename } from '../src/modules/buildings/building-workbook.js'
 
-const COLUMNS = ['Building name', 'Address', 'Pincode', 'Home pass', 'Zone']
+const COLUMNS = ['Building name', 'Address', 'Pincode', 'Home pass', 'Zone', 'Operator']
 
 /** Read the produced file back, so these assert on a real workbook. */
 const reopen = async (payload) => {
@@ -16,8 +16,8 @@ describe('the workbook we hand back', () => {
   const payload = {
     columns: COLUMNS,
     rows: [
-      ['Balaji Heights', 'Baner Road, Pune', '411045', 250, 'Zone A'],
-      ['Shanti Residency', '', '', '', ''],
+      ['Balaji Heights', 'Baner Road, Pune', '411045', 250, 'Zone A', 'Fiber Plus Broadband'],
+      ['Shanti Residency', '', '', '', '', ''],
     ],
   }
 
@@ -36,7 +36,7 @@ describe('the workbook we hand back', () => {
   })
 
   it('keeps a pincode as text, so a leading zero would survive', async () => {
-    const sheet = await reopen({ columns: COLUMNS, rows: [['X', '', '011045', 1, 'Z']] })
+    const sheet = await reopen({ columns: COLUMNS, rows: [['X', '', '011045', 1, 'Z', 'Op']] })
     expect(sheet.getRow(2).getCell(3).value).toBe('011045')
   })
 

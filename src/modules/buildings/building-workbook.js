@@ -17,7 +17,14 @@ export async function buildingsWorkbook({ columns, rows }) {
     header,
     // Address is the only column that runs long; the rest are short enough
     // that a single width reads tidily.
-    width: header === 'Address' ? 46 : header === 'Building name' ? 32 : 14,
+    width:
+      header === 'Address'
+        ? 46
+        : header === 'Building name'
+          ? 32
+          : header === 'Zone' || header === 'Operator'
+            ? 26
+            : 14,
   }))
 
   sheet.getRow(1).font = { bold: true }

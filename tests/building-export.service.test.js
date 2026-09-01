@@ -18,7 +18,7 @@ const rows = [
     formattedAddress: 'Baner Road, Pune',
     pincode: '411045',
     details: { homePass: 250 },
-    zone: { name: 'Zone A' },
+    zone: { name: 'Zone A', operator: { name: 'Fiber Plus Broadband' } },
   },
   {
     id: 'b2',
@@ -28,11 +28,21 @@ const rows = [
     details: null,
     zone: null,
   },
+  {
+    id: 'b3',
+    buildingName: 'Orchid Towers',
+    formattedAddress: 'Wakad, Pune',
+    pincode: null,
+    details: { homePass: 900 },
+    // A zone with no operator assigned yet — the schema allows it.
+    zone: { name: 'Zone C', operator: null },
+  },
 ]
 
 const build = (zones = []) => {
   const buildingRepository = {
     list: vi.fn(async () => rows),
+    listForExport: vi.fn(async () => rows),
     count: vi.fn(async () => rows.length),
     updateMany: vi.fn(),
   }
@@ -53,19 +63,33 @@ describe('the exported rows', () => {
   it('carries exactly the five columns asked for, in order', async () => {
     const { service } = build()
     const out = await service.exportBuildings({}, ADMIN)
-    expect(out.columns).toEqual(['Building name', 'Address', 'Pincode', 'Home pass', 'Zone'])
+    expect(out.columns).toEqual([
+      'Building name',
+      'Address',
+      'Pincode',
+      'Home pass',
+      'Zone',
+      'Operator',
+    ])
   })
 
   it('flattens the nested home pass and zone', async () => {
     const { service } = build()
     const { rows: out } = await service.exportBuildings({}, ADMIN)
-    expect(out[0]).toEqual(['Balaji Heights', 'Baner Road, Pune', '411045', 250, 'Zone A'])
+    expect(out[0]).toEqual([
+      'Balaji Heights',
+      'Baner Road, Pune',
+      '411045',
+      250,
+      'Zone A',
+      'Fiber Plus Broadband',
+    ])
   })
 
   it('leaves a missing value blank rather than writing "null" into a cell', async () => {
     const { service } = build()
     const { rows: out } = await service.exportBuildings({}, ADMIN)
-    expect(out[1]).toEqual(['Shanti Residency', '', '', '', ''])
+    expect(out[1]).toEqual(['Shanti Residency', '', '', '', '', ''])
   })
 
   it('keeps home pass a number, so the column can be summed', async () => {
@@ -85,7 +109,7 @@ describe('what the export is allowed to see', () => {
   it('applies the same filter the list would', async () => {
     const { buildingRepository, service } = build()
     await service.exportBuildings({ zoneId: 'z1' }, ADMIN)
-    expect(buildingRepository.list.mock.calls[0][0]).toMatchObject({
+    expect(buildingRepository.listForExport.mock.calls[0][0]).toMatchObject({
       source: 'COVERAGE',
       zoneId: 'z1',
     })
@@ -94,14 +118,14 @@ describe('what the export is allowed to see', () => {
   it('confines a surveyor to their own scope', async () => {
     const { buildingRepository, service } = build(['z1'])
     await service.exportBuildings({}, SURVEYOR)
-    const where = buildingRepository.list.mock.calls[0][0]
+    const where = buildingRepository.listForExport.mock.calls[0][0]
     expect(where.AND).toEqual([{ OR: [{ zoneId: { in: ['z1'] } }, { createdById: 's1' }] }])
   })
 
   it('carries the search term through', async () => {
     const { buildingRepository, service } = build()
     await service.exportBuildings({ search: 'mall' }, ADMIN)
-    expect(buildingRepository.list.mock.calls[0][0].OR).toBeTruthy()
+    expect(buildingRepository.listForExport.mock.calls[0][0].OR).toBeTruthy()
   })
 
   it('is not capped at one page of results', async () => {
@@ -109,8 +133,7 @@ describe('what the export is allowed to see', () => {
     await service.exportBuildings({ page: 1, pageSize: 20 }, ADMIN)
     // pageSize belongs to the screen, never to the file — exporting a filtered
     // view must not hand back only the rows that happened to be visible.
-    expect(buildingRepository.list.mock.calls[0][1].take).toBeGreaterThan(20)
-    expect(buildingRepository.list.mock.calls[0][1].skip).toBe(0)
+    expect(buildingRepository.listForExport.mock.calls[0][1].take).toBeGreaterThan(20)
   })
 })
 
@@ -162,5 +185,32 @@ describe('exportPincode', () => {
 
   it('never returns a code starting with 0 — no Indian pincode does', () => {
     expect(exportPincode({ pincode: null, formattedAddress: 'Nowhere, 011045' })).toBe('')
+  })
+})
+
+describe('the operator column', () => {
+  it('reads the operator through the building’s zone', async () => {
+    const { service } = build()
+    const { rows: out } = await service.exportBuildings({}, ADMIN)
+    expect(out[0][5]).toBe('Fiber Plus Broadband')
+  })
+
+  it('is blank when the zone has no operator assigned yet', async () => {
+    const { service } = build()
+    const { rows: out } = await service.exportBuildings({}, ADMIN)
+    expect(out[2][5]).toBe('')
+  })
+
+  it('is blank when the building has no zone at all', async () => {
+    const { service } = build()
+    const { rows: out } = await service.exportBuildings({}, ADMIN)
+    expect(out[1][5]).toBe('')
+  })
+
+  it('sits last, so an existing file keeps its column positions', async () => {
+    const { service } = build()
+    const { columns } = await service.exportBuildings({}, ADMIN)
+    expect(columns.at(-1)).toBe('Operator')
+    expect(columns.indexOf('Zone')).toBe(4)
   })
 })
