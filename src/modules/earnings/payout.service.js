@@ -3,6 +3,15 @@ import { ApiError } from '../../lib/api-error.js'
 /** A calendar month, as the statement groups them. */
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/
 
+export const PAYMENT_METHODS = ['BANK_TRANSFER', 'UPI', 'CASH', 'CHEQUE', 'OTHER']
+
+/**
+ * Cash is the only route with nothing to quote back. Everything else leaves a
+ * UTR, a transaction id or a cheque number, and a payment that cannot be
+ * checked against a statement is a claim rather than a record.
+ */
+const NEEDS_REFERENCE = ['BANK_TRANSFER', 'UPI', 'CHEQUE']
+
 export function createPayoutService({ earningRepository }) {
   return {
     /**
@@ -25,33 +34,63 @@ export function createPayoutService({ earningRepository }) {
       }
     },
 
-    /** Payments already recorded, newest first, for checking against a bank. */
-    settled: () => earningRepository.paidByPartnerMonth(),
+    /** Payments as entered, newest first — what other users read. */
+    settled: () => earningRepository.listPayments(),
 
     /**
-     * Record that a partner has been paid for a month.
+     * Record a payment against one partner-month.
      *
-     * Settles every earning in that group that is still awaiting payment, and
-     * ONLY those: an earning already marked paid is never touched again
-     * (partner-network.md §6.2), so pressing this twice cannot rewrite who
-     * recorded the first payment or when.
+     * The entry is the point: how much moved, by what route, and the
+     * reference the partner can check. Settling the earnings is a consequence
+     * of it, not the other way round.
      *
-     * If a customer converts in that month AFTER it was settled, a new
-     * earning appears and the row comes back with just the new amount. That
-     * is correct — it is genuinely a further payment owed, not a mistake.
+     * `amountOwed` is read from the server, never from the form — a screen
+     * left open while another earning converts would otherwise record a total
+     * that was never true.
      */
-    async markPaid({ partnerId, month }, actor) {
+    async markPaid(entry, actor) {
+      const { partnerId, month, method, reference, note, amountPaid, paidOn } = entry ?? {}
+
       if (!partnerId) throw ApiError.badRequest('Which partner?')
       if (!MONTH.test(month ?? '')) throw ApiError.badRequest('Not a valid month')
+      if (!PAYMENT_METHODS.includes(method)) throw ApiError.badRequest('Pick how it was paid')
 
-      const { count } = await earningRepository.markMonthPaid({
-        partnerId,
-        month,
-        byUserId: actor?.id ?? null,
+      const amount = Number(amountPaid)
+      if (!Number.isFinite(amount) || amount <= 0) {
+        throw ApiError.badRequest('Enter the amount that was paid')
+      }
+      const ref = reference?.trim() || null
+      if (!ref && NEEDS_REFERENCE.includes(method)) {
+        throw ApiError.badRequest('Enter the transaction or cheque reference')
+      }
+
+      // What the server says is owed right now — and proof there is anything
+      // left to settle, which also guards two people paying the same month.
+      const owed = (await earningRepository.owedByPartnerMonth()).find(
+        (row) => row.partnerId === partnerId && row.month === month,
+      )
+      if (!owed) {
+        throw ApiError.conflict('Nothing is owed for that month any more — reload the list')
+      }
+
+      const when = paidOn ? new Date(paidOn) : new Date()
+      if (Number.isNaN(when.getTime())) throw ApiError.badRequest('Not a valid payment date')
+
+      const { payment, count } = await earningRepository.recordPayment({
+        payment: {
+          partnerId,
+          month,
+          amountOwed: owed.amount,
+          amountPaid: amount,
+          method,
+          reference: ref,
+          note: note?.trim() || null,
+          paidOn: when,
+          recordedById: actor?.id ?? null,
+        },
       })
-      // Zero is not an error — someone else may have settled it a second
-      // earlier — but it must not be reported as a payment that happened.
-      return { count, alreadySettled: count === 0 }
+
+      return { payment, count, shortfall: owed.amount - amount }
     },
   }
 }

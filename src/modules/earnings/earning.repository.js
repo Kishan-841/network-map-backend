@@ -55,6 +55,51 @@ export const earningRepository = {
    * already paid is never re-stamped, so pressing this twice cannot overwrite
    * who recorded the first payment or when.
    */
+  /**
+   * Record a payment and settle the month it covers, in ONE transaction.
+   *
+   * Separately, a crash between the two leaves either money marked paid with
+   * no record of how, or a payment entry against earnings still showing as
+   * owed. Both are worse than the operation simply not happening.
+   *
+   * The AWAITING_PAYMENT filter still does the safety work: an earning
+   * already settled by an earlier payment is never re-stamped or re-linked.
+   */
+  async recordPayment({ payment }) {
+    const start = new Date(`${payment.month}-01T00:00:00.000Z`)
+    const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1))
+
+    return prisma.$transaction(async (tx) => {
+      const created = await tx.partnerPayment.create({ data: payment })
+      const { count } = await tx.partnerEarning.updateMany({
+        where: {
+          partnerId: payment.partnerId,
+          status: 'AWAITING_PAYMENT',
+          earnedAt: { gte: start, lt: end },
+        },
+        data: {
+          status: 'PAID',
+          paidAt: payment.paidOn,
+          paidById: payment.recordedById,
+          paymentId: created.id,
+        },
+      })
+      return { payment: created, count }
+    })
+  },
+
+  /** Payments as entered, newest first — the list other users read. */
+  listPayments: (limit = 200) =>
+    prisma.partnerPayment.findMany({
+      orderBy: { paidOn: 'desc' },
+      take: limit,
+      include: {
+        partner: { select: { id: true, name: true, mobile: true } },
+        recordedBy: { select: { id: true, name: true } },
+        _count: { select: { earnings: true } },
+      },
+    }),
+
   async markMonthPaid({ partnerId, month, byUserId }) {
     const start = new Date(`${month}-01T00:00:00.000Z`)
     const end = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1))

@@ -89,6 +89,7 @@ model User {
   earningsAttributed PartnerEarning[]  @relation("EarningEmployee")
   partnerReferrals   PartnerReferral[] @relation("PartnerReferralEmployee")
   earningsMarkedPaid PartnerEarning[]  @relation("EarningPaidBy")
+  paymentsRecorded   PartnerPayment[]  @relation("PaymentRecordedBy")
 }
 
 /// One row per pincode an acquisition agent covers (within one city).
@@ -339,6 +340,7 @@ model Partner {
   invite            PartnerInvite?
   leads             Lead[]
   earnings          PartnerEarning[]
+  payments          PartnerPayment[]
   introductionsMade PartnerReferral[] @relation("PartnerReferralBy")
   introducedAs      PartnerReferral?  @relation("PartnerReferralJoined")
   coverageRequests  CoverageRequest[]
@@ -555,10 +557,13 @@ model PartnerEarning {
   /// clock, so a backdated correction lands in the month it belongs to.
   earnedAt DateTime @default(now())
 
-  status   EarningStatus @default(AWAITING_PAYMENT)
-  paidAt   DateTime?
-  paidById String?
-  paidBy   User?         @relation("EarningPaidBy", fields: [paidById], references: [id], onDelete: SetNull)
+  status    EarningStatus   @default(AWAITING_PAYMENT)
+  /// The payment that settled this, when one was recorded.
+  paymentId String?
+  payment   PartnerPayment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  paidAt    DateTime?
+  paidById  String?
+  paidBy    User?           @relation("EarningPaidBy", fields: [paidById], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -629,4 +634,54 @@ enum PartnerReferralStatus {
   CONTACTED
   JOINED
   DECLINED
+}
+
+/// One payment to a partner for one month.
+///
+/// The entry accounts actually make: how much moved, by what route, and the
+/// reference the partner can check against their bank. Marking a month "paid"
+/// without those is a claim nobody can verify.
+model PartnerPayment {
+  id String @id @default(cuid())
+
+  partnerId String
+  partner   Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  /// The month being settled, as YYYY-MM.
+  month String
+
+  /// What that month came to when this was recorded — a SNAPSHOT. If an
+  /// earning is added or corrected later, the payment must still show what
+  /// was owed at the time rather than silently disagreeing with itself.
+  amountOwed Int
+  /// What actually left the account. Usually the same; kept separate so a
+  /// part payment or a rounding difference is visible instead of lost.
+  amountPaid Int
+
+  method    PaymentMethod
+  /// UTR, transaction id or cheque number. Optional only for cash.
+  reference String?
+  note      String?
+
+  /// When the money moved — not when the entry was typed, which is createdAt.
+  paidOn DateTime
+
+  recordedById String?
+  recordedBy   User?   @relation("PaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+
+  /// The earnings this payment settled.
+  earnings PartnerEarning[]
+
+  createdAt DateTime @default(now())
+
+  @@index([partnerId, month])
+  @@index([paidOn])
+}
+
+enum PaymentMethod {
+  BANK_TRANSFER
+  UPI
+  CASH
+  CHEQUE
+  OTHER
 }
