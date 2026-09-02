@@ -22,6 +22,10 @@ enum Role {
   /// Recruits and supports external referral partners. No building, zone or
   /// operator access at all — see partner-network.md §2.1.
   PARTNER_MANAGER
+  /// Finance. Records that a partner has been paid what they earned
+  /// (partner-network.md §6.2) and nothing else: no registry, no map, and
+  /// none of the customers' personal details behind those earnings.
+  ACCOUNTS
 }
 
 enum FeasibleStatus {
