@@ -9,9 +9,11 @@ import { partnerRepository } from './partner.repository.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
 import { env } from '../../config/env.js'
 import { createApprovalBypassService } from './approval-bypass.service.js'
+import { createDirectPartnerService } from './direct-add.service.js'
 import { partnerAuthRepository } from '../partner-auth/partner-auth.repository.js'
 
 const service = createPartnerService({ partnerRepository, storage: getStorageProvider() })
+const directPartners = createDirectPartnerService({ partnerAuthRepository })
 const approvalBypass = createApprovalBypassService({
   partnerAuthRepository,
   allowed: env.allowApprovalBypass,
@@ -22,6 +24,16 @@ const documentSchema = z.object({
   url: z.string().url(),
 })
 const rejectSchema = z.object({ reason: z.string().trim().min(3).max(500) })
+
+/** What a manager types to add a partner they already know. */
+const addPartnerSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  type: z.enum(['AGENT', 'SOCIETY_REPRESENTATIVE', 'RETAIL_SHOP', 'DSA']),
+  mobile: z.string().trim().regex(/^[6-9][0-9]{9}$/, 'Enter a 10-digit mobile number'),
+  // Optional, and an empty string means "not given" rather than an empty email.
+  email: z.string().trim().email().max(200).optional().or(z.literal('')),
+  companyName: z.string().trim().max(160).optional().or(z.literal('')),
+})
 
 // ---------------------------------------------------------------------------
 // The partner's own onboarding — authenticated as a PARTNER, not staff.
@@ -104,6 +116,29 @@ partnerAdminRoutes.get('/', async (req, res, next) => {
     next(err)
   }
 })
+
+/**
+ * Add a partner directly, with no invite link. They can sign in with their
+ * mobile from this moment; the OTP flow finds them like any other partner.
+ */
+partnerAdminRoutes.post(
+  '/',
+  audit('Partner', 'Create', {
+    describe: (req) => `Partner '${req.body?.name ?? 'unknown'}' added directly`,
+  }),
+  validateBody(addPartnerSchema),
+  async (req, res, next) => {
+    try {
+      const partner = await directPartners.addPartner(req.body, req.user)
+      res.status(201).json({
+        success: true,
+        data: { id: partner.id, name: partner.name, mobile: partner.mobile, status: partner.status },
+      })
+    } catch (err) {
+      next(err)
+    }
+  },
+)
 
 partnerAdminRoutes.get('/:id/documents', requireRole('ADMIN'), async (req, res, next) => {
   try {
