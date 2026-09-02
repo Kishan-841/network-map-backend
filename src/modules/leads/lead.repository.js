@@ -42,6 +42,17 @@ export const leadRepository = {
         // So a converted lead with no earning behind it is visible as such,
         // rather than looking identical to one that paid out.
         earning: { select: { amount: true, status: true } },
+        // The last few calls, so a row can show what happened without a
+        // second request per lead.
+        calls: {
+          orderBy: { endedAt: 'desc' },
+          take: 3,
+          select: {
+            id: true, outcome: true, endedAt: true, durationSeconds: true,
+            callbackAt: true, note: true,
+            by: { select: { id: true, name: true } },
+          },
+        },
       },
     }),
 }

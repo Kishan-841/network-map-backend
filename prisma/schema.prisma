@@ -88,6 +88,7 @@ model User {
   leadsAttributed    Lead[]            @relation("LeadEmployee")
   earningsAttributed PartnerEarning[]  @relation("EarningEmployee")
   partnerReferrals   PartnerReferral[] @relation("PartnerReferralEmployee")
+  leadCalls          LeadCall[]        @relation("LeadCallBy")
   earningsMarkedPaid PartnerEarning[]  @relation("EarningPaidBy")
   paymentsRecorded   PartnerPayment[]  @relation("PaymentRecordedBy")
 }
@@ -461,15 +462,20 @@ model Lead {
   duplicateOf   Lead?      @relation("LeadDuplicate", fields: [duplicateOfId], references: [id], onDelete: SetNull)
   duplicates    Lead[]     @relation("LeadDuplicate")
 
-  events    LeadStatusEvent[]
-  earning   PartnerEarning?
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
+  events     LeadStatusEvent[]
+  calls      LeadCall[]
+  /// When this lead asked to be called back. Kept on the lead, not derived
+  /// from the last call, so "who is due today" is one indexed query.
+  nextCallAt DateTime?
+  earning    PartnerEarning?
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
 
   @@index([partnerId])
   @@index([employeeId])
   @@index([status])
   @@index([customerMobile])
+  @@index([nextCallAt])
 }
 
 /// Every status change, with who and when. Commission may one day depend on
@@ -684,4 +690,42 @@ enum PaymentMethod {
   CASH
   CHEQUE
   OTHER
+}
+
+/// One phone call to a lead.
+///
+/// The record is written when the call ENDS, with the outcome — a call with
+/// no outcome tells the next person nothing, and a row created at "start"
+/// would dangle forever whenever a browser tab closes mid-call.
+model LeadCall {
+  id String @id @default(cuid())
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  byUserId String?
+  by       User?   @relation("LeadCallBy", fields: [byUserId], references: [id], onDelete: SetNull)
+
+  startedAt       DateTime
+  endedAt         DateTime
+  /// Seconds, stored rather than recomputed so a clock change cannot rewrite
+  /// how long a past call took.
+  durationSeconds Int
+
+  outcome    CallOutcome
+  /// Set only for CALL_LATER — when they asked to be called back.
+  callbackAt DateTime?
+  note       String?
+
+  createdAt DateTime @default(now())
+
+  @@index([leadId])
+  @@index([byUserId])
+}
+
+enum CallOutcome {
+  INTERESTED
+  CALL_LATER
+  NOT_REACHABLE
+  WRONG_NUMBER
 }

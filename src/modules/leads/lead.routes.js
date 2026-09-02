@@ -13,6 +13,8 @@ import { BILLING_PERIODS } from '../rate-card/rate-card.service.js'
 import { createPartnerService } from '../partners/partner.service.js'
 import { partnerRepository } from '../partners/partner.repository.js'
 import { buildingRepository } from '../buildings/building.repository.js'
+import { createLeadCallService } from './lead-call.service.js'
+import { leadCallRepository } from './lead-call.repository.js'
 import { createEarningService } from '../earnings/earning.service.js'
 import { earningRepository } from '../earnings/earning.repository.js'
 import { rateCardRepository } from '../rate-card/rate-card.repository.js'
@@ -24,6 +26,7 @@ const earningService = createEarningService({
   leadRepository,
 })
 const leadService = createLeadService({ leadRepository, earningService })
+const leadCalls = createLeadCallService({ leadRepository, callRepository: leadCallRepository })
 const capture = createLeadCaptureService({ buildingRepository, leadRepository })
 const buildingSearch = createBuildingSearchService({ buildingRepository })
 const partners = createPartnerService({ partnerRepository, storage: getStorageProvider() })
@@ -73,6 +76,15 @@ const leadSchema = z.object({
 const planSchema = z.object({
   speedMbps: z.coerce.number().int().positive(),
   billingPeriod: z.enum(BILLING_PERIODS),
+})
+
+/** What the browser sends when a call ends. Duration is derived server-side. */
+const callSchema = z.object({
+  startedAt: z.string().datetime(),
+  endedAt: z.string().datetime(),
+  outcome: z.enum(['INTERESTED', 'CALL_LATER', 'NOT_REACHABLE', 'WRONG_NUMBER']),
+  callbackAt: z.string().datetime().optional(),
+  note: z.string().trim().max(500).optional(),
 })
 
 const statusSchema = z.object({
@@ -192,6 +204,27 @@ staffLeadRoutes.get('/', async (req, res, next) => {
     next(err)
   }
 })
+
+staffLeadRoutes.post(
+  '/:id/calls',
+  audit('Lead', 'CallLogged', {
+    describe: (req) =>
+      `Called lead ${req.params.id} — ${req.body?.outcome}` +
+      (req.body?.callbackAt ? `, call back ${req.body.callbackAt}` : ''),
+  }),
+  validateBody(callSchema),
+  async (req, res, next) => {
+    try {
+      const call = await leadCalls.logCall(req.params.id, req.body, req.user)
+      res.status(201).json({
+        success: true,
+        data: { id: call.id, outcome: call.outcome, durationSeconds: call.durationSeconds },
+      })
+    } catch (err) {
+      next(err)
+    }
+  },
+)
 
 staffLeadRoutes.patch(
   '/:id/status',
