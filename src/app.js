@@ -25,6 +25,7 @@ import {
   staffPartnerReferralRoutes,
 } from './modules/partner-referrals/partner-referral.routes.js'
 import { payoutRoutes } from './modules/earnings/payout.routes.js'
+import { partnerDashboardRoutes } from './modules/partner-dashboard/dashboard.routes.js'
 
 export function createApp() {
   const app = express()
@@ -56,6 +57,7 @@ export function createApp() {
   app.use('/api/v1/partner', partnerReferralRoutes)
   app.use('/api/v1/partner-referrals', staffPartnerReferralRoutes)
   app.use('/api/v1/payouts', payoutRoutes)
+  app.use('/api/v1/partner-dashboard', partnerDashboardRoutes)
   app.use('/api/v1/users', userRoutes)
   app.use('/api/v1/zones', zoneRoutes)
   app.use('/api/v1/buildings', buildingRoutes)
