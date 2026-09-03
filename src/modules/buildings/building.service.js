@@ -270,6 +270,24 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         throw ApiError.forbidden('Acquisition leads cannot add coverage buildings')
       }
       if (!building.zoneId) throw ApiError.badRequest('Zone is required')
+
+      // The same building may exist under more than one zone — two operators
+      // can serve it — so the clash we care about is one per PLACE PER ZONE.
+      // Checked here for a readable message; the database index is what makes
+      // it race-safe when two people submit at once.
+      if (building.placeId) {
+        const clash = await buildingRepository.findByPlaceIdInZone(
+          building.placeId,
+          building.zoneId,
+        )
+        if (clash) {
+          const zone = await zoneRepository?.findById(building.zoneId)
+          throw ApiError.conflict(
+            `This building is already added under ${zone?.name ?? 'that zone'}. ` +
+              'Pick a different zone to add it again.',
+          )
+        }
+      }
       // Permission records are legal artifacts — surveyors may not set them, the
       // same rule addPhoto enforces for permission letters.
       if (actor?.role === 'SURVEYOR') {
