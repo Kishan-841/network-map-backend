@@ -153,7 +153,12 @@ model FiberRoute {
 
 model Building {
   id               String           @id @default(cuid())
-  placeId          String?          @unique
+  /// Google Place id. NOT globally unique: the same building can be added
+  /// under more than one zone, because two operators can both serve it. The
+  /// uniqueness that IS enforced — one row per place PER ZONE — is a partial
+  /// expression index created in the migration, which Prisma cannot express.
+  /// Do not put @unique back here.
+  placeId          String?
   buildingName     String
   formattedAddress String
   latitude         Float

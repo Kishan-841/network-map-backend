@@ -12,6 +12,9 @@ function fakeBuildingRepository(seed = []) {
     },
     list: async () => buildings,
     findById: async (id) => buildings.find((b) => b.id === id) ?? null,
+    // The create path checks for a same-place clash within the chosen zone.
+    findByPlaceIdInZone: async (placeId, zoneId) =>
+      buildings.find((b) => b.placeId === placeId && b.zoneId === zoneId) ?? null,
   }
 }
 

@@ -38,6 +38,9 @@ const exportSelect = {
 }
 
 export const buildingRepository = {
+  /** One row per Place per zone — the clash the create path refuses. */
+  findByPlaceIdInZone: (placeId, zoneId) =>
+    prisma.building.findFirst({ where: { placeId, zoneId }, select: { id: true } }),
   create: (data) => prisma.building.create({ data, include: fullInclude }),
   listForExport: (where = {}, { take = 1000 } = {}) =>
     prisma.building.findMany({
