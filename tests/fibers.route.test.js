@@ -1,0 +1,205 @@
+import { describe, it, expect } from 'vitest'
+import request from 'supertest'
+import jwt from 'jsonwebtoken'
+import { createApp } from '../src/app.js'
+import { env } from '../src/config/env.js'
+import { prisma } from '../src/lib/prisma.js'
+
+const tokenFor = (role) =>
+  jwt.sign({ sub: `test-${role.toLowerCase()}`, role }, env.jwtSecret, {
+    audience: 'staff',
+    expiresIn: '1h',
+  })
+
+describe('fibers API', () => {
+  it('runs the acceptance flow: create → splitter feed → cut → restore → delete', async () => {
+    const app = createApp()
+    const stamp = Date.now()
+    const manager = ['Authorization', `Bearer ${tokenFor('MANAGER')}`]
+
+    let popId = null
+    let oltId = null
+    let buildingAId = null
+    let buildingBId = null
+    let closureId = null
+    let fiberId1 = null
+    let fiberId2 = null
+
+    try {
+      // Unauthenticated read is rejected.
+      expect((await request(app).get('/api/v1/fibers')).status).toBe(401)
+
+      // SURVEYOR can read, cannot write.
+      const surveyor = ['Authorization', `Bearer ${tokenFor('SURVEYOR')}`]
+      expect((await request(app).get('/api/v1/fibers').set(...surveyor)).status).toBe(200)
+      expect((await request(app).post('/api/v1/fibers').set(...surveyor).send({})).status).toBe(403)
+
+      const pop = await request(app)
+        .post('/api/v1/pops')
+        .set(...manager)
+        .send({ name: `POP-FIB-${stamp}`, latitude: 18.5, longitude: 73.8 })
+      expect(pop.status).toBe(201)
+      popId = pop.body.data.id
+
+      const olt = await request(app)
+        .post(`/api/v1/pops/${popId}/olts`)
+        .set(...manager)
+        .send({ name: `OLT-FIB-${stamp}`, ponPortCount: 16 })
+      expect(olt.status).toBe(201)
+      oltId = olt.body.data.id
+
+      const buildingA = await prisma.building.create({
+        data: {
+          buildingName: `Fiber-Bldg-A-${stamp}`,
+          formattedAddress: '1 Fiber St',
+          latitude: 18.51,
+          longitude: 73.81,
+          createdById: 'test-admin',
+        },
+      })
+      buildingAId = buildingA.id
+
+      const buildingB = await prisma.building.create({
+        data: {
+          buildingName: `Fiber-Bldg-B-${stamp}`,
+          formattedAddress: '2 Fiber St',
+          latitude: 18.52,
+          longitude: 73.82,
+          createdById: 'test-admin',
+        },
+      })
+      buildingBId = buildingB.id
+
+      // First fiber: POP → WAYPOINT → BUILDING(A) → new CLOSURE (its last point,
+      // so the closure can later auto-claim this fiber as a splitter's input).
+      const created = await request(app)
+        .post('/api/v1/fibers')
+        .set(...manager)
+        .send({
+          coreCount: 6,
+          oltId,
+          ponPort: 3,
+          points: [
+            { type: 'POP', popId, latitude: 18.5, longitude: 73.8 },
+            { type: 'WAYPOINT', latitude: 18.505, longitude: 73.805 },
+            { type: 'BUILDING', buildingId: buildingAId, latitude: 18.51, longitude: 73.81 },
+            { type: 'CLOSURE', newClosure: { kind: 'pole' }, latitude: 18.515, longitude: 73.815 },
+          ],
+        })
+      expect(created.status).toBe(201)
+      const fiber1 = created.body.data
+      fiberId1 = fiber1.id
+      expect(fiber1.points[3].label).toMatch(/^CL-\d{4}$/)
+      expect(fiber1.segments).toHaveLength(2)
+      expect(fiber1.totals.closureCount).toBe(1)
+      closureId = fiber1.points[3].closureId
+
+      const seg0 = fiber1.segments[0].id
+      const seg1 = fiber1.segments[1].id
+
+      const laid = await request(app)
+        .patch(`/api/v1/fibers/${fiberId1}/segments/${seg0}`)
+        .set(...manager)
+        .send({ fiberLaidMeters: 420 })
+      expect(laid.status).toBe(200)
+      expect(laid.body.data.totals.fiberLaidMeters).toBe(420)
+
+      const splitter = await request(app)
+        .post(`/api/v1/closures/${closureId}/splitters`)
+        .set(...manager)
+        .send({ ratio: 'R1_2' })
+      expect(splitter.status).toBe(201)
+      const splitterId = splitter.body.data.id
+      expect(splitter.body.data.inputFiberId).toBe(fiberId1)
+
+      // A direct tap off output 1, straight to building A.
+      const outputPatch = await request(app)
+        .patch(`/api/v1/splitters/${splitterId}/outputs/1`)
+        .set(...manager)
+        .send({ toBuildingId: buildingAId })
+      expect(outputPatch.status).toBe(200)
+
+      // Second fiber: fed by output 2, starting at the same closure, ending at building B.
+      const created2 = await request(app)
+        .post('/api/v1/fibers')
+        .set(...manager)
+        .send({
+          coreCount: 4,
+          fromSplitterOutput: { splitterId, portNo: 2 },
+          points: [
+            { type: 'CLOSURE', closureId, latitude: 18.515, longitude: 73.815 },
+            { type: 'BUILDING', buildingId: buildingBId, latitude: 18.52, longitude: 73.82 },
+          ],
+        })
+      expect(created2.status).toBe(201)
+      const fiber2 = created2.body.data
+      fiberId2 = fiber2.id
+
+      const getFirst = await request(app)
+        .get(`/api/v1/fibers/${fiberId1}`)
+        .set(...manager)
+      expect(getFirst.status).toBe(200)
+      expect(getFirst.body.data.splitters[0].outputs[1].toFiber.id).toBe(fiberId2)
+
+      // A third fiber cannot reuse the same OLT PON port.
+      const third = await request(app)
+        .post('/api/v1/fibers')
+        .set(...manager)
+        .send({
+          coreCount: 2,
+          oltId,
+          ponPort: 3,
+          points: [
+            { type: 'POP', popId, latitude: 18.5, longitude: 73.8 },
+            { type: 'BUILDING', buildingId: buildingBId, latitude: 18.52, longitude: 73.82 },
+          ],
+        })
+      expect(third.status).toBe(409)
+
+      // Cutting the BUILDING(A)→CLOSURE segment takes down the direct tap
+      // (building A) and fiber 2 (fed by the splitter sitting at that closure).
+      const cut = await request(app)
+        .post(`/api/v1/fibers/${fiberId1}/cut`)
+        .set(...manager)
+        .send({ segmentId: seg1 })
+      expect(cut.status).toBe(200)
+      expect(cut.body.data.status).toBe('CUT')
+      expect(cut.body.data.downstream.buildings.map((b) => b.id)).toContain(buildingAId)
+      expect(cut.body.data.downstream.fibers.map((f) => f.id)).toContain(fiberId2)
+
+      const restore = await request(app)
+        .post(`/api/v1/fibers/${fiberId1}/restore`)
+        .set(...manager)
+      expect(restore.status).toBe(200)
+      expect(restore.body.data.status).toBe('LIVE')
+
+      const closureGet = await request(app)
+        .get(`/api/v1/closures/${closureId}`)
+        .set(...manager)
+      expect(closureGet.status).toBe(200)
+      const roles = closureGet.body.data.fibers.map((f) => f.role)
+      expect(roles).toContain('in')
+      expect(roles).toContain('out')
+
+      const del2 = await request(app)
+        .delete(`/api/v1/fibers/${fiberId2}`)
+        .set(...manager)
+      expect(del2.status).toBe(200)
+      fiberId2 = null
+
+      const del1 = await request(app)
+        .delete(`/api/v1/fibers/${fiberId1}`)
+        .set(...manager)
+      expect(del1.status).toBe(200)
+      fiberId1 = null
+    } finally {
+      if (fiberId2) await request(app).delete(`/api/v1/fibers/${fiberId2}`).set(...manager)
+      if (fiberId1) await request(app).delete(`/api/v1/fibers/${fiberId1}`).set(...manager)
+      if (closureId) await request(app).delete(`/api/v1/closures/${closureId}`).set(...manager)
+      if (buildingAId) await prisma.building.delete({ where: { id: buildingAId } }).catch(() => {})
+      if (buildingBId) await prisma.building.delete({ where: { id: buildingBId } }).catch(() => {})
+      if (oltId) await request(app).delete(`/api/v1/pops/${popId}/olts/${oltId}`).set(...manager)
+      if (popId) await request(app).delete(`/api/v1/pops/${popId}`).set(...manager)
+    }
+  })
+})

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import { Prisma } from '@prisma/client'
 import { createFiberService } from '../src/modules/fibers/fiber.service.js'
 import { createFiberSchema, updateFiberSchema, CORE_COUNTS } from '../src/modules/fibers/fiber.schemas.js'
 import { fiberRepository as realFiberRepo } from '../src/modules/fibers/fiber.repository.js'
@@ -355,5 +356,33 @@ describe('fiber service', () => {
       await service.updateFiber('f1', { fromSplitterOutput: null })
       expect(closure.updateOutput).toHaveBeenCalledWith('s1', 2, { toFiberId: null }, 'tx')
     })
+
+    it('releases the old output before the new one is claimed, when the payload swaps feeds', async () => {
+      const closure = fakeClosureRepo({
+        findSplitterById: vi.fn(async (id) =>
+          id === 's2'
+            ? { id: 's2', closureId: 'c9', outputs: [{ portNo: 1, toFiberId: null }] }
+            : { id: 's1', closureId: 'c1', outputs: [{ portNo: 2, toFiberId: 'f1' }] },
+        ),
+        findManyWithSplitters: vi.fn(async () => [{ id: 'c9', splitters: [{ id: 's2', ratio: 'R1_4' }] }]),
+      })
+      const { service } = svc({ fiber: fedFiber(), closure })
+      await service.updateFiber('f1', {
+        fromSplitterOutput: { splitterId: 's2', portNo: 1 },
+        points: [P.closure('c9'), P.building],
+      })
+      expect(closure.updateOutput.mock.calls[0]).toEqual(['s1', 2, { toFiberId: null }, 'tx'])
+      expect(closure.updateOutput.mock.calls[1]).toEqual(['s2', 1, { toFiberId: 'f1' }, 'tx'])
+    })
+  })
+
+  it('clears images to Prisma.DbNull when the payload explicitly nulls them', async () => {
+    const { service, deps } = svc()
+    await service.updateFiber('f1', { images: null })
+    expect(deps.fiberRepository.update).toHaveBeenCalledWith(
+      'f1',
+      expect.objectContaining({ images: Prisma.DbNull }),
+      'tx',
+    )
   })
 })

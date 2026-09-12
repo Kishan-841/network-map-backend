@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client'
 import { ApiError } from '../../lib/api-error.js'
 import { prisma } from '../../lib/prisma.js'
 import { pathMeters } from '../../lib/fiber-geo.js'
@@ -51,6 +52,8 @@ export function createFiberService(deps) {
 
   /** Edits echo back the signed URLs we served — store the canonical form. */
   function canonicalImages(data) {
+    // Prisma needs DbNull (not JS null) to clear a Json? column to SQL NULL.
+    if (data.images === null) return { ...data, images: Prisma.DbNull }
     if (!data.images || !storage?.canonicalUrl) return data
     return { ...data, images: data.images.map((url) => storage.canonicalUrl(url)) }
   }
@@ -235,6 +238,21 @@ export function createFiberService(deps) {
         // An explicit null hands the splitter output back before any new geometry
         // claims one, so a detach works whether or not the points were redrawn.
         if (data.fromSplitterOutput === null && existing.fedBy) {
+          await closureRepository.updateOutput(
+            existing.fedBy.splitter.id,
+            existing.fedBy.portNo,
+            { toFiberId: null },
+            tx,
+          )
+        } else if (
+          data.fromSplitterOutput &&
+          existing.fedBy &&
+          (existing.fedBy.splitter.id !== data.fromSplitterOutput.splitterId ||
+            existing.fedBy.portNo !== data.fromSplitterOutput.portNo)
+        ) {
+          // Swapping feeds: release the old output before saveGeometry claims the
+          // new one below, or the old and new outputs both trying to hold this
+          // fiber's id trips the toFiberId unique index and 500s.
           await closureRepository.updateOutput(
             existing.fedBy.splitter.id,
             existing.fedBy.portNo,
