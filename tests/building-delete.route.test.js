@@ -59,4 +59,52 @@ describe('DELETE /api/v1/buildings/:id', () => {
     expect(await prisma.building.findUnique({ where: { id: building.id } })).toBeNull()
     expect(await prisma.buildingDetails.findUnique({ where: { buildingId: building.id } })).toBeNull()
   })
+
+  it('refuses to delete a building attached to a fiber, then succeeds once the fiber is gone', async () => {
+    const stamp = Date.now()
+    const admin = ['Authorization', `Bearer ${tokenFor('ADMIN')}`]
+    const manager = ['Authorization', `Bearer ${tokenFor('MANAGER')}`]
+    const app = createApp()
+
+    const building = await prisma.building.create({
+      data: {
+        buildingName: `FiberAttachedDelete-${stamp}`,
+        formattedAddress: '1 Attached St',
+        latitude: 18.56,
+        longitude: 73.86,
+        createdById: 'test-admin',
+      },
+    })
+
+    let fiberId = null
+    try {
+      const fiber = await request(app)
+        .post('/api/v1/fibers')
+        .set(...manager)
+        .send({
+          coreCount: 2,
+          points: [
+            { type: 'WAYPOINT', latitude: 18.561, longitude: 73.861 },
+            { type: 'BUILDING', buildingId: building.id, latitude: 18.56, longitude: 73.86 },
+          ],
+        })
+      expect(fiber.status).toBe(201)
+      fiberId = fiber.body.data.id
+      const fiberName = fiber.body.data.name
+
+      const blocked = await request(app).delete(`/api/v1/buildings/${building.id}`).set(...admin)
+      expect(blocked.status).toBe(409)
+      expect(blocked.body.error.message).toContain(fiberName)
+
+      const deleteFiber = await request(app).delete(`/api/v1/fibers/${fiberId}`).set(...manager)
+      expect(deleteFiber.status).toBe(200)
+      fiberId = null
+
+      const allowed = await request(app).delete(`/api/v1/buildings/${building.id}`).set(...admin)
+      expect(allowed.status).toBe(204)
+    } finally {
+      if (fiberId) await prisma.fiber.delete({ where: { id: fiberId } }).catch(() => {})
+      await prisma.building.deleteMany({ where: { id: building.id } })
+    }
+  })
 })
