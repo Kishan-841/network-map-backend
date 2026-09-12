@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createFiberService } from '../src/modules/fibers/fiber.service.js'
-import { createFiberSchema, CORE_COUNTS } from '../src/modules/fibers/fiber.schemas.js'
+import { createFiberSchema, updateFiberSchema, CORE_COUNTS } from '../src/modules/fibers/fiber.schemas.js'
 import { fiberRepository as realFiberRepo } from '../src/modules/fibers/fiber.repository.js'
 import { closureRepository as realClosureRepo } from '../src/modules/closures/closure.repository.js'
 import { popRepository as realPopRepo } from '../src/modules/pops/pop.repository.js'
@@ -11,7 +11,7 @@ const fakeStorage = () => ({
 })
 
 /** What `findById` hands back: a POP→CLOSURE fiber with one 400 m laid segment. */
-const existingFiber = () => ({
+const existingFiber = (over = {}) => ({
   id: 'f1',
   name: 'FIB-001',
   coreCount: 12,
@@ -35,7 +35,17 @@ const existingFiber = () => ({
   segments: [
     { id: 'seg1', sequence: 0, fromPointId: 'p1', toPointId: 'p2', mapMeters: 1500, fiberLaidMeters: 400, isCut: false },
   ],
+  ...over,
 })
+
+/** Shaped the way FIBER_INCLUDE loads it: portNo alongside the nested splitter. */
+const fedByOutput = { portNo: 2, splitter: { id: 's1', ratio: 'R1_4', closure: { id: 'c1', code: 'CL-0001' } } }
+
+/** A splitter whose port 2 already feeds fiber f1 — i.e. the stored feed above. */
+const splitterFeeding = (toFiberId = 'f1') =>
+  fakeClosureRepo({
+    findSplitterById: vi.fn(async () => ({ id: 's1', closureId: 'c1', outputs: [{ portNo: 2, toFiberId }] })),
+  })
 
 function fakeFiberRepo(over = {}) {
   return {
@@ -119,6 +129,11 @@ describe('fiber schemas', () => {
     expect(createFiberSchema.safeParse({ ...base, coreCount: 10, points: [P.pop, P.building] }).success).toBe(false)
     // oltId and ponPort travel together
     expect(createFiberSchema.safeParse({ ...base, oltId: 'olt1', points: [P.pop, P.building] }).success).toBe(false)
+  })
+
+  it('lets a PATCH carry one half of a cross-field pair — the service merges and re-checks', () => {
+    expect(updateFiberSchema.safeParse({ ponPort: 5 }).success).toBe(true)
+    expect(updateFiberSchema.safeParse({ fromSplitterOutput: { splitterId: 's1', portNo: 1 } }).success).toBe(true)
   })
 })
 
@@ -285,5 +300,60 @@ describe('fiber service', () => {
     const result = await service.getFiber('f1')
     expect(result.downstream.buildings.map((b) => b.id).sort()).toEqual(['b1', 'b2'])
     expect(result.totals.closureCount).toBe(1)
+  })
+
+  it('claims the splitter input of the closure a fiber ends on', async () => {
+    const { service, deps } = svc()
+    await service.createFiber({ ...base, points: [P.pop, P.waypoint, P.closure('c1')] })
+    expect(deps.closureRepository.claimSplitterInput).toHaveBeenCalledWith('c1', 'new', 'tx')
+  })
+
+  describe('update-time cross-field rules run on merged values', () => {
+    it('accepts half a port pair when the stored fiber supplies the other half', async () => {
+      const fiber = fakeFiberRepo({ findById: vi.fn(async () => existingFiber({ oltId: 'olt1', ponPort: 2 })) })
+      const { service } = svc({ fiber })
+      await expect(service.updateFiber('f1', { ponPort: 5 })).resolves.toBeTruthy()
+      expect(fiber.findUsingPort).toHaveBeenCalledWith('olt1', 5)
+    })
+
+    it('400s a port that the merged fiber would hold without an OLT', async () => {
+      const { service } = svc()
+      await expect(service.updateFiber('f1', { ponPort: 5 })).rejects.toMatchObject({ status: 400 })
+    })
+
+    it('400s a splitter feed on a fiber that keeps its OLT port', async () => {
+      const fiber = fakeFiberRepo({ findById: vi.fn(async () => existingFiber({ oltId: 'olt1', ponPort: 2 })) })
+      const { service } = svc({ fiber })
+      await expect(
+        service.updateFiber('f1', { fromSplitterOutput: { splitterId: 's1', portNo: 1 } }),
+      ).rejects.toMatchObject({ status: 400 })
+    })
+  })
+
+  describe('a stored feed the payload does not repeat', () => {
+    const fedFiber = () => fakeFiberRepo({ findById: vi.fn(async () => existingFiber({ fedBy: fedByOutput })) })
+
+    it('still requires the redrawn line to start at the splitter closure', async () => {
+      const { service } = svc({ fiber: fedFiber(), closure: splitterFeeding() })
+      await expect(
+        service.updateFiber('f1', { points: [P.closure('c2'), P.building] }),
+      ).rejects.toMatchObject({ status: 400 })
+    })
+
+    it('passes when the redrawn line still starts there, without re-writing the output', async () => {
+      const closure = splitterFeeding()
+      const { service } = svc({ fiber: fedFiber(), closure })
+      await expect(
+        service.updateFiber('f1', { points: [P.closure('c1'), P.building] }),
+      ).resolves.toBeTruthy()
+      expect(closure.updateOutput).not.toHaveBeenCalled()
+    })
+
+    it('hands the output back when the payload explicitly detaches the feed', async () => {
+      const closure = splitterFeeding()
+      const { service } = svc({ fiber: fedFiber(), closure })
+      await service.updateFiber('f1', { fromSplitterOutput: null })
+      expect(closure.updateOutput).toHaveBeenCalledWith('s1', 2, { toFiberId: null }, 'tx')
+    })
   })
 })

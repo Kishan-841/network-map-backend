@@ -47,19 +47,20 @@ const fiberFields = z
   })
 
 // Zod 4 refuses `.partial()` on an object that already carries refinements, so
-// the cross-field rules live here and are applied to both variants separately.
-const fiberRules = (f, ctx) => {
+// the cross-field rules cannot be shared with the partial variant. That suits the
+// semantics anyway: a PATCH carries a fragment, so `{ ponPort: 5 }` is legal when
+// the stored fiber already has an OLT. The service re-checks both rules against
+// the merged values once it has loaded the existing row.
+export const createFiberSchema = fiberFields.superRefine((f, ctx) => {
   if ((f.oltId == null) !== (f.ponPort == null)) {
     ctx.addIssue({ code: 'custom', message: 'oltId and ponPort go together' })
   }
   if (f.fromSplitterOutput && f.oltId) {
     ctx.addIssue({ code: 'custom', message: 'A fiber fed by a splitter has no OLT port of its own' })
   }
-}
+})
 
-export const createFiberSchema = fiberFields.superRefine(fiberRules)
-
-export const updateFiberSchema = fiberFields.partial().superRefine(fiberRules)
+export const updateFiberSchema = fiberFields.partial()
 
 export const segmentLaidSchema = z.object({ fiberLaidMeters: num(z.number().min(0).nullable()) })
 
