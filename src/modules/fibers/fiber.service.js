@@ -139,14 +139,19 @@ export function createFiberService(deps) {
     return segments.map((s, i) => ({ ...s, fiberLaidMeters: laid[i] ?? s.fiberLaidMeters }))
   }
 
+  /**
+   * The feed an edit ends up with. An absent key keeps the stored one (it still
+   * has to satisfy the "starts at the splitter's closure" rule); an explicit
+   * null is a detach, so it inherits nothing.
+   */
+  const mergedFeed = (data, oldFiber) => {
+    if (data.fromSplitterOutput !== undefined) return data.fromSplitterOutput
+    return oldFiber?.fedBy ? { splitterId: oldFiber.fedBy.splitter.id, portNo: oldFiber.fedBy.portNo } : null
+  }
+
   async function saveGeometry(fiberId, rawPoints, data, oldFiber, tx) {
     const points = await resolvePoints(rawPoints, tx)
-    // On an edit the payload need not repeat the feed — the stored one still has
-    // to satisfy the "starts at the splitter's closure" rule.
-    const feedOutput =
-      data.fromSplitterOutput ??
-      (oldFiber?.fedBy ? { splitterId: oldFiber.fedBy.splitter.id, portNo: oldFiber.fedBy.portNo } : null)
-    await assertSplitterRules(points, feedOutput, fiberId)
+    await assertSplitterRules(points, mergedFeed(data, oldFiber), fiberId)
     let segments = deriveSegments(points)
     if (oldFiber) {
       const byId = Object.fromEntries(oldFiber.points.map((p) => [p.id, p]))
@@ -214,10 +219,29 @@ export function createFiberService(deps) {
       const existing = await fiberRepository.findById(id)
       if (!existing) throw ApiError.notFound('Fiber not found')
       if (data.name) await assertNameFree(data.name, id)
-      await assertPort({ oltId: data.oltId ?? existing.oltId, ponPort: data.ponPort ?? existing.ponPort }, id)
+      // A PATCH is a fragment, so the create schema's cross-field rules are
+      // re-run here against what the fiber will actually look like afterwards.
+      // Only an absent key inherits; an explicit null clears.
+      const oltId = data.oltId === undefined ? existing.oltId : data.oltId
+      const ponPort = data.ponPort === undefined ? existing.ponPort : data.ponPort
+      if ((oltId == null) !== (ponPort == null)) throw ApiError.badRequest('oltId and ponPort go together')
+      if (mergedFeed(data, existing) && oltId != null) {
+        throw ApiError.badRequest('A fiber fed by a splitter has no OLT port of its own')
+      }
+      await assertPort({ oltId, ponPort }, id)
       assertOwnedImages(data.images)
       await prisma.$transaction(async (tx) => {
         await fiberRepository.update(id, canonicalImages(detailsOf(data)), tx)
+        // An explicit null hands the splitter output back before any new geometry
+        // claims one, so a detach works whether or not the points were redrawn.
+        if (data.fromSplitterOutput === null && existing.fedBy) {
+          await closureRepository.updateOutput(
+            existing.fedBy.splitter.id,
+            existing.fedBy.portNo,
+            { toFiberId: null },
+            tx,
+          )
+        }
         if (data.points) await saveGeometry(id, data.points, data, existing, tx)
       })
       return getFiber(id)
