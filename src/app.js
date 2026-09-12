@@ -16,6 +16,8 @@ import { operatorRoutes } from './modules/operators/operator.routes.js'
 import { cityRoutes } from './modules/cities/city.routes.js'
 import { fiberRouteRoutes } from './modules/fiber-routes/fiber-route.routes.js'
 import { popRoutes } from './modules/pops/pop.routes.js'
+import { closureRoutes } from './modules/closures/closure.routes.js'
+import { splitterRoutes } from './modules/closures/splitter.routes.js'
 import { partnerAuthRoutes } from './modules/partner-auth/partner-auth.routes.js'
 import { inviteRoutes } from './modules/partner-invites/invite.routes.js'
 import { partnerSelfRoutes, partnerAdminRoutes } from './modules/partners/partner.routes.js'
@@ -90,6 +92,8 @@ export function createApp() {
   app.use('/api/v1/cities', cityRoutes)
   app.use('/api/v1/fiber-routes', fiberRouteRoutes)
   app.use('/api/v1/pops', popRoutes)
+  app.use('/api/v1/closures', closureRoutes)
+  app.use('/api/v1/splitters', splitterRoutes)
 
   app.use(errorHandler)
   return app
