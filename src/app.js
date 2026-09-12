@@ -18,6 +18,7 @@ import { fiberRouteRoutes } from './modules/fiber-routes/fiber-route.routes.js'
 import { popRoutes } from './modules/pops/pop.routes.js'
 import { closureRoutes } from './modules/closures/closure.routes.js'
 import { splitterRoutes } from './modules/closures/splitter.routes.js'
+import { fiberRoutes } from './modules/fibers/fiber.routes.js'
 
 export function createApp() {
   const app = express()
@@ -70,6 +71,7 @@ export function createApp() {
   app.use('/api/v1/pops', popRoutes)
   app.use('/api/v1/closures', closureRoutes)
   app.use('/api/v1/splitters', splitterRoutes)
+  app.use('/api/v1/fibers', fiberRoutes)
 
   app.use(errorHandler)
   return app
