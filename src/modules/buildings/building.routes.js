@@ -52,6 +52,19 @@ buildingRoutes.patch(
   buildingController.bulkStatus,
 )
 buildingRoutes.get('/', validateQuery(listQuerySchema), buildingController.list)
+// Above /:id, or Express reads 'export' as a building id.
+buildingRoutes.get(
+  '/export',
+  requireRole('ADMIN'),
+  audit('Building', 'Export', {
+    describe: (req) =>
+      `Exported the building list${
+        Object.keys(req.query ?? {}).length ? ` (filtered: ${new URLSearchParams(req.query)})` : ''
+      }`,
+  }),
+  validateQuery(listQuerySchema),
+  buildingController.exportXlsx,
+)
 // NOTE: /nearby must stay above /:id or Express matches it as an id.
 buildingRoutes.get('/nearby', validateQuery(nearbyQuerySchema), buildingController.nearby)
 buildingRoutes.get('/:id', buildingController.get)

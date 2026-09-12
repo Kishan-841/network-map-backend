@@ -3,6 +3,34 @@ import { homePassTier, HOME_PASS_TIERS } from '../../lib/home-pass-tier.js'
 import { haversineMeters, boundingBox } from '../../lib/geo.js'
 import { isSimilarName } from '../../lib/name-similarity.js'
 
+/**
+ * The most rows one export will carry. Well beyond the current registry, and
+ * the response says when it bites rather than silently handing back a short
+ * file that looks complete.
+ */
+const EXPORT_LIMIT = 10000
+
+/**
+ * The pincode for an export row.
+ *
+ * `Building.pincode` is only ever set on ACQUISITION rows — coverage
+ * buildings are located by zone instead — so on the coverage registry the
+ * stored field is empty for every row. Where the address came from Google it
+ * ends in a real 6-digit code, and reading it back off that building's own
+ * address is recovery, not a guess about which pincode it might be.
+ *
+ * Anchored to where a postcode actually sits in a Google address — last, or
+ * second-to-last before the country ("…, Maharashtra 411045, India") — so a
+ * plot or survey number earlier in the line cannot be mistaken for one.
+ * Requiring a leading 1-9 rules out the rest: no Indian pincode starts at 0.
+ */
+const PINCODE_AT_END = /\b([1-9][0-9]{5})\b(?:,[^,]*)?\s*$/
+
+export const exportPincode = (building) => {
+  if (building.pincode) return building.pincode
+  return building.formattedAddress?.match(PINCODE_AT_END)?.[1] ?? ''
+}
+
 export function createBuildingService({ buildingRepository, storage, userRepository, zoneRepository, operatorRepository }) {
   // Stored URLs are rendered as <a href>/<img src> — only accept files that
   // came from our own uploads API (blocks javascript:/foreign URLs).
@@ -242,6 +270,24 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         throw ApiError.forbidden('Acquisition leads cannot add coverage buildings')
       }
       if (!building.zoneId) throw ApiError.badRequest('Zone is required')
+
+      // The same building may exist under more than one zone — two operators
+      // can serve it — so the clash we care about is one per PLACE PER ZONE.
+      // Checked here for a readable message; the database index is what makes
+      // it race-safe when two people submit at once.
+      if (building.placeId) {
+        const clash = await buildingRepository.findByPlaceIdInZone(
+          building.placeId,
+          building.zoneId,
+        )
+        if (clash) {
+          const zone = await zoneRepository?.findById(building.zoneId)
+          throw ApiError.conflict(
+            `This building is already added under ${zone?.name ?? 'that zone'}. ` +
+              'Pick a different zone to add it again.',
+          )
+        }
+      }
       // Permission records are legal artifacts — surveyors may not set them, the
       // same rule addPhoto enforces for permission letters.
       if (actor?.role === 'SURVEYOR') {
@@ -269,6 +315,45 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         photos: photos?.length ? { create: photos } : undefined,
       })
       return signUrls(created)
+    },
+
+    /**
+     * The building list as a spreadsheet.
+     *
+     * Runs through `buildListWhere`, the same predicate the on-screen list
+     * uses, so the file contains exactly the rows the filter shows and nothing
+     * an actor could not already see. An export that quietly widens the scope
+     * hands somebody a file full of buildings they are not entitled to.
+     *
+     * `page`/`pageSize` are deliberately ignored: they describe the screen, not
+     * the file. Capped all the same, because an unbounded query against a
+     * growing registry is a memory problem waiting to happen.
+     */
+    async exportBuildings(filters = {}, actor) {
+      const where = await buildListWhere(filters, actor)
+      const found = await buildingRepository.listForExport(where, { take: EXPORT_LIMIT })
+
+      // Operator is appended rather than slotted beside Zone: anyone already
+      // working from an exported file keeps their column positions.
+      return {
+        columns: ['Building name', 'Address', 'Pincode', 'Home pass', 'Zone', 'Operator'],
+        rows: found.map((b) => [
+          // Blank, never the string "null" — a spreadsheet cell with nothing
+          // in it reads as nothing; one containing "null" reads as data.
+          b.buildingName ?? '',
+          b.formattedAddress ?? '',
+          // An identifier, not a quantity: as a number it would lose a
+          // leading zero and be right-aligned beside real figures.
+          exportPincode(b),
+          // Home pass stays numeric so the column can be summed and sorted.
+          b.details?.homePass ?? '',
+          b.zone?.name ?? '',
+          // Reached through the zone — a building has no operator of its own,
+          // and a zone may not have one assigned yet.
+          b.zone?.operator?.name ?? '',
+        ]),
+        truncated: found.length === EXPORT_LIMIT,
+      }
     },
 
     async listBuildings(filters = {}, actor) {

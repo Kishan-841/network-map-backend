@@ -5,6 +5,7 @@ import { buildingRepository } from './building.repository.js'
 import { userRepository } from '../users/user.repository.js'
 import { zoneRepository } from '../zones/zone.repository.js'
 import { operatorRepository } from '../operators/operator.repository.js'
+import { buildingsWorkbook, workbookFilename } from './building-workbook.js'
 
 const buildingService = createBuildingService({
   buildingRepository,
@@ -28,6 +29,31 @@ export const buildingController = {
     try {
       const result = await buildingService.bulkCreateBuildings(req.body.rows, req.user.id)
       res.json({ success: true, data: result })
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  /**
+   * The filtered list as an .xlsx download.
+   *
+   * Streams a buffer rather than JSON, so the browser saves a file instead of
+   * the page having to build one. The filters arrive exactly as the list takes
+   * them, so "export" always means "export what I am looking at".
+   */
+  async exportXlsx(req, res, next) {
+    try {
+      const data = await buildingService.exportBuildings(req.validatedQuery ?? {}, req.user)
+      const buffer = await buildingsWorkbook(data)
+      res.setHeader(
+        'Content-Type',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      )
+      res.setHeader('Content-Disposition', `attachment; filename="${workbookFilename()}"`)
+      // The browser reads this to warn when a huge registry was cut short.
+      res.setHeader('X-Export-Truncated', String(data.truncated))
+      res.setHeader('X-Export-Rows', String(data.rows.length))
+      res.send(Buffer.from(buffer))
     } catch (err) {
       next(err)
     }
