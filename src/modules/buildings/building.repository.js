@@ -82,6 +82,28 @@ export const buildingRepository = {
   findById: (id) => prisma.building.findUnique({ where: { id }, include: fullInclude }),
   update: (id, data) => prisma.building.update({ where: { id }, data, include: fullInclude }),
   delete: (id) => prisma.building.delete({ where: { id } }),
+  /**
+   * Lightweight map markers: exactly the fields a pin needs, no pagination,
+   * no zone/photo joins — the map can hold thousands of these at once.
+   */
+  listMarkers: (where = {}) =>
+    prisma.building.findMany({
+      where,
+      select: { id: true, buildingName: true, latitude: true, longitude: true, isLive: true },
+      orderBy: { buildingName: 'asc' },
+    }),
+  /**
+   * Fiber names still touching this building via a FiberPoint — the delete
+   * guard's evidence. Deduplicated + sorted so the 409 message is stable
+   * regardless of point order.
+   */
+  fiberNamesAttachedTo: async (buildingId) => {
+    const refs = await prisma.fiberPoint.findMany({
+      where: { buildingId },
+      select: { fiber: { select: { name: true } } },
+    })
+    return [...new Set(refs.map((r) => r.fiber.name))].sort()
+  },
   // Capped so a large/degenerate box can't pull the whole table into memory.
   // The nearby check only needs enough candidates to flag a duplicate.
   findWithinBounds: ({ minLat, maxLat, minLon, maxLon }) =>

@@ -392,6 +392,17 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       return { items: items.map(withTier), pagination: paginate(total) }
     },
 
+    /**
+     * Map pins: id/name/lat/lon/isLive only, no pagination. Scoped through
+     * `buildListWhere` with no filters — the same rule the list screen uses,
+     * so a role that only sees coverage buildings (or a subset of them) never
+     * gets a marker for something it could not otherwise open.
+     */
+    async listMarkers(actor) {
+      const where = await buildListWhere({}, actor)
+      return buildingRepository.listMarkers(where)
+    },
+
     async getBuilding(id, actor) {
       const building = await buildingRepository.findById(id)
       if (!building) throw ApiError.notFound('Building not found')
@@ -654,6 +665,16 @@ export function createBuildingService({ buildingRepository, storage, userReposit
     async deleteBuilding(id) {
       const building = await buildingRepository.findById(id)
       if (!building) throw ApiError.notFound('Building not found')
+
+      // A FiberPoint→Building reference is RESTRICT at the DB level, so an
+      // unguarded delete would fail with an opaque foreign-key error. Check
+      // first so the operator gets a clear next step (retype the point).
+      const fiberNames = await buildingRepository.fiberNamesAttachedTo(id)
+      if (fiberNames.length) {
+        throw ApiError.conflict(
+          `Attached to fiber ${fiberNames.join(', ')} — retype that point first`,
+        )
+      }
 
       // Collect every stored file before the row (and its cascaded photo/
       // permission children) disappears. The permission letter usually exists

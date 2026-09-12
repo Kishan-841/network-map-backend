@@ -58,6 +58,17 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
 
     async addSplitter(closureId, data) {
       await mustFind(closureId)
+      // A fiber that only touches this closure at one end (in/out) is fine —
+      // a splitter can feed off it. One that passes straight through must be
+      // ended here first, or the splitter would sit mid-cable with no clean
+      // role for either half.
+      const through = await closureRepository.fibersThrough(closureId)
+      const passingThrough = through.find(({ pointSeq, maxSeq }) => pointSeq !== 0 && pointSeq !== maxSeq)
+      if (passingThrough) {
+        throw ApiError.conflict(
+          `Fiber ${passingThrough.fiber.name} passes through this closure — end it here first`,
+        )
+      }
       let inputFiberId = data.inputFiberId ?? null
       if (!inputFiberId) {
         const ending = await closureRepository.fibersEndingAt(closureId)

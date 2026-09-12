@@ -67,6 +67,8 @@ buildingRoutes.get(
 )
 // NOTE: /nearby must stay above /:id or Express matches it as an id.
 buildingRoutes.get('/nearby', validateQuery(nearbyQuerySchema), buildingController.nearby)
+// Above /:id, or Express reads 'markers' as a building id.
+buildingRoutes.get('/markers', buildingController.markers)
 buildingRoutes.get('/:id', buildingController.get)
 buildingRoutes.patch(
   '/:id/status',

@@ -77,6 +77,15 @@ export const buildingController = {
     }
   },
 
+  async markers(req, res, next) {
+    try {
+      const markers = await buildingService.listMarkers(req.user)
+      res.json({ success: true, data: markers })
+    } catch (err) {
+      next(err)
+    }
+  },
+
   async nearby(req, res, next) {
     try {
       const { latitude, longitude, radius, name, placeId } = req.validatedQuery

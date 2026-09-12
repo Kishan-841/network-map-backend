@@ -1,10 +1,11 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createBuildingService } from '../src/modules/buildings/building.service.js'
 
-function fakeRepo(building) {
+function fakeRepo(building, { fiberNames = [] } = {}) {
   return {
     findById: vi.fn(async (id) => (id === building?.id ? building : null)),
     delete: vi.fn(async () => {}),
+    fiberNamesAttachedTo: vi.fn(async () => fiberNames),
   }
 }
 
@@ -81,5 +82,26 @@ describe('building service delete', () => {
     await service.deleteBuilding('b1')
 
     expect(storage.delete).not.toHaveBeenCalled()
+  })
+
+  it('409s with the attached fiber names when a FiberPoint still references the building', async () => {
+    const building = { id: 'b1', photos: [] }
+    const repo = fakeRepo(building, { fiberNames: ['FIB-001'] })
+    const service = createBuildingService({ buildingRepository: repo, storage: fakeStorage() })
+
+    await expect(service.deleteBuilding('b1')).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringContaining('FIB-001'),
+    })
+    expect(repo.delete).not.toHaveBeenCalled()
+  })
+
+  it('deletes normally when no fiber is attached', async () => {
+    const building = { id: 'b1', photos: [] }
+    const repo = fakeRepo(building, { fiberNames: [] })
+    const service = createBuildingService({ buildingRepository: repo, storage: fakeStorage() })
+
+    await expect(service.deleteBuilding('b1')).resolves.toBeUndefined()
+    expect(repo.delete).toHaveBeenCalledWith('b1')
   })
 })
