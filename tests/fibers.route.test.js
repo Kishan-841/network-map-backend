@@ -22,6 +22,7 @@ describe('fibers API', () => {
     let buildingAId = null
     let buildingBId = null
     let closureId = null
+    let splitterId = null
     let fiberId1 = null
     let fiberId2 = null
 
@@ -88,11 +89,14 @@ describe('fibers API', () => {
         })
       expect(created.status).toBe(201)
       const fiber1 = created.body.data
+      // Capture every id the `finally` block needs to clean up before any
+      // assertion below can throw — an assertion failure here must not leak
+      // the fiber or the closure the transaction above already persisted.
       fiberId1 = fiber1.id
+      closureId = fiber1.points?.[3]?.closureId ?? null
       expect(fiber1.points[3].label).toMatch(/^CL-\d{4}$/)
       expect(fiber1.segments).toHaveLength(2)
       expect(fiber1.totals.closureCount).toBe(1)
-      closureId = fiber1.points[3].closureId
 
       const seg0 = fiber1.segments[0].id
       const seg1 = fiber1.segments[1].id
@@ -109,10 +113,14 @@ describe('fibers API', () => {
         .set(...manager)
         .send({ ratio: 'R1_2' })
       expect(splitter.status).toBe(201)
-      const splitterId = splitter.body.data.id
+      splitterId = splitter.body.data?.id ?? null
       expect(splitter.body.data.inputFiberId).toBe(fiberId1)
 
-      // A direct tap off output 1, straight to building A.
+      // Tap building A directly off the splitter (output 1): building A sits
+      // BEFORE the closure on fiber 1, at exactly the point the cut below
+      // starts from, so the downstream walk's "sequence > cutFrom" check
+      // would not otherwise pick it up — the splitter tap gives it its own
+      // path into `downstream.buildings`.
       const outputPatch = await request(app)
         .patch(`/api/v1/splitters/${splitterId}/outputs/1`)
         .set(...manager)
@@ -133,7 +141,7 @@ describe('fibers API', () => {
         })
       expect(created2.status).toBe(201)
       const fiber2 = created2.body.data
-      fiberId2 = fiber2.id
+      fiberId2 = fiber2?.id ?? null
 
       const getFirst = await request(app)
         .get(`/api/v1/fibers/${fiberId1}`)
@@ -195,6 +203,10 @@ describe('fibers API', () => {
     } finally {
       if (fiberId2) await request(app).delete(`/api/v1/fibers/${fiberId2}`).set(...manager)
       if (fiberId1) await request(app).delete(`/api/v1/fibers/${fiberId1}`).set(...manager)
+      // Both fibers are gone by now, so no output still holds a toFiberId —
+      // explicit here for defense-in-depth even though deleting the closure
+      // below would cascade-delete this splitter anyway.
+      if (splitterId) await request(app).delete(`/api/v1/splitters/${splitterId}`).set(...manager)
       if (closureId) await request(app).delete(`/api/v1/closures/${closureId}`).set(...manager)
       if (buildingAId) await prisma.building.delete({ where: { id: buildingAId } }).catch(() => {})
       if (buildingBId) await prisma.building.delete({ where: { id: buildingBId } }).catch(() => {})
