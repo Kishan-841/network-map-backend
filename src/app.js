@@ -15,6 +15,7 @@ import { systemLogRoutes } from './modules/system-logs/system-log.routes.js'
 import { operatorRoutes } from './modules/operators/operator.routes.js'
 import { cityRoutes } from './modules/cities/city.routes.js'
 import { fiberRouteRoutes } from './modules/fiber-routes/fiber-route.routes.js'
+import { popRoutes } from './modules/pops/pop.routes.js'
 import { partnerAuthRoutes } from './modules/partner-auth/partner-auth.routes.js'
 import { inviteRoutes } from './modules/partner-invites/invite.routes.js'
 import { partnerSelfRoutes, partnerAdminRoutes } from './modules/partners/partner.routes.js'
@@ -88,6 +89,7 @@ export function createApp() {
   app.use('/api/v1/operators', operatorRoutes)
   app.use('/api/v1/cities', cityRoutes)
   app.use('/api/v1/fiber-routes', fiberRouteRoutes)
+  app.use('/api/v1/pops', popRoutes)
 
   app.use(errorHandler)
   return app
