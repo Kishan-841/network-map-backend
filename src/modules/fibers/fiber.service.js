@@ -90,6 +90,7 @@ export function createFiberService(deps) {
                 latitude: p.latitude,
                 longitude: p.longitude,
                 kind: p.newClosure.kind ?? null,
+                notes: p.newClosure.notes ?? null,
               },
               tx,
             )

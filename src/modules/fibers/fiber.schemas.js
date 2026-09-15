@@ -14,7 +14,9 @@ const pointSchema = z
     popId: z.string().nullish(),
     closureId: z.string().nullish(),
     buildingId: z.string().nullish(),
-    newClosure: z.object({ kind: z.string().trim().max(50).nullish() }).nullish(),
+    newClosure: z
+      .object({ kind: z.string().trim().max(50).nullish(), notes: z.string().trim().max(500).nullish() })
+      .nullish(),
     newPop: z.object({ name: z.string().trim().min(1).max(100) }).nullish(),
   })
   .superRefine((p, ctx) => {
