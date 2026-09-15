@@ -64,6 +64,8 @@ function fakeFiberRepo(over = {}) {
     restoreAll: vi.fn(async () => {}),
     splittersFedBy: vi.fn(async () => []),
     fedBy: vi.fn(async () => null),
+    listEndpointWaypoints: vi.fn(async () => []),
+    findPointsByIds: vi.fn(async () => []),
     ...over,
   }
 }
@@ -384,5 +386,177 @@ describe('fiber service', () => {
       expect.objectContaining({ images: Prisma.DbNull }),
       'tx',
     )
+  })
+})
+
+describe('fiber junctions and merge-points', () => {
+  const LON = 73.8
+  const point = (id, sequence, over) => ({
+    id,
+    sequence,
+    type: 'WAYPOINT',
+    popId: null,
+    closureId: null,
+    buildingId: null,
+    latitude: 18.5,
+    longitude: LON,
+    ...over,
+  })
+
+  /** A migrated route: POP → WAYPOINT → WAYPOINT, its loose end at `endLat`. */
+  const migratedFiber = (id, name, endId, endLat) => ({
+    id,
+    name,
+    coreCount: 12,
+    status: 'PLANNED',
+    oltId: null,
+    ponPort: null,
+    images: null,
+    fedBy: null,
+    points: [
+      point(`${id}-a`, 0, { type: 'POP', popId: 'pop1', latitude: 18.49, pop: { name: 'POP A' } }),
+      point(`${id}-b`, 1, { latitude: 18.5 }),
+      point(endId, 2, { latitude: endLat }),
+    ],
+    segments: [],
+  })
+
+  const END_1 = 18.51
+  const END_2 = 18.510002
+  const CENTRE_LAT = (END_1 + END_2) / 2
+
+  const mergeRepo = (over = {}) =>
+    fakeFiberRepo({
+      findById: vi.fn(async (id) =>
+        id === 'f1' ? migratedFiber('f1', 'FIB-001', 'e1', END_1) : migratedFiber('f2', 'FIB-002', 'e2', END_2),
+      ),
+      findPointsByIds: vi.fn(async () => [
+        { id: 'e1', fiberId: 'f1', sequence: 2, type: 'WAYPOINT', latitude: END_1, longitude: LON },
+        { id: 'e2', fiberId: 'f2', sequence: 2, type: 'WAYPOINT', latitude: END_2, longitude: LON },
+      ]),
+      ...over,
+    })
+
+  it('clusters the endpoint waypoints the repository hands back', async () => {
+    const fiber = fakeFiberRepo({
+      listEndpointWaypoints: vi.fn(async () => [
+        { pointId: 'e1', fiberId: 'f1', fiberName: 'FIB-001', latitude: END_1, longitude: LON },
+        { pointId: 'e2', fiberId: 'f2', fiberName: 'FIB-002', latitude: END_2, longitude: LON },
+        { pointId: 'far', fiberId: 'f3', fiberName: 'FIB-003', latitude: 18.6, longitude: LON },
+      ]),
+    })
+    const { service } = svc({ fiber })
+
+    const clusters = await service.listJunctions({ radiusMeters: 10 })
+
+    expect(clusters).toHaveLength(1)
+    expect(clusters[0].points.map((p) => p.pointId)).toEqual(['e1', 'e2'])
+    expect(clusters[0].centre.latitude).toBeCloseTo(CENTRE_LAT, 8)
+  })
+
+  it('merges two loose ends into one new closure and redraws both fibers', async () => {
+    const fiber = mergeRepo()
+    const { service, deps } = svc({ fiber })
+
+    const result = await service.mergePoints({ pointIds: ['e1', 'e2'], type: 'CLOSURE', kind: 'pole' })
+
+    expect(deps.sequences.nextClosureCode).toHaveBeenCalledWith('tx')
+    expect(deps.closureRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'CL-0042', kind: 'pole', longitude: LON }),
+      'tx',
+    )
+    expect(deps.closureRepository.create.mock.calls[0][0].latitude).toBeCloseTo(CENTRE_LAT, 8)
+
+    expect(fiber.replaceGeometry).toHaveBeenCalledTimes(2)
+    for (const [fiberId, points, segments, tx] of fiber.replaceGeometry.mock.calls) {
+      expect(['f1', 'f2']).toContain(fiberId)
+      expect(tx).toBe('tx')
+      // Untouched points keep their type and entity reference...
+      expect(points[0]).toMatchObject({ type: 'POP', popId: 'pop1', latitude: 18.49 })
+      expect(points[1]).toMatchObject({ type: 'WAYPOINT', latitude: 18.5 })
+      // ...and the selected one becomes the closure, at the closure's position.
+      expect(points[2]).toMatchObject({ type: 'CLOSURE', closureId: 'cnew' })
+      expect(points[2].latitude).toBeCloseTo(CENTRE_LAT, 8)
+      // POP → CLOSURE is now a real segment where before there was none.
+      expect(segments).toHaveLength(1)
+      expect(segments[0].mapMeters).toBeGreaterThan(0)
+    }
+
+    expect(result).toEqual({
+      entity: { type: 'CLOSURE', id: 'cnew', code: 'CL-0042' },
+      fibers: [
+        { id: 'f1', name: 'FIB-001' },
+        { id: 'f2', name: 'FIB-002' },
+      ],
+    })
+  })
+
+  it('attaches the loose ends to an existing POP', async () => {
+    const fiber = mergeRepo()
+    const { service, deps } = svc({ fiber })
+
+    const result = await service.mergePoints({ pointIds: ['e1', 'e2'], type: 'POP', popId: 'pop9' })
+
+    expect(deps.closureRepository.create).not.toHaveBeenCalled()
+    expect(result.entity).toEqual({ type: 'POP', id: 'pop9', name: 'POP A' })
+    // The POP's own coordinates win over the centroid.
+    expect(fiber.replaceGeometry.mock.calls[0][1][2]).toMatchObject({
+      type: 'POP',
+      popId: 'pop9',
+      latitude: 1,
+      longitude: 1,
+    })
+  })
+
+  it('400s when the target POP does not exist', async () => {
+    const pop = fakePopRepo({ findById: vi.fn(async () => null) })
+    const { service } = svc({ fiber: mergeRepo(), pop })
+
+    await expect(
+      service.mergePoints({ pointIds: ['e1', 'e2'], type: 'POP', popId: 'ghost' }),
+    ).rejects.toMatchObject({ status: 400 })
+  })
+
+  it('400s when one of the selected points is not a waypoint', async () => {
+    const fiber = mergeRepo({
+      findPointsByIds: vi.fn(async () => [
+        { id: 'e1', fiberId: 'f1', sequence: 2, type: 'WAYPOINT', latitude: END_1, longitude: LON },
+        { id: 'e2', fiberId: 'f2', sequence: 2, type: 'CLOSURE', latitude: END_2, longitude: LON },
+      ]),
+    })
+    const { service } = svc({ fiber })
+
+    await expect(service.mergePoints({ pointIds: ['e1', 'e2'], type: 'CLOSURE' })).rejects.toMatchObject({
+      status: 400,
+      message: 'Only waypoints can be merged',
+    })
+  })
+
+  it('400s when a selected id does not exist at all', async () => {
+    const fiber = mergeRepo({
+      findPointsByIds: vi.fn(async () => [
+        { id: 'e1', fiberId: 'f1', sequence: 2, type: 'WAYPOINT', latitude: END_1, longitude: LON },
+      ]),
+    })
+    const { service } = svc({ fiber })
+
+    await expect(service.mergePoints({ pointIds: ['e1', 'ghost'], type: 'CLOSURE' })).rejects.toMatchObject({
+      status: 400,
+    })
+  })
+
+  it('400s when every selected point belongs to the same fiber', async () => {
+    const fiber = mergeRepo({
+      findPointsByIds: vi.fn(async () => [
+        { id: 'e1', fiberId: 'f1', sequence: 0, type: 'WAYPOINT', latitude: END_1, longitude: LON },
+        { id: 'e2', fiberId: 'f1', sequence: 2, type: 'WAYPOINT', latitude: END_2, longitude: LON },
+      ]),
+    })
+    const { service } = svc({ fiber })
+
+    await expect(service.mergePoints({ pointIds: ['e1', 'e2'], type: 'CLOSURE' })).rejects.toMatchObject({
+      status: 400,
+    })
+    expect(fiber.replaceGeometry).not.toHaveBeenCalled()
   })
 })

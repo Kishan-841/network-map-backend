@@ -4,7 +4,8 @@ import { prisma } from '../../lib/prisma.js'
 import { pathMeters } from '../../lib/fiber-geo.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
 import { nextFiberName, nextClosureCode } from '../../lib/sequences.js'
-import { deriveSegments, carryForward, splitterPlacementErrors, entityKey } from './fiber-geometry.js'
+import { deriveSegments, carryForward, splitterPlacementErrors, keyedSegments } from './fiber-geometry.js'
+import { findJunctions } from './fiber-junctions.js'
 import { collectDownstream } from './fiber-downstream.js'
 import { fiberRepository } from './fiber.repository.js'
 import { closureRepository } from '../closures/closure.repository.js'
@@ -156,15 +157,7 @@ export function createFiberService(deps) {
     const points = await resolvePoints(rawPoints, tx)
     await assertSplitterRules(points, mergedFeed(data, oldFiber), fiberId)
     let segments = deriveSegments(points)
-    if (oldFiber) {
-      const byId = Object.fromEntries(oldFiber.points.map((p) => [p.id, p]))
-      const old = oldFiber.segments.map((s) => ({
-        ...s,
-        fromKey: entityKey(byId[s.fromPointId]),
-        toKey: entityKey(byId[s.toPointId]),
-      }))
-      segments = carryForward(old, segments)
-    }
+    if (oldFiber) segments = carryForward(keyedSegments(oldFiber), segments)
     segments = applyLaid(segments, data.segmentLaidMeters)
     await fiberRepository.replaceGeometry(fiberId, points, segments, tx)
     if (data.fromSplitterOutput) {
@@ -179,6 +172,44 @@ export function createFiberService(deps) {
     const last = points.at(-1)
     if (last.type === 'CLOSURE') await closureRepository.claimSplitterInput(last.closureId, fiberId, tx)
   }
+
+  const MAX_MERGE_POINTS = 50
+
+  const centroid = (points) => ({
+    latitude: points.reduce((n, p) => n + p.latitude, 0) / points.length,
+    longitude: points.reduce((n, p) => n + p.longitude, 0) / points.length,
+  })
+
+  /** The entity every selected point is about to become, plus how to describe it back. */
+  async function resolveMergeTarget({ type, popId, kind }, selected, tx) {
+    if (type === 'POP') {
+      const pop = popId ? await popRepository.findById(popId) : null
+      if (!pop) throw ApiError.badRequest('POP does not exist')
+      return {
+        entity: { type: 'POP', id: pop.id, name: pop.name },
+        point: { type: 'POP', popId: pop.id, latitude: pop.latitude, longitude: pop.longitude },
+      }
+    }
+    const centre = centroid(selected)
+    const closure = await closureRepository.create(
+      { code: await sequences.nextClosureCode(tx), latitude: centre.latitude, longitude: centre.longitude, kind: kind ?? null },
+      tx,
+    )
+    return {
+      entity: { type: 'CLOSURE', id: closure.id, code: closure.code },
+      point: { type: 'CLOSURE', closureId: closure.id, latitude: closure.latitude, longitude: closure.longitude },
+    }
+  }
+
+  /** A stored point restated as the plain shape `replaceGeometry` writes back. */
+  const asPlainPoint = (p) => ({
+    type: p.type,
+    popId: p.popId ?? null,
+    closureId: p.closureId ?? null,
+    buildingId: p.buildingId ?? null,
+    latitude: p.latitude,
+    longitude: p.longitude,
+  })
 
   const detailsOf = ({ points, segmentLaidMeters, fromSplitterOutput, ...rest }) => rest
 
@@ -263,6 +294,47 @@ export function createFiberService(deps) {
         if (data.points) await saveGeometry(id, data.points, data, existing, tx)
       })
       return getFiber(id)
+    },
+
+    /** Piles of migrated endpoints that look like one pole (spec §2.15). */
+    async listJunctions({ radiusMeters = 10 } = {}) {
+      return findJunctions(await fiberRepository.listEndpointWaypoints(), radiusMeters)
+    },
+
+    /**
+     * Turns a cluster of loose waypoints into one shared entity: the selected
+     * points all become the same CLOSURE (minted here, at their centroid) or the
+     * same existing POP, and every fiber they belong to is redrawn so the shared
+     * point bounds real segments instead of being an untyped bend.
+     */
+    async mergePoints({ pointIds, type, popId, kind }) {
+      const ids = [...new Set(pointIds)]
+      if (ids.length < 2) throw ApiError.badRequest('Select at least two distinct points')
+      if (ids.length > MAX_MERGE_POINTS) throw ApiError.badRequest(`At most ${MAX_MERGE_POINTS} points can be merged at once`)
+
+      const selected = await fiberRepository.findPointsByIds(ids)
+      // A missing id and a typed id fail the same way — either means the
+      // selection no longer describes a mergeable pile of loose ends.
+      if (selected.length !== ids.length || selected.some((p) => p.type !== 'WAYPOINT')) {
+        throw ApiError.badRequest('Only waypoints can be merged')
+      }
+      const fiberIds = [...new Set(selected.map((p) => p.fiberId))]
+      if (fiberIds.length < 2) throw ApiError.badRequest('Merging needs points from at least two different fibers')
+
+      const selectedIds = new Set(ids)
+      return prisma.$transaction(async (tx) => {
+        const target = await resolveMergeTarget({ type, popId, kind }, selected, tx)
+        const fibers = []
+        for (const fiberId of fiberIds) {
+          const fiber = await fiberRepository.findById(fiberId, tx)
+          if (!fiber) throw ApiError.badRequest('Fiber not found')
+          const points = fiber.points.map((p) => (selectedIds.has(p.id) ? { ...target.point } : asPlainPoint(p)))
+          const segments = carryForward(keyedSegments(fiber), deriveSegments(points))
+          await fiberRepository.replaceGeometry(fiberId, points, segments, tx)
+          fibers.push({ id: fiber.id, name: fiber.name })
+        }
+        return { entity: target.entity, fibers }
+      })
     },
 
     async deleteFiber(id) {
