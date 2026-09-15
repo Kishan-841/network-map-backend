@@ -2,7 +2,7 @@ import { prisma } from '../../lib/prisma.js'
 import { deriveSegments } from './fiber-geometry.js'
 
 export const FIBER_INCLUDE = {
-  points: { orderBy: { sequence: 'asc' }, include: { pop: { select: { name: true } }, closure: { select: { code: true, splitters: { select: { id: true, ratio: true } } } }, building: { select: { buildingName: true } } } },
+  points: { orderBy: { sequence: 'asc' }, include: { pop: { select: { name: true } }, closure: { select: { code: true, kind: true, notes: true, splitters: { select: { id: true, ratio: true } } } }, building: { select: { buildingName: true } } } },
   segments: { orderBy: { sequence: 'asc' } },
   olt: { select: { id: true, name: true, pop: { select: { id: true, name: true } } } },
   operator: { select: { id: true, name: true } },

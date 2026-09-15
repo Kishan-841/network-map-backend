@@ -19,6 +19,7 @@ export function shapeFiber(fiber, extras = {}) {
     ...p,
     label: p.pop?.name ?? p.closure?.code ?? p.building?.buildingName ?? null,
     splitter: p.closure?.splitters?.[0] ? RATIO_LABEL[p.closure.splitters[0].ratio] : null,
+    kind: p.closure?.kind ?? null,
   }))
   return {
     ...fiber,
