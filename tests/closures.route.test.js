@@ -3,6 +3,7 @@ import request from 'supertest'
 import jwt from 'jsonwebtoken'
 import { createApp } from '../src/app.js'
 import { env } from '../src/config/env.js'
+import { prisma } from '../src/lib/prisma.js'
 
 const tokenFor = (role) =>
   jwt.sign({ sub: `test-${role.toLowerCase()}`, role }, env.jwtSecret, {
@@ -15,6 +16,7 @@ describe('closures API', () => {
     const app = createApp()
     let closureId = null
     let splitterId = null
+    let buildingId = null
     try {
       expect(
         (
@@ -58,6 +60,31 @@ describe('closures API', () => {
       expect(outputPatch.status).toBe(200)
       expect(outputPatch.body.data.label).toBe('Shop')
 
+      const building = await prisma.building.create({
+        data: {
+          buildingName: `Closure-Test-Bldg-${Date.now()}`,
+          formattedAddress: '1 Closure St',
+          latitude: 18.5,
+          longitude: 73.8,
+          createdById: 'test-admin',
+        },
+      })
+      buildingId = building.id
+
+      const outputPatch2 = await request(app)
+        .patch(`/api/v1/splitters/${splitterId}/outputs/2`)
+        .set(...auth)
+        .send({ toBuildingId: buildingId })
+      expect(outputPatch2.status).toBe(200)
+
+      const closureGet = await request(app)
+        .get(`/api/v1/closures/${closureId}`)
+        .set(...auth)
+      expect(closureGet.status).toBe(200)
+      expect(closureGet.body.data.splitters[0].outputs[1].toBuilding.buildingName).toBe(building.buildingName)
+      expect(closureGet.body.data.splitters[0].outputs[0].toBuilding).toBeNull()
+      expect(closureGet.body.data.splitters[0].outputs[0].toFiber).toBeNull()
+
       expect(
         (
           await request(app)
@@ -86,6 +113,9 @@ describe('closures API', () => {
         await request(app)
           .delete(`/api/v1/closures/${closureId}`)
           .set(...auth)
+      }
+      if (buildingId) {
+        await prisma.building.delete({ where: { id: buildingId } }).catch(() => {})
       }
     }
   })

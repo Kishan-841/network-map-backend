@@ -1,7 +1,15 @@
 import { prisma } from '../../lib/prisma.js'
 
+const outputsWithTargets = {
+  orderBy: { portNo: 'asc' },
+  include: {
+    toFiber: { select: { id: true, name: true, status: true } },
+    toBuilding: { select: { id: true, buildingName: true } },
+  },
+}
+
 const withDetail = {
-  splitters: { include: { outputs: true } },
+  splitters: { include: { outputs: outputsWithTargets } },
   building: true,
   _count: { select: { points: true } },
 }
@@ -40,7 +48,7 @@ export const closureRepository = {
         ...data,
         outputs: { create: Array.from({ length: portCount }, (_, i) => ({ portNo: i + 1 })) },
       },
-      include: { outputs: true },
+      include: { outputs: outputsWithTargets },
     }),
   findSplitterById: (id) => prisma.splitter.findUnique({ where: { id }, include: { outputs: true } }),
   updateSplitter: (id, data, newPortCount) => {
