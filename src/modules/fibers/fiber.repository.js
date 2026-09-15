@@ -31,6 +31,36 @@ export const fiberRepository = {
       await tx.fiberSegment.create({ data: { fiberId, sequence: s.sequence, fromPointId: created[s.fromIndex].id, toPointId: created[s.toIndex].id, mapMeters: s.mapMeters, fiberLaidMeters: s.fiberLaidMeters ?? null, isCut: s.isCut ?? false, cutAt: s.cutAt ?? null, cutNote: s.cutNote ?? null } })
     }
   },
+  /**
+   * Merge candidates: every fiber's first and last point that is still a
+   * WAYPOINT. One query loads all the points; picking the two ends in JS beats
+   * a per-fiber min/max round trip at this table size.
+   */
+  async listEndpointWaypoints() {
+    const fibers = await prisma.fiber.findMany({
+      select: {
+        id: true,
+        name: true,
+        points: { orderBy: { sequence: 'asc' }, select: { id: true, type: true, latitude: true, longitude: true } },
+      },
+    })
+    const out = []
+    for (const fiber of fibers) {
+      if (!fiber.points.length) continue
+      const ends = fiber.points.length === 1 ? [fiber.points[0]] : [fiber.points[0], fiber.points.at(-1)]
+      for (const p of ends) {
+        if (p.type !== 'WAYPOINT') continue
+        out.push({ pointId: p.id, fiberId: fiber.id, fiberName: fiber.name, latitude: p.latitude, longitude: p.longitude })
+      }
+    }
+    return out
+  },
+  /** Raw rows for the ids a merge selected — no includes, the service only needs type + position. */
+  findPointsByIds: (ids) =>
+    prisma.fiberPoint.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, fiberId: true, sequence: true, type: true, latitude: true, longitude: true },
+    }),
   findSegment: (fiberId, segmentId) => prisma.fiberSegment.findFirst({ where: { id: segmentId, fiberId } }),
   updateSegment: (id, data) => prisma.fiberSegment.update({ where: { id }, data }),
   cutSegment: (fiberId, segmentId, note) => prisma.$transaction([

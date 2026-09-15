@@ -18,6 +18,20 @@ export function deriveSegments(points) {
   return segments
 }
 
+/**
+ * The stored segments of a loaded fiber, restated in the entity-pair form
+ * `carryForward` matches on. Both the edit path and the merge-points path
+ * redraw a fiber's geometry, so both need it.
+ */
+export function keyedSegments(fiber) {
+  const byId = Object.fromEntries(fiber.points.map((p) => [p.id, p]))
+  return fiber.segments.map((s) => ({
+    ...s,
+    fromKey: entityKey(byId[s.fromPointId]),
+    toKey: entityKey(byId[s.toPointId]),
+  }))
+}
+
 /** User-entered values survive a redraw as long as the segment's two endpoints do (spec §2.12 step 6). */
 export function carryForward(oldSegments, newSegments) {
   const byPair = new Map(oldSegments.map((s) => [`${s.fromKey}>${s.toKey}`, s]))
