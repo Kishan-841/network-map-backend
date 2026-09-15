@@ -1,6 +1,6 @@
 import { PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
-import { buildObjectKey, keyFromPublicUrl } from './object-key.js'
+import { buildObjectKey, keyFromPublicUrl, keyFromSignedUrl } from './object-key.js'
 
 const READ_URL_TTL_SECONDS = 15 * 60
 
@@ -14,6 +14,10 @@ const READ_URL_TTL_SECONDS = 15 * 60
  * turned off on the bucket. `client` is an S3Client (injected for tests).
  */
 export function createR2StorageProvider({ client, bucket, publicBaseUrl }) {
+  // Either form of our own URL resolves to the same object: the canonical
+  // public one we store, or the presigned S3-host one `readUrl()` hands out.
+  const keyOf = (url) => keyFromPublicUrl(url, publicBaseUrl) ?? keyFromSignedUrl(url, bucket)
+
   return {
     async save({ buffer, extension, contentType }) {
       const key = buildObjectKey(extension)
@@ -33,14 +37,14 @@ export function createR2StorageProvider({ client, bucket, publicBaseUrl }) {
     },
 
     keyFromUrl(url) {
-      return keyFromPublicUrl(url, publicBaseUrl)
+      return keyOf(url)
     },
 
     // The stable form we store. Read URLs handed to browsers are signed and
     // expire; if one is posted back to us on an edit, this turns it back into
     // the object's identity so we never persist a link that dies.
     canonicalUrl(url) {
-      const key = keyFromPublicUrl(url, publicBaseUrl)
+      const key = keyOf(url)
       return key ? `${publicBaseUrl}/${key}` : url
     },
 
@@ -51,7 +55,7 @@ export function createR2StorageProvider({ client, bucket, publicBaseUrl }) {
      * shared screenshot, a browser history entry) stops working quickly.
      */
     async readUrl(url, { expiresIn = READ_URL_TTL_SECONDS } = {}) {
-      const key = keyFromPublicUrl(url, publicBaseUrl)
+      const key = keyOf(url)
       if (!key) return url
       return getSignedUrl(client, new GetObjectCommand({ Bucket: bucket, Key: key }), {
         expiresIn,

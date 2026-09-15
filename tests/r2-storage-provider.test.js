@@ -46,4 +46,37 @@ describe('r2 storage provider', () => {
     expect(provider.keyFromUrl('https://evil.example/x.jpg')).toBeNull()
     expect(provider.keyFromUrl(`${PUBLIC}/../secret`)).toBeNull()
   })
+
+  // readUrl() signs against the S3 API host, not PUBLIC. A client that edits a
+  // record posts back what we served it, so both forms must resolve.
+  it('accepts its own presigned read urls and canonicalises them back', () => {
+    const provider = createR2StorageProvider({
+      client: fakeClient(),
+      bucket: 'docs',
+      publicBaseUrl: PUBLIC,
+    })
+    const signed =
+      'https://docs.abc123.r2.cloudflarestorage.com/2026/07/a.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=deadbeef'
+    const pathStyle = 'https://abc123.r2.cloudflarestorage.com/docs/2026/07/a.jpg?X-Amz-Signature=x'
+
+    expect(provider.keyFromUrl(signed)).toBe('2026/07/a.jpg')
+    expect(provider.keyFromUrl(pathStyle)).toBe('2026/07/a.jpg')
+    expect(provider.canonicalUrl(signed)).toBe(`${PUBLIC}/2026/07/a.jpg`)
+    expect(provider.canonicalUrl(pathStyle)).toBe(`${PUBLIC}/2026/07/a.jpg`)
+  })
+
+  it('still rejects another bucket, another host and traversal in a signed url', () => {
+    const provider = createR2StorageProvider({
+      client: fakeClient(),
+      bucket: 'docs',
+      publicBaseUrl: PUBLIC,
+    })
+    expect(provider.keyFromUrl('https://other.abc123.r2.cloudflarestorage.com/2026/07/a.jpg')).toBeNull()
+    expect(provider.keyFromUrl('https://abc123.r2.cloudflarestorage.com/other/2026/07/a.jpg')).toBeNull()
+    expect(provider.keyFromUrl('https://docs.abc123.evil.com/2026/07/a.jpg')).toBeNull()
+    // Dot segments, encoded or not, are normalised away by URL parsing, so a
+    // signed url can only ever name an object inside our own bucket.
+    expect(provider.keyFromUrl('https://docs.abc123.r2.cloudflarestorage.com/../secret')).toBe('secret')
+    expect(provider.keyFromUrl('https://docs.abc123.r2.cloudflarestorage.com/%2E%2E/secret')).toBe('secret')
+  })
 })
