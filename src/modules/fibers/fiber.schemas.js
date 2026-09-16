@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { RATIO_PORTS } from '../closures/closure.schemas.js'
 
 export const CORE_COUNTS = [2, 4, 6, 12, 24, 48]
 
@@ -8,22 +9,32 @@ const num = (schema) => z.preprocess((v) => (v === '' || v === null ? undefined 
 
 const pointSchema = z
   .object({
-    type: z.enum(['WAYPOINT', 'POP', 'CLOSURE', 'BUILDING']).default('WAYPOINT'),
+    type: z.enum(['WAYPOINT', 'POP', 'CLOSURE', 'BUILDING', 'SPLITTER']).default('WAYPOINT'),
     latitude: z.number().min(-90).max(90),
     longitude: z.number().min(-180).max(180),
     popId: z.string().nullish(),
     closureId: z.string().nullish(),
     buildingId: z.string().nullish(),
+    splitterId: z.string().nullish(),
     newClosure: z
       .object({ kind: z.string().trim().max(50).nullish(), notes: z.string().trim().max(500).nullish() })
       .nullish(),
     newPop: z.object({ name: z.string().trim().min(1).max(100) }).nullish(),
+    // A splitter dropped straight onto the line: no closure, its own S-code.
+    newSplitter: z
+      .object({
+        ratio: z.enum(Object.keys(RATIO_PORTS)),
+        fiberType: z.enum(['MAIN', 'SUB']).nullish(),
+        location: z.enum(['WAN', 'LAN']).default('WAN'),
+      })
+      .nullish(),
   })
   .superRefine((p, ctx) => {
     const has = {
       POP: p.popId || p.newPop,
       CLOSURE: p.closureId || p.newClosure,
       BUILDING: p.buildingId,
+      SPLITTER: p.splitterId || p.newSplitter,
     }
     if (p.type !== 'WAYPOINT' && !has[p.type]) {
       ctx.addIssue({ code: 'custom', message: `${p.type} point needs its reference` })

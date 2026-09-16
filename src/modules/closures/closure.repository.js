@@ -42,15 +42,16 @@ export const closureRepository = {
   fibersEndingAt: async (closureId) =>
     (await fibersThrough(closureId)).filter((x) => x.pointSeq === x.maxSeq).map((x) => x.fiber),
 
-  createSplitter: (data, portCount) =>
-    prisma.splitter.create({
+  // `tx` so a splitter minted as part of a fiber save shares that transaction.
+  createSplitter: (data, portCount, tx = prisma) =>
+    tx.splitter.create({
       data: {
         ...data,
         outputs: { create: Array.from({ length: portCount }, (_, i) => ({ portNo: i + 1 })) },
       },
       include: { outputs: outputsWithTargets },
     }),
-  findSplitterById: (id) => prisma.splitter.findUnique({ where: { id }, include: { outputs: true } }),
+  findSplitterById: (id) => prisma.splitter.findUnique({ where: { id }, include: { outputs: true, _count: { select: { points: true } } } }),
   updateSplitter: (id, data, newPortCount) => {
     if (!newPortCount) return prisma.splitter.update({ where: { id }, data, include: { outputs: true } })
     return prisma.$transaction(async (tx) => {

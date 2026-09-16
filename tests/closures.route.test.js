@@ -53,6 +53,9 @@ describe('closures API', () => {
       expect(splitter.body.data.outputs).toHaveLength(4)
       expect(splitter.body.data.inputFiberId).toBeNull()
       expect(splitter.body.data.fiberType).toBe('MAIN')
+      expect(splitter.body.data.code).toMatch(/^S\d+$/)
+      // A closure's splitter inherits the closure's position.
+      expect(splitter.body.data.latitude).toBe(18.5)
 
       const retyped = await request(app)
         .patch(`/api/v1/splitters/${splitterId}`)
