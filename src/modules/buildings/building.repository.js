@@ -37,6 +37,40 @@ const exportSelect = {
   zone: { select: { name: true, operator: { select: { name: true } } } },
 }
 
+/**
+ * The map's payload: enough to place a pin, colour it, and fill the selected
+ * building card — and nothing else. No photos, contacts or permission rows,
+ * because the map draws every building the actor can see in one response and
+ * anything extra is multiplied by the whole registry.
+ */
+const markerSelect = {
+  id: true,
+  buildingName: true,
+  formattedAddress: true,
+  latitude: true,
+  longitude: true,
+  isLive: true,
+  feasibleStatus: true,
+  source: true,
+  createdById: true,
+  createdAt: true,
+  zone: { select: { id: true, name: true, operatorId: true } },
+  cityId: true,
+  pincode: true,
+  details: { select: { homePass: true, floors: true, wings: true } },
+  // The acquisition map's card shows the city and the contact person.
+  city: { select: { id: true, name: true } },
+  contact: {
+    select: {
+      contactName: true,
+      contactPhone: true,
+      contactEmail: true,
+      designation: true,
+      designationOther: true,
+    },
+  },
+}
+
 export const buildingRepository = {
   /** One row per Place per zone — the clash the create path refuses. */
   findByPlaceIdInZone: (placeId, zoneId) =>
@@ -56,6 +90,17 @@ export const buildingRepository = {
       orderBy: { createdAt: 'desc' },
       skip,
       take,
+    }),
+  /**
+   * Every matching building, lean. Deliberately unpaginated: the map is not a
+   * page of results, it is the whole picture — a `take` here is exactly the
+   * bug that capped it at 500.
+   */
+  listMarkers: (where = {}) =>
+    prisma.building.findMany({
+      where,
+      select: markerSelect,
+      orderBy: { buildingName: 'asc' },
     }),
   count: (where = {}) => prisma.building.count({ where }),
   updateMany: (where, data) => prisma.building.updateMany({ where, data }),
