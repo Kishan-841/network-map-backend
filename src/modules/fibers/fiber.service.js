@@ -4,7 +4,7 @@ import { prisma } from '../../lib/prisma.js'
 import { pathMeters } from '../../lib/fiber-geo.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
 import { nextFiberName, nextClosureCode } from '../../lib/sequences.js'
-import { deriveSegments, carryForward, splitterPlacementErrors, keyedSegments } from './fiber-geometry.js'
+import { deriveSegments, carryForward, keyedSegments } from './fiber-geometry.js'
 import { findJunctions } from './fiber-junctions.js'
 import { collectDownstream } from './fiber-downstream.js'
 import { fiberRepository } from './fiber.repository.js'
@@ -15,12 +15,19 @@ import { buildingRepository } from '../buildings/building.repository.js'
 const RATIO_LABEL = { R1_2: '1:2', R1_4: '1:4', R1_8: '1:8', R1_16: '1:16' }
 
 export function shapeFiber(fiber, extras = {}) {
-  const points = fiber.points.map((p) => ({
-    ...p,
-    label: p.pop?.name ?? p.closure?.code ?? p.building?.buildingName ?? null,
-    splitter: p.closure?.splitters?.[0] ? RATIO_LABEL[p.closure.splitters[0].ratio] : null,
-    kind: p.closure?.kind ?? null,
-  }))
+  const points = fiber.points.map((p) => {
+    const splitter = p.closure?.splitters?.[0] ?? null
+    return {
+      ...p,
+      label: p.pop?.name ?? p.closure?.code ?? p.building?.buildingName ?? null,
+      splitter: splitter ? RATIO_LABEL[splitter.ratio] : null,
+      splitterId: splitter?.id ?? null,
+      splitterRatio: splitter?.ratio ?? null,
+      splitterLocation: splitter?.location ?? null,
+      splitterFiberType: splitter?.fiberType ?? null,
+      kind: p.closure?.kind ?? null,
+    }
+  })
   return {
     ...fiber,
     points,
@@ -116,25 +123,22 @@ export function createFiberService(deps) {
     if (taken && taken.id !== selfId) throw ApiError.conflict(`Port ${data.ponPort} already feeds ${taken.name}`)
   }
 
+  /**
+   * A splitter may sit on any closure of a line, so there is no placement rule
+   * left — only the ownership of the output a fed fiber claims.
+   */
   async function assertSplitterRules(points, fromSplitterOutput, selfId) {
-    const closureIds = points.filter((p) => p.type === 'CLOSURE').map((p) => p.closureId)
-    const closures = Object.fromEntries((await closureRepository.findManyWithSplitters(closureIds)).map((c) => [c.id, c]))
-    let feed = null
-    if (fromSplitterOutput) {
-      const splitter = await closureRepository.findSplitterById(fromSplitterOutput.splitterId)
-      if (!splitter) throw ApiError.badRequest('Splitter does not exist')
-      const output = splitter.outputs.find((o) => o.portNo === fromSplitterOutput.portNo)
-      if (!output) throw ApiError.badRequest('That splitter has no such output')
-      if (output.toFiberId && output.toFiberId !== selfId) {
-        throw ApiError.conflict(`Output ${output.portNo} already feeds another fiber`)
-      }
-      if (points[0]?.closureId !== splitter.closureId) {
-        throw ApiError.badRequest('A fiber fed by a splitter must start at that closure')
-      }
-      feed = { ...fromSplitterOutput, closureId: splitter.closureId }
+    if (!fromSplitterOutput) return
+    const splitter = await closureRepository.findSplitterById(fromSplitterOutput.splitterId)
+    if (!splitter) throw ApiError.badRequest('Splitter does not exist')
+    const output = splitter.outputs.find((o) => o.portNo === fromSplitterOutput.portNo)
+    if (!output) throw ApiError.badRequest('That splitter has no such output')
+    if (output.toFiberId && output.toFiberId !== selfId) {
+      throw ApiError.conflict(`Output ${output.portNo} already feeds another fiber`)
     }
-    const errors = splitterPlacementErrors(points, closures, feed)
-    if (errors.length) throw ApiError.badRequest(errors[0])
+    if (points[0]?.closureId !== splitter.closureId) {
+      throw ApiError.badRequest('A fiber fed by a splitter must start at that closure')
+    }
   }
 
   function applyLaid(segments, laid) {

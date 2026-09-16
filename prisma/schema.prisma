@@ -284,6 +284,7 @@ model Splitter {
   closure      Closure          @relation(fields: [closureId], references: [id], onDelete: Cascade)
   ratio        SplitterRatio
   location     SplitterLocation @default(WAN)
+  fiberType    String?                         // 'MAIN' | 'SUB'
   inputFiberId String?
   inputFiber   Fiber?           @relation("SplitterInput", fields: [inputFiberId], references: [id], onDelete: SetNull)
   createdAt    DateTime         @default(now())
