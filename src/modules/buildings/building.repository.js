@@ -58,6 +58,17 @@ const markerSelect = {
   cityId: true,
   pincode: true,
   details: { select: { homePass: true, floors: true, wings: true } },
+  // The acquisition map's card shows the city and the contact person.
+  city: { select: { id: true, name: true } },
+  contact: {
+    select: {
+      contactName: true,
+      contactPhone: true,
+      contactEmail: true,
+      designation: true,
+      designationOther: true,
+    },
+  },
 }
 
 export const buildingRepository = {

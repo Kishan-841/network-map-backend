@@ -26,6 +26,8 @@ const MARKER_KEYS = [
   'cityId',
   'pincode',
   'details',
+  'city',
+  'contact',
 ]
 
 // The reported bug: /map drew 500 pins out of 1155 buildings, because it read
