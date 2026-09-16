@@ -17,23 +17,6 @@ export const fiberController = {
     }
   },
 
-  async junctions(req, res, next) {
-    try {
-      const data = await fiberService.listJunctions({ radiusMeters: req.validatedQuery.radius })
-      res.json({ success: true, data })
-    } catch (err) {
-      next(err)
-    }
-  },
-
-  async mergePoints(req, res, next) {
-    try {
-      res.status(201).json({ success: true, data: await fiberService.mergePoints(req.body) })
-    } catch (err) {
-      next(err)
-    }
-  },
-
   async create(req, res, next) {
     try {
       const fiber = await fiberService.createFiber(req.body)

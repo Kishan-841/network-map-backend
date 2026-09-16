@@ -5,7 +5,7 @@ import { closureRepository as realRepo } from '../src/modules/closures/closure.r
 function fakeRepo(over = {}) {
   const closure = {
     id: 'c1',
-    code: 'CL-0001',
+    code: 'JC-0001',
     latitude: 18.5,
     longitude: 73.8,
     splitters: [],
@@ -49,7 +49,7 @@ function svc(over, fpOver) {
       recomputeSegmentsTouching: vi.fn(async () => 0),
       ...fpOver,
     },
-    sequences: { nextClosureCode: async () => 'CL-0042', nextSplitterCode: async () => 'S7' },
+    sequences: { nextClosureCode: async () => 'JC-0042', nextSplitterCode: async () => 'S7' },
     prisma: { $transaction: (fn) => fn('tx') },
   })
 }
@@ -64,12 +64,12 @@ describe('closure service', () => {
     const s = createClosureService({
       closureRepository: repo,
       fiberPointRepository: { updatePositionForClosure: vi.fn(), recomputeSegmentsTouching: vi.fn() },
-      sequences: { nextClosureCode: async () => 'CL-0042', nextSplitterCode: async () => 'S7' },
+      sequences: { nextClosureCode: async () => 'JC-0042', nextSplitterCode: async () => 'S7' },
       prisma: { $transaction: (fn) => fn('tx') },
     })
     await s.createClosure({ latitude: 1, longitude: 1 })
     expect(repo.create).toHaveBeenCalledWith(
-      expect.objectContaining({ code: 'CL-0042', latitude: 1, longitude: 1 }),
+      expect.objectContaining({ code: 'JC-0042', latitude: 1, longitude: 1 }),
       'tx',
     )
   })
@@ -110,7 +110,7 @@ describe('closure service', () => {
     const s = createClosureService({
       closureRepository: fakeRepo(),
       fiberPointRepository: fp,
-      sequences: { nextClosureCode: async () => 'CL-0042', nextSplitterCode: async () => 'S7' },
+      sequences: { nextClosureCode: async () => 'JC-0042', nextSplitterCode: async () => 'S7' },
       prisma: { $transaction: (fn) => fn('tx') },
     })
     await s.updateClosure('c1', { latitude: 18.6, longitude: 73.9 })
@@ -123,7 +123,7 @@ describe('closure service', () => {
     const s = createClosureService({
       closureRepository: repo,
       fiberPointRepository: { updatePositionForClosure: vi.fn(), recomputeSegmentsTouching: vi.fn() },
-      sequences: { nextClosureCode: async () => 'CL-0042', nextSplitterCode: async () => 'S7' },
+      sequences: { nextClosureCode: async () => 'JC-0042', nextSplitterCode: async () => 'S7' },
       prisma: { $transaction: (fn) => fn('tx') },
     })
     await s.addSplitter('c1', { ratio: 'R1_4', location: 'WAN' })
@@ -139,7 +139,7 @@ describe('closure service', () => {
     const s = createClosureService({
       closureRepository: repo,
       fiberPointRepository: { updatePositionForClosure: vi.fn(), recomputeSegmentsTouching: vi.fn() },
-      sequences: { nextClosureCode: async () => 'CL-0042', nextSplitterCode: async () => 'S7' },
+      sequences: { nextClosureCode: async () => 'JC-0042', nextSplitterCode: async () => 'S7' },
       prisma: { $transaction: (fn) => fn('tx') },
     })
     await s.addSplitter('c1', { ratio: 'R1_8', location: 'WAN' })
@@ -166,7 +166,7 @@ describe('closure service', () => {
     const s = createClosureService({
       closureRepository: repo,
       fiberPointRepository: { updatePositionForClosure: vi.fn(), recomputeSegmentsTouching: vi.fn() },
-      sequences: { nextClosureCode: async () => 'CL-0042', nextSplitterCode: async () => 'S7' },
+      sequences: { nextClosureCode: async () => 'JC-0042', nextSplitterCode: async () => 'S7' },
       prisma: { $transaction: (fn) => fn('tx') },
     })
     await expect(s.addSplitter('c1', { ratio: 'R1_4', location: 'WAN' })).resolves.toBeDefined()
@@ -178,7 +178,7 @@ describe('closure service', () => {
     const s = createClosureService({
       closureRepository: repo,
       fiberPointRepository: { updatePositionForClosure: vi.fn(), recomputeSegmentsTouching: vi.fn() },
-      sequences: { nextClosureCode: async () => 'CL-0042', nextSplitterCode: async () => 'S7' },
+      sequences: { nextClosureCode: async () => 'JC-0042', nextSplitterCode: async () => 'S7' },
       prisma: { $transaction: (fn) => fn('tx') },
     })
     await s.addSplitter('c1', { ratio: 'R1_2', location: 'LAN', fiberType: 'SUB', inputFiberId: 'f7' })
@@ -221,7 +221,7 @@ describe('closure service', () => {
     const s = createClosureService({
       closureRepository: repo,
       fiberPointRepository: { updatePositionForClosure: vi.fn(), recomputeSegmentsTouching: vi.fn() },
-      sequences: { nextClosureCode: async () => 'CL-0042', nextSplitterCode: async () => 'S7' },
+      sequences: { nextClosureCode: async () => 'JC-0042', nextSplitterCode: async () => 'S7' },
       prisma: { $transaction: (fn) => fn('tx') },
     })
     await s.addSplitter('c1', { ratio: 'R1_6', location: 'WAN' })

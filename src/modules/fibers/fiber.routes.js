@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { requireAuth, requireRole } from '../../middleware/auth.js'
-import { validateBody, validateQuery } from '../../middleware/validate.js'
+import { validateBody } from '../../middleware/validate.js'
 import { audit } from '../system-logs/audit.js'
 import { fiberRepository } from './fiber.repository.js'
 import {
@@ -8,8 +8,6 @@ import {
   updateFiberSchema,
   segmentLaidSchema,
   cutSchema,
-  junctionsQuerySchema,
-  mergePointsSchema,
 } from './fiber.schemas.js'
 import { fiberController } from './fiber.controller.js'
 
@@ -20,18 +18,6 @@ const READ = requireRole('ADMIN', 'MANAGER', 'SURVEYOR', 'SUPERVISOR')
 const WRITE = requireRole('ADMIN', 'MANAGER')
 
 fiberRoutes.get('/', READ, fiberController.list)
-// Both literal paths go above '/:id' — otherwise Express reads 'junctions' as an id.
-fiberRoutes.get('/junctions', READ, validateQuery(junctionsQuerySchema), fiberController.junctions)
-fiberRoutes.post(
-  '/merge-points',
-  WRITE,
-  audit('Fiber', 'MergePoints', {
-    describe: (req, old, body) =>
-      `Merged ${req.body?.pointIds?.length ?? 0} points into ${body?.data?.entity?.code ?? body?.data?.entity?.name ?? 'entity'}`,
-  }),
-  validateBody(mergePointsSchema),
-  fiberController.mergePoints,
-)
 fiberRoutes.get('/:id', READ, fiberController.get)
 fiberRoutes.post(
   '/',

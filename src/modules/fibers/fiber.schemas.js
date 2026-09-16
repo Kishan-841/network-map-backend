@@ -78,19 +78,3 @@ export const updateFiberSchema = fiberFields.partial()
 export const segmentLaidSchema = z.object({ fiberLaidMeters: num(z.number().min(0).nullable()) })
 
 export const cutSchema = z.object({ segmentId: z.string(), note: z.string().trim().max(300).nullish() })
-
-// Query values arrive as strings. z.coerce would turn '' into 0 and fail the
-// min instead of falling back, so preprocess supplies the default itself.
-export const junctionsQuerySchema = z.object({
-  radius: z.preprocess(
-    (v) => (v === '' || v === null || v === undefined ? 10 : Number(v)),
-    z.number().min(1).max(100),
-  ),
-})
-
-export const mergePointsSchema = z.object({
-  pointIds: z.array(z.string()).min(2).max(50),
-  type: z.enum(['CLOSURE', 'POP']),
-  popId: z.string().nullish(),
-  kind: z.string().trim().max(50).nullish(),
-})

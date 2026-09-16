@@ -42,7 +42,7 @@ describe('closures API', () => {
         .send({ latitude: 18.5, longitude: 73.8, kind: 'pole' })
       expect(created.status).toBe(201)
       closureId = created.body.data.id
-      expect(created.body.data.code).toMatch(/^CL-\d{4}$/)
+      expect(created.body.data.code).toMatch(/^JC-\d{4}$/)
 
       const splitter = await request(app)
         .post(`/api/v1/closures/${closureId}/splitters`)
