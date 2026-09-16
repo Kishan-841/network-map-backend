@@ -65,6 +65,9 @@ buildingRoutes.get(
   validateQuery(listQuerySchema),
   buildingController.exportXlsx,
 )
+// Above /:id, like /export and /nearby — 'markers' is not a building id.
+// The map's own feed: every building in scope, lean fields, no pagination.
+buildingRoutes.get('/markers', validateQuery(listQuerySchema), buildingController.markers)
 // NOTE: /nearby must stay above /:id or Express matches it as an id.
 buildingRoutes.get('/nearby', validateQuery(nearbyQuerySchema), buildingController.nearby)
 buildingRoutes.get('/:id', buildingController.get)
