@@ -193,7 +193,7 @@ describe('fibers API', () => {
       // the fiber or the closure the transaction above already persisted.
       fiberId1 = fiber1.id
       closureId = fiber1.points?.[3]?.closureId ?? null
-      expect(fiber1.points[3].label).toMatch(/^CL-\d{4}$/)
+      expect(fiber1.points[3].label).toMatch(/^JC-\d{4}$/)
       expect(fiber1.segments).toHaveLength(2)
       expect(fiber1.totals.closureCount).toBe(1)
 
