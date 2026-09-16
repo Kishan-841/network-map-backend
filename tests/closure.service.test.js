@@ -127,7 +127,7 @@ describe('closure service', () => {
     })
     await s.addSplitter('c1', { ratio: 'R1_4', location: 'WAN' })
     expect(repo.createSplitter).toHaveBeenCalledWith(
-      { closureId: 'c1', ratio: 'R1_4', location: 'WAN', inputFiberId: 'f1' },
+      { closureId: 'c1', ratio: 'R1_4', location: 'WAN', fiberType: null, inputFiberId: 'f1' },
       4,
     )
   })
@@ -142,7 +142,7 @@ describe('closure service', () => {
     })
     await s.addSplitter('c1', { ratio: 'R1_8', location: 'WAN' })
     expect(repo.createSplitter).toHaveBeenCalledWith(
-      { closureId: 'c1', ratio: 'R1_8', location: 'WAN', inputFiberId: null },
+      { closureId: 'c1', ratio: 'R1_8', location: 'WAN', fiberType: null, inputFiberId: null },
       8,
     )
   })
@@ -153,30 +153,10 @@ describe('closure service', () => {
     })
   })
 
-  it('addSplitter 409s when a fiber passes through the closure', async () => {
+  it('addSplitter succeeds on a closure a fiber passes straight through', async () => {
     const repo = fakeRepo({
       fibersThrough: vi.fn(async () => [
         { fiber: { id: 'f1', name: 'FIB-001' }, pointSeq: 1, maxSeq: 2 },
-      ]),
-    })
-    const s = createClosureService({
-      closureRepository: repo,
-      fiberPointRepository: { updatePositionForClosure: vi.fn(), recomputeSegmentsTouching: vi.fn() },
-      sequences: { nextClosureCode: async () => 'CL-0042' },
-      prisma: { $transaction: (fn) => fn('tx') },
-    })
-    await expect(s.addSplitter('c1', { ratio: 'R1_4', location: 'WAN' })).rejects.toMatchObject({
-      status: 409,
-      message: expect.stringContaining('FIB-001'),
-    })
-    expect(repo.createSplitter).not.toHaveBeenCalled()
-  })
-
-  it('addSplitter succeeds when fibers only end (in) or start (out) at the closure', async () => {
-    const repo = fakeRepo({
-      fibersThrough: vi.fn(async () => [
-        { fiber: { id: 'f1', name: 'FIB-001' }, pointSeq: 0, maxSeq: 2 },
-        { fiber: { id: 'f2', name: 'FIB-002' }, pointSeq: 2, maxSeq: 2 },
       ]),
       fibersEndingAt: vi.fn(async () => []),
     })
@@ -188,6 +168,29 @@ describe('closure service', () => {
     })
     await expect(s.addSplitter('c1', { ratio: 'R1_4', location: 'WAN' })).resolves.toBeDefined()
     expect(repo.createSplitter).toHaveBeenCalled()
+  })
+
+  it('addSplitter stores the fiber type and the caller-named input fiber', async () => {
+    const repo = fakeRepo({ fibersEndingAt: vi.fn(async () => [{ id: 'other' }]) })
+    const s = createClosureService({
+      closureRepository: repo,
+      fiberPointRepository: { updatePositionForClosure: vi.fn(), recomputeSegmentsTouching: vi.fn() },
+      sequences: { nextClosureCode: async () => 'CL-0042' },
+      prisma: { $transaction: (fn) => fn('tx') },
+    })
+    await s.addSplitter('c1', { ratio: 'R1_2', location: 'LAN', fiberType: 'SUB', inputFiberId: 'f7' })
+    expect(repo.createSplitter).toHaveBeenCalledWith(
+      { closureId: 'c1', ratio: 'R1_2', location: 'LAN', fiberType: 'SUB', inputFiberId: 'f7' },
+      2,
+    )
+    expect(repo.fibersEndingAt).not.toHaveBeenCalled()
+  })
+
+  it('updateSplitter passes the fiber type through', async () => {
+    const repo = fakeRepo()
+    const s = svc({ updateSplitter: repo.updateSplitter })
+    await s.updateSplitter('s1', { fiberType: 'MAIN', location: 'WAN' })
+    expect(repo.updateSplitter).toHaveBeenCalledWith('s1', { fiberType: 'MAIN', location: 'WAN' }, null)
   })
 
   it('deleteSplitter 409s when an output still feeds a fiber', async () => {

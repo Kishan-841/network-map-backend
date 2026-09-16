@@ -40,15 +40,3 @@ export function carryForward(oldSegments, newSegments) {
     return match ? { ...s, fiberLaidMeters: match.fiberLaidMeters, isCut: match.isCut, cutAt: match.cutAt, cutNote: match.cutNote } : s
   })
 }
-
-/** A line cannot pass through a splitter (spec §2.4). closuresById: { [id]: { splitters: [] } } */
-export function splitterPlacementErrors(points, closuresById, fromSplitterOutput) {
-  const errors = []
-  points.forEach((p, i) => {
-    if (p.type !== 'CLOSURE' || !closuresById[p.closureId]?.splitters?.length) return
-    const isLast = i === points.length - 1
-    const isFedStart = i === 0 && fromSplitterOutput?.closureId === p.closureId
-    if (!isLast && !isFedStart) errors.push(`Point ${i + 1}: a line cannot pass through a splitter closure — end the fiber there and start a new one`)
-  })
-  return errors
-}

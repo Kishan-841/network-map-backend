@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { deriveSegments, carryForward, entityKey, splitterPlacementErrors } from '../src/modules/fibers/fiber-geometry.js'
+import { deriveSegments, carryForward, entityKey } from '../src/modules/fibers/fiber-geometry.js'
 
 const P = (type, lat, extra = {}) => ({ type, latitude: lat, longitude: 73.8, ...extra })
 const points = [
@@ -24,16 +24,5 @@ describe('carryForward', () => {
     const next = carryForward(old, deriveSegments(points))
     expect(next[0]).toMatchObject({ fiberLaidMeters: 400, isCut: true, cutNote: 'jcb' })
     expect(next[1].fiberLaidMeters).toBeUndefined()
-  })
-})
-describe('splitterPlacementErrors', () => {
-  const closures = { c1: { id: 'c1', splitters: [{ id: 's1' }] } }
-  it('allows a splitter closure only as the last point, or first with fromSplitterOutput', () => {
-    expect(splitterPlacementErrors(points, closures, null)).toHaveLength(1)          // c1 is in the middle
-    const ending = [points[0], points[3]]
-    expect(splitterPlacementErrors(ending, closures, null)).toEqual([])
-    const starting = [points[3], points[5]]
-    expect(splitterPlacementErrors(starting, closures, null)).toHaveLength(1)
-    expect(splitterPlacementErrors(starting, closures, { splitterId: 's1', closureId: 'c1' })).toEqual([])
   })
 })

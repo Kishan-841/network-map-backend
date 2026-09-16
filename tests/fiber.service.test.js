@@ -178,14 +178,14 @@ describe('fiber service', () => {
     for (const s of segments) expect(s.mapMeters).toBeGreaterThan(0)
   })
 
-  it('rejects a splitter closure in the middle of the line', async () => {
+  it('allows a splitter closure in the middle of the line', async () => {
     const closure = fakeClosureRepo({
       findManyWithSplitters: vi.fn(async () => [{ id: 'c2', splitters: [{ id: 's1', ratio: 'R1_4' }] }]),
     })
     const { service } = svc({ closure })
     await expect(
       service.createFiber({ ...base, points: [P.pop, P.closure('c2'), P.building] }),
-    ).rejects.toMatchObject({ status: 400 })
+    ).resolves.toBeTruthy()
   })
 
   it('409s when the OLT PON port already feeds another fiber', async () => {
