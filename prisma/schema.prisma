@@ -174,6 +174,7 @@ enum FiberPointType {
   POP
   CLOSURE
   BUILDING
+  SPLITTER
 }
 
 enum FiberStatus {
@@ -185,6 +186,7 @@ enum FiberStatus {
 enum SplitterRatio {
   R1_2
   R1_4
+  R1_6
   R1_8
   R1_16
 }
@@ -255,12 +257,15 @@ model FiberPoint {
   closure    Closure?       @relation(fields: [closureId], references: [id], onDelete: Restrict)
   buildingId String?
   building   Building?      @relation(fields: [buildingId], references: [id], onDelete: Restrict)
+  splitterId String?
+  splitter   Splitter?      @relation(fields: [splitterId], references: [id], onDelete: Restrict)
   segmentsFrom FiberSegment[] @relation("SegmentFrom")
   segmentsTo   FiberSegment[] @relation("SegmentTo")
   @@unique([fiberId, sequence])
   @@index([closureId])
   @@index([popId])
   @@index([buildingId])
+  @@index([splitterId])
 }
 
 model FiberSegment {
@@ -297,8 +302,13 @@ model Closure {
 
 model Splitter {
   id           String           @id @default(cuid())
-  closureId    String
-  closure      Closure          @relation(fields: [closureId], references: [id], onDelete: Cascade)
+  code         String           @unique       // S1, S2… minted from Splitter_code_seq
+  latitude     Float                          // where it sits on the line
+  longitude    Float
+  /// Set only for the legacy "splitter attached to a closure" shape; a splitter
+  /// placed on the line directly has none.
+  closureId    String?
+  closure      Closure?         @relation(fields: [closureId], references: [id], onDelete: Cascade)
   ratio        SplitterRatio
   location     SplitterLocation @default(WAN)
   fiberType    String?                         // 'MAIN' | 'SUB'
@@ -306,6 +316,7 @@ model Splitter {
   inputFiber   Fiber?           @relation("SplitterInput", fields: [inputFiberId], references: [id], onDelete: SetNull)
   createdAt    DateTime         @default(now())
   outputs      SplitterOutput[]
+  points       FiberPoint[]
   @@index([inputFiberId])
 }
 

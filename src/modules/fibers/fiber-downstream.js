@@ -5,9 +5,13 @@ export async function collectDownstream({ fiber, splittersFedBy, loadFiber }) {
     if (depth > 20 || visited.has(f.id)) return
     visited.add(f.id)
     for (const p of f.points) if (p.sequence > fromSequence && p.type === 'BUILDING') buildings.set(p.buildingId, { id: p.buildingId, buildingName: p.label })
-    const laterClosures = new Set(f.points.filter((p) => p.sequence > fromSequence && p.type === 'CLOSURE').map((p) => p.closureId))
+    // A splitter is reached past the cut either through a closure the line
+    // still visits, or as a point of its own on the line.
+    const later = f.points.filter((p) => p.sequence > fromSequence)
+    const laterClosures = new Set(later.filter((p) => p.type === 'CLOSURE').map((p) => p.closureId))
+    const laterSplitters = new Set(later.filter((p) => p.type === 'SPLITTER').map((p) => p.splitterId))
     for (const s of await splittersFedBy(f.id)) {
-      if (!laterClosures.has(s.closureId)) continue
+      if (!(s.closureId ? laterClosures.has(s.closureId) : laterSplitters.has(s.id))) continue
       for (const o of s.outputs) {
         if (o.toBuilding) buildings.set(o.toBuilding.id, o.toBuilding)
         if (o.toFiber) { fibers.set(o.toFiber.id, { id: o.toFiber.id, name: o.toFiber.name }); await walk(await loadFiber(o.toFiber.id), -1, depth + 1) }

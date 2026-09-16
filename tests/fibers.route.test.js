@@ -12,6 +12,105 @@ const tokenFor = (role) =>
   })
 
 describe('fibers API', () => {
+  it('places a splitter on the line: S-code, 1:6 ratio, then retype the point and delete it', async () => {
+    const app = createApp()
+    const manager = ['Authorization', `Bearer ${tokenFor('MANAGER')}`]
+    let fiberId = null
+    let splitterId = null
+    let popId = null
+
+    try {
+      const pop = await request(app)
+        .post('/api/v1/pops')
+        .set(...manager)
+        .send({ name: `POP-SPL-${Date.now()}`, latitude: 18.6, longitude: 73.9 })
+      expect(pop.status).toBe(201)
+      popId = pop.body.data.id
+
+      const created = await request(app)
+        .post('/api/v1/fibers')
+        .set(...manager)
+        .send({
+          coreCount: 4,
+          points: [
+            { type: 'POP', popId, latitude: 18.6, longitude: 73.9 },
+            { type: 'SPLITTER', newSplitter: { ratio: 'R1_6', fiberType: 'SUB', location: 'LAN' }, latitude: 18.601, longitude: 73.901 },
+            { type: 'WAYPOINT', latitude: 18.602, longitude: 73.902 },
+            { type: 'CLOSURE', newClosure: { kind: 'Compass' }, latitude: 18.603, longitude: 73.903 },
+          ],
+        })
+      expect(created.status).toBe(201)
+      const fiber = created.body.data
+      fiberId = fiber.id
+      splitterId = fiber.points[1].splitterId
+
+      expect(fiber.points[1].type).toBe('SPLITTER')
+      expect(fiber.points[1].label).toMatch(/^S\d+$/)
+      expect(fiber.points[1].splitter).toBe('1:6')
+      expect(fiber.points[1].splitterFiberType).toBe('SUB')
+      expect(fiber.points[1].splitterLocation).toBe('LAN')
+      expect(fiber.totals.splitterCount).toBe(1)
+      // POP → SPLITTER → CLOSURE: the splitter bounds segments like a closure.
+      expect(fiber.segments).toHaveLength(2)
+      // The line that carries it is the line that feeds it.
+      expect(fiber.splitters.map((s) => s.id)).toContain(splitterId)
+      expect(fiber.splitters[0].outputs).toHaveLength(6)
+
+      // A point still holding the splitter blocks the delete (FK is RESTRICT).
+      const tooSoon = await request(app)
+        .delete(`/api/v1/splitters/${splitterId}`)
+        .set(...manager)
+      expect(tooSoon.status).toBe(409)
+
+      // Retyping the point back to a plain bend releases it.
+      const retyped = await request(app)
+        .patch(`/api/v1/fibers/${fiberId}`)
+        .set(...manager)
+        .send({
+          points: [
+            { type: 'POP', popId, latitude: 18.6, longitude: 73.9 },
+            { type: 'WAYPOINT', latitude: 18.601, longitude: 73.901 },
+            { type: 'WAYPOINT', latitude: 18.602, longitude: 73.902 },
+            { type: 'CLOSURE', closureId: fiber.points[3].closureId, latitude: 18.603, longitude: 73.903 },
+          ],
+        })
+      expect(retyped.status).toBe(200)
+      expect(retyped.body.data.totals.splitterCount).toBe(0)
+
+      const gone = await request(app)
+        .delete(`/api/v1/splitters/${splitterId}`)
+        .set(...manager)
+      expect(gone.status).toBe(200)
+      splitterId = null
+
+      // Deleting the fiber takes its remaining line splitters with it.
+      const second = await request(app)
+        .patch(`/api/v1/fibers/${fiberId}`)
+        .set(...manager)
+        .send({
+          points: [
+            { type: 'POP', popId, latitude: 18.6, longitude: 73.9 },
+            { type: 'SPLITTER', newSplitter: { ratio: 'R1_2' }, latitude: 18.604, longitude: 73.904 },
+          ],
+        })
+      expect(second.status).toBe(200)
+      const secondId = second.body.data.points[1].splitterId
+      expect(second.body.data.points[1].label).toMatch(/^S\d+$/)
+
+      const closureId = fiber.points[3].closureId
+      expect((await request(app).delete(`/api/v1/fibers/${fiberId}`).set(...manager)).status).toBe(200)
+      fiberId = null
+      expect(await prisma.splitter.findUnique({ where: { id: secondId } })).toBeNull()
+      // The closure the line passed through is untouched.
+      expect(await prisma.closure.findUnique({ where: { id: closureId } })).not.toBeNull()
+      await prisma.closure.delete({ where: { id: closureId } }).catch(() => {})
+    } finally {
+      if (fiberId) await request(app).delete(`/api/v1/fibers/${fiberId}`).set(...manager)
+      if (splitterId) await request(app).delete(`/api/v1/splitters/${splitterId}`).set(...manager)
+      if (popId) await request(app).delete(`/api/v1/pops/${popId}`).set(...manager)
+    }
+  })
+
   it('runs the acceptance flow: create → splitter feed → cut → restore → delete', async () => {
     const app = createApp()
     const stamp = Date.now()

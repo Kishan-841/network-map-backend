@@ -3,23 +3,27 @@ import { ApiError } from '../../lib/api-error.js'
 import { prisma } from '../../lib/prisma.js'
 import { pathMeters } from '../../lib/fiber-geo.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
-import { nextFiberName, nextClosureCode } from '../../lib/sequences.js'
+import { nextFiberName, nextClosureCode, nextSplitterCode } from '../../lib/sequences.js'
 import { deriveSegments, carryForward, keyedSegments } from './fiber-geometry.js'
 import { findJunctions } from './fiber-junctions.js'
 import { collectDownstream } from './fiber-downstream.js'
 import { fiberRepository } from './fiber.repository.js'
 import { closureRepository } from '../closures/closure.repository.js'
+import { RATIO_PORTS } from '../closures/closure.schemas.js'
 import { popRepository } from '../pops/pop.repository.js'
 import { buildingRepository } from '../buildings/building.repository.js'
 
-const RATIO_LABEL = { R1_2: '1:2', R1_4: '1:4', R1_8: '1:8', R1_16: '1:16' }
+const RATIO_LABEL = { R1_2: '1:2', R1_4: '1:4', R1_6: '1:6', R1_8: '1:8', R1_16: '1:16' }
 
 export function shapeFiber(fiber, extras = {}) {
   const points = fiber.points.map((p) => {
-    const splitter = p.closure?.splitters?.[0] ?? null
+    // A SPLITTER point IS the splitter; a CLOSURE point may still carry a
+    // legacy one attached to the closure. Either way the same four fields
+    // describe it, so the client reads one shape.
+    const splitter = p.splitter ?? p.closure?.splitters?.[0] ?? null
     return {
       ...p,
-      label: p.pop?.name ?? p.closure?.code ?? p.building?.buildingName ?? null,
+      label: p.pop?.name ?? p.closure?.code ?? p.building?.buildingName ?? p.splitter?.code ?? null,
       splitter: splitter ? RATIO_LABEL[splitter.ratio] : null,
       splitterId: splitter?.id ?? null,
       splitterRatio: splitter?.ratio ?? null,
@@ -35,6 +39,7 @@ export function shapeFiber(fiber, extras = {}) {
       mapMeters: fiber.segments.reduce((n, s) => n + s.mapMeters, 0),
       fiberLaidMeters: fiber.segments.reduce((n, s) => n + (s.fiberLaidMeters ?? 0), 0),
       closureCount: points.filter((p) => p.type === 'CLOSURE').length,
+      splitterCount: points.filter((p) => p.type === 'SPLITTER').length,
       pathMeters: pathMeters(points),
     },
     ...extras,
@@ -76,7 +81,7 @@ export function createFiberService(deps) {
     return { ...fiber, images: await Promise.all(fiber.images.map((u) => storage.readUrl(u))) }
   }
 
-  async function resolvePoints(points, tx) {
+  async function resolvePoints(points, fiberId, tx) {
     // Typed points take the entity's coordinates; new closures/POPs are created here (spec §2.12 steps 2–3).
     const out = []
     for (const p of points) {
@@ -105,6 +110,31 @@ export function createFiberService(deps) {
           : await closureRepository.findById(p.closureId)
         if (!closure) throw ApiError.badRequest('Closure does not exist')
         out.push({ type: 'CLOSURE', closureId: closure.id, latitude: closure.latitude, longitude: closure.longitude })
+      } else if (p.type === 'SPLITTER') {
+        const splitter = p.newSplitter
+          ? await closureRepository.createSplitter(
+              {
+                code: await sequences.nextSplitterCode(tx),
+                latitude: p.latitude,
+                longitude: p.longitude,
+                ratio: p.newSplitter.ratio,
+                location: p.newSplitter.location ?? 'WAN',
+                fiberType: p.newSplitter.fiberType ?? null,
+                // The line it sits on is the line that feeds it.
+                inputFiberId: fiberId,
+                closureId: null,
+              },
+              RATIO_PORTS[p.newSplitter.ratio],
+              tx,
+            )
+          : await closureRepository.findSplitterById(p.splitterId)
+        if (!splitter) throw ApiError.badRequest('Splitter does not exist')
+        out.push({
+          type: 'SPLITTER',
+          splitterId: splitter.id,
+          latitude: splitter.latitude,
+          longitude: splitter.longitude,
+        })
       } else {
         const b = await buildingRepository.findById(p.buildingId)
         if (!b) throw ApiError.badRequest('Building does not exist')
@@ -136,8 +166,14 @@ export function createFiberService(deps) {
     if (output.toFiberId && output.toFiberId !== selfId) {
       throw ApiError.conflict(`Output ${output.portNo} already feeds another fiber`)
     }
-    if (points[0]?.closureId !== splitter.closureId) {
-      throw ApiError.badRequest('A fiber fed by a splitter must start at that closure')
+    // A splitter on a closure is reached at that closure; one dropped on a line
+    // is reached at its own point.
+    if (splitter.closureId) {
+      if (points[0]?.closureId !== splitter.closureId) {
+        throw ApiError.badRequest('A fiber fed by a splitter must start at that closure')
+      }
+    } else if (points[0]?.splitterId !== splitter.id) {
+      throw ApiError.badRequest('A fiber fed by a splitter must start at that splitter')
     }
   }
 
@@ -160,7 +196,7 @@ export function createFiberService(deps) {
   }
 
   async function saveGeometry(fiberId, rawPoints, data, oldFiber, tx) {
-    const points = await resolvePoints(rawPoints, tx)
+    const points = await resolvePoints(rawPoints, fiberId, tx)
     await assertSplitterRules(points, mergedFeed(data, oldFiber), fiberId)
     let segments = deriveSegments(points)
     if (oldFiber) segments = carryForward(keyedSegments(oldFiber), segments)
@@ -213,6 +249,7 @@ export function createFiberService(deps) {
     popId: p.popId ?? null,
     closureId: p.closureId ?? null,
     buildingId: p.buildingId ?? null,
+    splitterId: p.splitterId ?? null,
     latitude: p.latitude,
     longitude: p.longitude,
   })
@@ -344,8 +381,12 @@ export function createFiberService(deps) {
     },
 
     async deleteFiber(id) {
-      if (!(await fiberRepository.findById(id))) throw ApiError.notFound('Fiber not found')
-      await fiberRepository.delete(id)
+      const fiber = await fiberRepository.findById(id)
+      if (!fiber) throw ApiError.notFound('Fiber not found')
+      // Splitters that live on this line and nowhere else go with it; the
+      // repository keeps any that are still attached to a closure.
+      const lineSplitterIds = [...new Set(fiber.points.filter((p) => p.splitterId).map((p) => p.splitterId))]
+      await fiberRepository.delete(id, lineSplitterIds)
     },
 
     async setSegmentLaid(fiberId, segmentId, { fiberLaidMeters }) {
@@ -374,6 +415,6 @@ export const fiberService = createFiberService({
   popRepository,
   buildingRepository,
   storage: getStorageProvider(),
-  sequences: { nextFiberName, nextClosureCode },
+  sequences: { nextFiberName, nextClosureCode, nextSplitterCode },
   prisma,
 })

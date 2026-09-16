@@ -15,6 +15,7 @@ function fakeRepo(over = {}) {
     id: 's1',
     closureId: 'c1',
     ratio: 'R1_4',
+    _count: { points: 0 },
     outputs: [
       { id: 'o1', splitterId: 's1', portNo: 1, toFiberId: null, toBuildingId: null, label: null },
       { id: 'o2', splitterId: 's1', portNo: 2, toFiberId: null, toBuildingId: null, label: null },
@@ -48,7 +49,7 @@ function svc(over, fpOver) {
       recomputeSegmentsTouching: vi.fn(async () => 0),
       ...fpOver,
     },
-    sequences: { nextClosureCode: async () => 'CL-0042' },
+    sequences: { nextClosureCode: async () => 'CL-0042', nextSplitterCode: async () => 'S7' },
     prisma: { $transaction: (fn) => fn('tx') },
   })
 }
@@ -63,7 +64,7 @@ describe('closure service', () => {
     const s = createClosureService({
       closureRepository: repo,
       fiberPointRepository: { updatePositionForClosure: vi.fn(), recomputeSegmentsTouching: vi.fn() },
-      sequences: { nextClosureCode: async () => 'CL-0042' },
+      sequences: { nextClosureCode: async () => 'CL-0042', nextSplitterCode: async () => 'S7' },
       prisma: { $transaction: (fn) => fn('tx') },
     })
     await s.createClosure({ latitude: 1, longitude: 1 })
@@ -109,7 +110,7 @@ describe('closure service', () => {
     const s = createClosureService({
       closureRepository: fakeRepo(),
       fiberPointRepository: fp,
-      sequences: { nextClosureCode: async () => 'CL-0042' },
+      sequences: { nextClosureCode: async () => 'CL-0042', nextSplitterCode: async () => 'S7' },
       prisma: { $transaction: (fn) => fn('tx') },
     })
     await s.updateClosure('c1', { latitude: 18.6, longitude: 73.9 })
@@ -122,13 +123,14 @@ describe('closure service', () => {
     const s = createClosureService({
       closureRepository: repo,
       fiberPointRepository: { updatePositionForClosure: vi.fn(), recomputeSegmentsTouching: vi.fn() },
-      sequences: { nextClosureCode: async () => 'CL-0042' },
+      sequences: { nextClosureCode: async () => 'CL-0042', nextSplitterCode: async () => 'S7' },
       prisma: { $transaction: (fn) => fn('tx') },
     })
     await s.addSplitter('c1', { ratio: 'R1_4', location: 'WAN' })
     expect(repo.createSplitter).toHaveBeenCalledWith(
-      { closureId: 'c1', ratio: 'R1_4', location: 'WAN', fiberType: null, inputFiberId: 'f1' },
+      { code: 'S7', latitude: 18.5, longitude: 73.8, closureId: 'c1', ratio: 'R1_4', location: 'WAN', fiberType: null, inputFiberId: 'f1' },
       4,
+      'tx',
     )
   })
 
@@ -137,13 +139,14 @@ describe('closure service', () => {
     const s = createClosureService({
       closureRepository: repo,
       fiberPointRepository: { updatePositionForClosure: vi.fn(), recomputeSegmentsTouching: vi.fn() },
-      sequences: { nextClosureCode: async () => 'CL-0042' },
+      sequences: { nextClosureCode: async () => 'CL-0042', nextSplitterCode: async () => 'S7' },
       prisma: { $transaction: (fn) => fn('tx') },
     })
     await s.addSplitter('c1', { ratio: 'R1_8', location: 'WAN' })
     expect(repo.createSplitter).toHaveBeenCalledWith(
-      { closureId: 'c1', ratio: 'R1_8', location: 'WAN', fiberType: null, inputFiberId: null },
+      { code: 'S7', latitude: 18.5, longitude: 73.8, closureId: 'c1', ratio: 'R1_8', location: 'WAN', fiberType: null, inputFiberId: null },
       8,
+      'tx',
     )
   })
 
@@ -163,7 +166,7 @@ describe('closure service', () => {
     const s = createClosureService({
       closureRepository: repo,
       fiberPointRepository: { updatePositionForClosure: vi.fn(), recomputeSegmentsTouching: vi.fn() },
-      sequences: { nextClosureCode: async () => 'CL-0042' },
+      sequences: { nextClosureCode: async () => 'CL-0042', nextSplitterCode: async () => 'S7' },
       prisma: { $transaction: (fn) => fn('tx') },
     })
     await expect(s.addSplitter('c1', { ratio: 'R1_4', location: 'WAN' })).resolves.toBeDefined()
@@ -175,13 +178,14 @@ describe('closure service', () => {
     const s = createClosureService({
       closureRepository: repo,
       fiberPointRepository: { updatePositionForClosure: vi.fn(), recomputeSegmentsTouching: vi.fn() },
-      sequences: { nextClosureCode: async () => 'CL-0042' },
+      sequences: { nextClosureCode: async () => 'CL-0042', nextSplitterCode: async () => 'S7' },
       prisma: { $transaction: (fn) => fn('tx') },
     })
     await s.addSplitter('c1', { ratio: 'R1_2', location: 'LAN', fiberType: 'SUB', inputFiberId: 'f7' })
     expect(repo.createSplitter).toHaveBeenCalledWith(
-      { closureId: 'c1', ratio: 'R1_2', location: 'LAN', fiberType: 'SUB', inputFiberId: 'f7' },
+      { code: 'S7', latitude: 18.5, longitude: 73.8, closureId: 'c1', ratio: 'R1_2', location: 'LAN', fiberType: 'SUB', inputFiberId: 'f7' },
       2,
+      'tx',
     )
     expect(repo.fibersEndingAt).not.toHaveBeenCalled()
   })
@@ -202,6 +206,30 @@ describe('closure service', () => {
         }),
       }).deleteSplitter('s1'),
     ).rejects.toMatchObject({ status: 409 })
+  })
+
+  it('deleteSplitter 409s while a fiber point still references it', async () => {
+    await expect(
+      svc({
+        findSplitterById: async () => ({ id: 's1', outputs: [], _count: { points: 1 } }),
+      }).deleteSplitter('s1'),
+    ).rejects.toMatchObject({ status: 409, message: 'Remove the splitter from its fiber first' })
+  })
+
+  it('addSplitter mints 6 ports for a 1:6 splitter', async () => {
+    const repo = fakeRepo({ fibersEndingAt: vi.fn(async () => []) })
+    const s = createClosureService({
+      closureRepository: repo,
+      fiberPointRepository: { updatePositionForClosure: vi.fn(), recomputeSegmentsTouching: vi.fn() },
+      sequences: { nextClosureCode: async () => 'CL-0042', nextSplitterCode: async () => 'S7' },
+      prisma: { $transaction: (fn) => fn('tx') },
+    })
+    await s.addSplitter('c1', { ratio: 'R1_6', location: 'WAN' })
+    expect(repo.createSplitter).toHaveBeenCalledWith(
+      { code: 'S7', latitude: 18.5, longitude: 73.8, closureId: 'c1', ratio: 'R1_6', location: 'WAN', fiberType: null, inputFiberId: null },
+      6,
+      'tx',
+    )
   })
 
   it('deleteSplitter succeeds when no output feeds a fiber', async () => {

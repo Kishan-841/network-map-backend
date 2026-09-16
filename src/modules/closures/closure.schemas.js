@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const RATIO_PORTS = { R1_2: 2, R1_4: 4, R1_8: 8, R1_16: 16 }
+export const RATIO_PORTS = { R1_2: 2, R1_4: 4, R1_6: 6, R1_8: 8, R1_16: 16 }
 
 const coord = { latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180) }
 

@@ -3,7 +3,7 @@ import { prisma } from '../../lib/prisma.js'
 import { closureRepository } from './closure.repository.js'
 import { fiberPointRepository } from '../fibers/fiber.repository.js'
 import { RATIO_PORTS } from './closure.schemas.js'
-import { nextClosureCode } from '../../lib/sequences.js'
+import { nextClosureCode, nextSplitterCode } from '../../lib/sequences.js'
 
 export function createClosureService({ closureRepository, fiberPointRepository, sequences, prisma }) {
   async function mustFind(id) {
@@ -57,7 +57,7 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
     },
 
     async addSplitter(closureId, data) {
-      await mustFind(closureId)
+      const closure = await mustFind(closureId)
       // A splitter may sit on any closure of a line — passing through one is
       // fine. The caller names the fiber that feeds it; when it does not, a
       // lone fiber ending here is the only unambiguous candidate.
@@ -66,15 +66,23 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
         const ending = await closureRepository.fibersEndingAt(closureId)
         if (ending.length === 1) inputFiberId = ending[0].id
       }
-      return closureRepository.createSplitter(
-        {
-          closureId,
-          ratio: data.ratio,
-          location: data.location,
-          fiberType: data.fiberType ?? null,
-          inputFiberId,
-        },
-        RATIO_PORTS[data.ratio],
+      // Every splitter carries its own code and position now, whether it hangs
+      // off a closure or sits on a line; a closure's takes the closure's.
+      return prisma.$transaction(async (tx) =>
+        closureRepository.createSplitter(
+          {
+            code: await sequences.nextSplitterCode(tx),
+            latitude: closure.latitude,
+            longitude: closure.longitude,
+            closureId,
+            ratio: data.ratio,
+            location: data.location,
+            fiberType: data.fiberType ?? null,
+            inputFiberId,
+          },
+          RATIO_PORTS[data.ratio],
+          tx,
+        ),
       )
     },
 
@@ -97,6 +105,11 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
       if (splitter.outputs.some((o) => o.toFiberId)) {
         throw ApiError.conflict('An output still feeds a fiber')
       }
+      // FiberPoint → Splitter is RESTRICT: the point has to become a plain bend
+      // first, or Postgres would answer with a 500 instead of this.
+      if (splitter._count?.points > 0) {
+        throw ApiError.conflict('Remove the splitter from its fiber first')
+      }
       await closureRepository.deleteSplitter(id)
     },
 
@@ -113,6 +126,6 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
 export const closureService = createClosureService({
   closureRepository,
   fiberPointRepository,
-  sequences: { nextClosureCode },
+  sequences: { nextClosureCode, nextSplitterCode },
   prisma,
 })

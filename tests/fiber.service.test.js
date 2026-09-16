@@ -75,6 +75,7 @@ function fakeClosureRepo(over = {}) {
     findById: vi.fn(async (id) => ({ id, code: 'CL-0001', latitude: 1.01, longitude: 1.01 })),
     create: vi.fn(async (d) => ({ id: 'cnew', ...d })),
     findSplitterById: vi.fn(async () => null),
+    createSplitter: vi.fn(async (d) => ({ id: 'snew', ...d })),
     updateOutput: vi.fn(async () => {}),
     findManyWithSplitters: vi.fn(async () => []),
     claimSplitterInput: vi.fn(async () => ({ count: 0 })),
@@ -103,7 +104,11 @@ function svc({ fiber, closure, pop, building } = {}) {
     popRepository: pop ?? fakePopRepo(),
     buildingRepository: building ?? fakeBuildingRepo(),
     storage: fakeStorage(),
-    sequences: { nextFiberName: vi.fn(async () => 'FIB-001'), nextClosureCode: vi.fn(async () => 'CL-0042') },
+    sequences: {
+      nextFiberName: vi.fn(async () => 'FIB-001'),
+      nextClosureCode: vi.fn(async () => 'CL-0042'),
+      nextSplitterCode: vi.fn(async () => 'S7'),
+    },
     prisma: { $transaction: (fn) => fn('tx') },
   }
   return { service: createFiberService(deps), deps }
@@ -114,6 +119,12 @@ const P = {
   waypoint: { type: 'WAYPOINT', latitude: 1.005, longitude: 1.0 },
   newClosure: { type: 'CLOSURE', newClosure: { kind: 'inline' }, latitude: 1.01, longitude: 1.01 },
   closure: (id) => ({ type: 'CLOSURE', closureId: id, latitude: 1.01, longitude: 1.01 }),
+  newSplitter: {
+    type: 'SPLITTER',
+    newSplitter: { ratio: 'R1_6', fiberType: 'SUB', location: 'LAN' },
+    latitude: 1.007,
+    longitude: 1.007,
+  },
   building: { type: 'BUILDING', buildingId: 'b1', latitude: 0, longitude: 0 },
 }
 
@@ -132,6 +143,20 @@ describe('fiber schemas', () => {
     expect(createFiberSchema.safeParse({ ...base, coreCount: 10, points: [P.pop, P.building] }).success).toBe(false)
     // oltId and ponPort travel together
     expect(createFiberSchema.safeParse({ ...base, oltId: 'olt1', points: [P.pop, P.building] }).success).toBe(false)
+  })
+
+  it('needs a reference on a SPLITTER point and accepts the 1:6 ratio', () => {
+    const bare = { ...base, points: [P.pop, { type: 'SPLITTER', latitude: 1, longitude: 1 }, P.building] }
+    expect(createFiberSchema.safeParse(bare).success).toBe(false)
+    const ok = createFiberSchema.safeParse({ ...base, points: [P.pop, P.newSplitter, P.building] })
+    expect(ok.success).toBe(true)
+    expect(ok.data.points[1].newSplitter).toEqual({ ratio: 'R1_6', fiberType: 'SUB', location: 'LAN' })
+    // An existing splitter is named by id instead; location defaults to WAN.
+    const byId = createFiberSchema.safeParse({
+      ...base,
+      points: [P.pop, { type: 'SPLITTER', splitterId: 's1', latitude: 1, longitude: 1 }, P.building],
+    })
+    expect(byId.success).toBe(true)
   })
 
   it('lets a PATCH carry one half of a cross-field pair — the service merges and re-checks', () => {
@@ -303,6 +328,89 @@ describe('fiber service', () => {
     const result = await service.getFiber('f1')
     expect(result.downstream.buildings.map((b) => b.id).sort()).toEqual(['b1', 'b2'])
     expect(result.totals.closureCount).toBe(1)
+  })
+
+  it('mints a splitter for a SPLITTER point: S-code, the point\'s position, fed by this fiber', async () => {
+    const closure = fakeClosureRepo({
+      createSplitter: vi.fn(async (d) => ({ id: 'snew', ...d, latitude: d.latitude, longitude: d.longitude })),
+    })
+    const { service, deps } = svc({ closure })
+    await service.createFiber({ ...base, points: [P.pop, P.newSplitter, P.building] })
+
+    expect(deps.sequences.nextSplitterCode).toHaveBeenCalledWith('tx')
+    expect(closure.createSplitter).toHaveBeenCalledWith(
+      {
+        code: 'S7',
+        latitude: 1.007,
+        longitude: 1.007,
+        ratio: 'R1_6',
+        location: 'LAN',
+        fiberType: 'SUB',
+        inputFiberId: 'new',
+        closureId: null,
+      },
+      6,
+      'tx',
+    )
+    const [, points, segments] = deps.fiberRepository.replaceGeometry.mock.calls[0]
+    expect(points[1]).toMatchObject({ type: 'SPLITTER', splitterId: 'snew', latitude: 1.007, longitude: 1.007 })
+    // The splitter is a typed point, so it bounds segments like a closure does.
+    expect(segments).toHaveLength(2)
+  })
+
+  it('reuses an existing splitter named by id, at the splitter\'s own position', async () => {
+    const closure = fakeClosureRepo({
+      findSplitterById: vi.fn(async (id) => ({ id, code: 'S3', latitude: 9, longitude: 9, outputs: [] })),
+    })
+    const { service, deps } = svc({ closure })
+    await service.createFiber({
+      ...base,
+      points: [P.pop, { type: 'SPLITTER', splitterId: 's3', latitude: 0, longitude: 0 }, P.building],
+    })
+    expect(closure.createSplitter).not.toHaveBeenCalled()
+    const [, points] = deps.fiberRepository.replaceGeometry.mock.calls[0]
+    expect(points[1]).toMatchObject({ type: 'SPLITTER', splitterId: 's3', latitude: 9, longitude: 9 })
+  })
+
+  it('labels a SPLITTER point with its code and ratio, and counts it', async () => {
+    const withSplitter = existingFiber({
+      points: [
+        ...existingFiber().points,
+        {
+          id: 'p3',
+          sequence: 2,
+          type: 'SPLITTER',
+          splitterId: 'sp1',
+          latitude: 1.02,
+          longitude: 1.02,
+          splitter: { id: 'sp1', code: 'S7', ratio: 'R1_6', fiberType: 'SUB', location: 'LAN' },
+        },
+      ],
+    })
+    const { service } = svc({ fiber: fakeFiberRepo({ findById: vi.fn(async () => withSplitter) }) })
+    const shaped = await service.getFiber('f1')
+    expect(shaped.points[2]).toMatchObject({
+      label: 'S7',
+      splitter: '1:6',
+      splitterId: 'sp1',
+      splitterRatio: 'R1_6',
+      splitterFiberType: 'SUB',
+      splitterLocation: 'LAN',
+    })
+    expect(shaped.totals.splitterCount).toBe(1)
+  })
+
+  it('takes the line\'s own splitters down with the fiber', async () => {
+    const withSplitter = existingFiber({
+      points: [
+        ...existingFiber().points,
+        { id: 'p3', sequence: 2, type: 'SPLITTER', splitterId: 'sp1', latitude: 1.02, longitude: 1.02 },
+      ],
+    })
+    const fiber = fakeFiberRepo({ findById: vi.fn(async () => withSplitter) })
+    const { service } = svc({ fiber })
+    await service.deleteFiber('f1')
+    expect(fiber.delete).toHaveBeenCalledWith('f1', ['sp1'])
   })
 
   it('claims the splitter input of the closure a fiber ends on', async () => {

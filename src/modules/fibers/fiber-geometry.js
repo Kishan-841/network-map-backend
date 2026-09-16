@@ -1,7 +1,8 @@
 import { pathMeters } from '../../lib/fiber-geo.js'
 
-export const entityKey = (p) =>
-  p.type === 'POP' ? `POP:${p.popId}` : p.type === 'CLOSURE' ? `CLOSURE:${p.closureId}` : p.type === 'BUILDING' ? `BUILDING:${p.buildingId}` : null
+const ENTITY_ID = { POP: 'popId', CLOSURE: 'closureId', BUILDING: 'buildingId', SPLITTER: 'splitterId' }
+
+export const entityKey = (p) => (ENTITY_ID[p.type] ? `${p.type}:${p[ENTITY_ID[p.type]]}` : null)
 
 /** Consecutive typed points bound a segment; the waypoints between them give its map length. */
 export function deriveSegments(points) {

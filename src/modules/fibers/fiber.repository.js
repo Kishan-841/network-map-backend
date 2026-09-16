@@ -2,11 +2,11 @@ import { prisma } from '../../lib/prisma.js'
 import { deriveSegments } from './fiber-geometry.js'
 
 export const FIBER_INCLUDE = {
-  points: { orderBy: { sequence: 'asc' }, include: { pop: { select: { name: true } }, closure: { select: { code: true, kind: true, notes: true, splitters: { select: { id: true, ratio: true, location: true, fiberType: true } } } }, building: { select: { buildingName: true } } } },
+  points: { orderBy: { sequence: 'asc' }, include: { pop: { select: { name: true } }, closure: { select: { code: true, kind: true, notes: true, splitters: { select: { id: true, ratio: true, location: true, fiberType: true } } } }, building: { select: { buildingName: true } }, splitter: { select: { id: true, code: true, ratio: true, fiberType: true, location: true } } } },
   segments: { orderBy: { sequence: 'asc' } },
   olt: { select: { id: true, name: true, pop: { select: { id: true, name: true } } } },
   operator: { select: { id: true, name: true } },
-  fedBy: { select: { portNo: true, splitter: { select: { id: true, ratio: true, location: true, fiberType: true, closure: { select: { id: true, code: true } }, inputFiber: { select: { id: true, name: true } } } } } },
+  fedBy: { select: { portNo: true, splitter: { select: { id: true, code: true, ratio: true, location: true, fiberType: true, closure: { select: { id: true, code: true } }, inputFiber: { select: { id: true, name: true } } } } } },
 }
 
 export const fiberRepository = {
@@ -18,14 +18,26 @@ export const fiberRepository = {
     oltId == null || ponPort == null ? null : prisma.fiber.findUnique({ where: { oltId_ponPort: { oltId, ponPort } } }),
   create: (data, tx = prisma) => tx.fiber.create({ data }),
   update: (id, data, tx = prisma) => tx.fiber.update({ where: { id }, data }),
-  delete: (id) => prisma.fiber.delete({ where: { id } }),
+  /**
+   * `FiberPoint.splitterId` is RESTRICT, so the points go first; the splitters
+   * that only ever existed as points on THIS line (no closure of their own) go
+   * with them, and anything still attached to a closure is left alone.
+   */
+  delete: (id, lineSplitterIds = []) =>
+    prisma.$transaction(async (tx) => {
+      await tx.fiberPoint.deleteMany({ where: { fiberId: id } })
+      if (lineSplitterIds.length) {
+        await tx.splitter.deleteMany({ where: { id: { in: lineSplitterIds }, closureId: null } })
+      }
+      await tx.fiber.delete({ where: { id } })
+    }),
   /** Replaces points and segments wholesale. `segments` items reference points by index. */
   async replaceGeometry(fiberId, points, segments, tx) {
     await tx.fiberSegment.deleteMany({ where: { fiberId } })
     await tx.fiberPoint.deleteMany({ where: { fiberId } })
     const created = []
     for (const [sequence, p] of points.entries()) {
-      created.push(await tx.fiberPoint.create({ data: { fiberId, sequence, type: p.type, latitude: p.latitude, longitude: p.longitude, popId: p.popId ?? null, closureId: p.closureId ?? null, buildingId: p.buildingId ?? null } }))
+      created.push(await tx.fiberPoint.create({ data: { fiberId, sequence, type: p.type, latitude: p.latitude, longitude: p.longitude, popId: p.popId ?? null, closureId: p.closureId ?? null, buildingId: p.buildingId ?? null, splitterId: p.splitterId ?? null } }))
     }
     for (const s of segments) {
       await tx.fiberSegment.create({ data: { fiberId, sequence: s.sequence, fromPointId: created[s.fromIndex].id, toPointId: created[s.toIndex].id, mapMeters: s.mapMeters, fiberLaidMeters: s.fiberLaidMeters ?? null, isCut: s.isCut ?? false, cutAt: s.cutAt ?? null, cutNote: s.cutNote ?? null } })
