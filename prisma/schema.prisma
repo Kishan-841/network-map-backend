@@ -67,6 +67,9 @@ model User {
   passwordHash String
   role         Role       @default(SURVEYOR)
   isActive     Boolean    @default(true)
+  /// Granted by an ADMIN on Users → Assign accesses. Lets a MANAGER, SURVEYOR
+  /// or SUPERVISOR draw fiber and closures; ADMIN never needs it.
+  canManageFiber Boolean  @default(false)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   buildings    Building[]

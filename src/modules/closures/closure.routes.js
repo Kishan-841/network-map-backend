@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { requireAuth, requireRole } from '../../middleware/auth.js'
+import { requireAuth, requireRole, requireFiberWrite } from '../../middleware/auth.js'
 import { validateBody } from '../../middleware/validate.js'
 import { audit } from '../system-logs/audit.js'
 import { closureRepository } from './closure.repository.js'
@@ -10,7 +10,7 @@ export const closureRoutes = Router()
 
 closureRoutes.use(requireAuth)
 const READ = requireRole('ADMIN', 'MANAGER', 'SURVEYOR', 'SUPERVISOR')
-const WRITE = requireRole('ADMIN', 'MANAGER')
+const WRITE = requireFiberWrite
 
 closureRoutes.get('/', READ, closureController.list)
 closureRoutes.get('/:id', READ, closureController.get)

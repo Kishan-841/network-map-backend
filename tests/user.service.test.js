@@ -98,4 +98,43 @@ describe('user service', () => {
     expect(updated.isActive).toBe(false)
     expect(updated).not.toHaveProperty('passwordHash')
   })
+
+  it('clears fiber access when a ticked user moves to a role that cannot hold it', async () => {
+    const repo = fakeUserRepository([
+      { id: 'u1', email: 'a@isp.local', passwordHash: 'x', role: 'SURVEYOR', canManageFiber: true },
+    ])
+    const service = createUserService({ userRepository: repo })
+    const updated = await service.updateUser('u1', { role: 'ACQUISITION_AGENT' })
+    expect(updated.canManageFiber).toBe(false)
+  })
+
+  it('keeps fiber access when a ticked user moves between map roles', async () => {
+    const repo = fakeUserRepository([
+      { id: 'u1', email: 'a@isp.local', passwordHash: 'x', role: 'SURVEYOR', canManageFiber: true },
+    ])
+    const service = createUserService({ userRepository: repo })
+    const updated = await service.updateUser('u1', { role: 'SUPERVISOR' })
+    expect(updated.canManageFiber).toBe(true)
+  })
+
+  it('setAccess ticks a surveyor and refuses a role that cannot hold fiber access', async () => {
+    const repo = fakeUserRepository([
+      { id: 'u1', email: 'a@isp.local', passwordHash: 'x', role: 'SURVEYOR', canManageFiber: false },
+      { id: 'u2', email: 'b@isp.local', passwordHash: 'x', role: 'ACQUISITION_AGENT', canManageFiber: false },
+    ])
+    const service = createUserService({ userRepository: repo })
+    const ticked = await service.setAccess('u1', { canManageFiber: true })
+    expect(ticked.canManageFiber).toBe(true)
+    expect(ticked).not.toHaveProperty('passwordHash')
+    await expect(service.setAccess('u2', { canManageFiber: true })).rejects.toMatchObject({ status: 400 })
+    await expect(service.setAccess('nope', { canManageFiber: true })).rejects.toMatchObject({ status: 404 })
+  })
+
+  it('the fake repository only has methods the real one has', async () => {
+    const { userRepository: real } = await import('../src/modules/users/user.repository.js')
+    for (const key of Object.keys(fakeUserRepository())) {
+      if (key === 'users') continue
+      expect(typeof real[key], `userRepository.${key}`).toBe('function')
+    }
+  })
 })

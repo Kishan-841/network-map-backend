@@ -62,3 +62,10 @@ export const updateUserSchema = z
     pincodes: z.array(pincodeSchema).max(50),
   })
   .partial()
+
+// Accesses an ADMIN hands to individual users (Users → Assign accesses).
+// Deliberately NOT part of updateUserSchema: that route is open to
+// acquisition leads, and an unknown key there is dropped, not applied.
+export const userAccessSchema = z.object({
+  canManageFiber: z.boolean(),
+})
