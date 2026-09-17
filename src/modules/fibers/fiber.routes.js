@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { requireAuth, requireRole } from '../../middleware/auth.js'
+import { requireAuth, requireRole, requireFiberWrite } from '../../middleware/auth.js'
 import { validateBody } from '../../middleware/validate.js'
 import { audit } from '../system-logs/audit.js'
 import { fiberRepository } from './fiber.repository.js'
@@ -15,7 +15,7 @@ export const fiberRoutes = Router()
 
 fiberRoutes.use(requireAuth)
 const READ = requireRole('ADMIN', 'MANAGER', 'SURVEYOR', 'SUPERVISOR')
-const WRITE = requireRole('ADMIN', 'MANAGER')
+const WRITE = requireFiberWrite
 
 fiberRoutes.get('/', READ, fiberController.list)
 fiberRoutes.get('/:id', READ, fiberController.get)

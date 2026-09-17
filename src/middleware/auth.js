@@ -20,7 +20,7 @@ export async function requireAuth(req, res, next) {
     // effect immediately instead of lingering until the token expires.
     const user = await userRepository.findById(payload.sub)
     if (!user || !user.isActive) return next(ApiError.unauthorized())
-    req.user = { id: user.id, role: user.role }
+    req.user = { id: user.id, role: user.role, canManageFiber: user.canManageFiber === true }
     next()
   } catch (err) {
     next(err)
@@ -30,5 +30,21 @@ export async function requireAuth(req, res, next) {
 export const requireRole = (...roles) => (req, res, next) => {
   if (!req.user) return next(ApiError.unauthorized())
   if (!roles.includes(req.user.role)) return next(ApiError.forbidden())
+  next()
+}
+
+// Drawing fiber is a per-user grant, not a role privilege: an ADMIN ticks the
+// users who may do it (Users → Assign accesses). The role list still applies
+// to a ticked user, so a flag left behind on someone moved to another team — or
+// set by hand in the database — opens nothing.
+export const FIBER_ACCESS_ROLES = ['MANAGER', 'SURVEYOR', 'SUPERVISOR']
+
+export const mayManageFiber = (actor) =>
+  actor?.role === 'ADMIN' ||
+  (actor?.canManageFiber === true && FIBER_ACCESS_ROLES.includes(actor?.role))
+
+export const requireFiberWrite = (req, res, next) => {
+  if (!req.user) return next(ApiError.unauthorized())
+  if (!mayManageFiber(req.user)) return next(ApiError.forbidden())
   next()
 }
