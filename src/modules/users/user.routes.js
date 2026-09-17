@@ -6,6 +6,7 @@ import {
   updateUserSchema,
   listUsersQuerySchema,
   bulkZoneAssignSchema,
+  userAccessSchema,
 } from './user.schemas.js'
 import { userController } from './user.controller.js'
 import { audit } from '../system-logs/audit.js'
@@ -50,4 +51,15 @@ userRoutes.patch(
   }),
   validateBody(updateUserSchema),
   userController.update,
+)
+userRoutes.patch(
+  '/:id/access',
+  requireRole('ADMIN'),
+  audit('User', 'AccessChange', {
+    load: (req) => userRepository.findById(req.params.id),
+    describe: (req, old) =>
+      `Fiber access ${req.body?.canManageFiber === true ? 'given to' : 'removed from'} '${old?.email ?? req.params.id}'`,
+  }),
+  validateBody(userAccessSchema),
+  userController.setAccess,
 )

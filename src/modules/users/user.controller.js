@@ -43,4 +43,13 @@ export const userController = {
       next(err)
     }
   },
+
+  async setAccess(req, res, next) {
+    try {
+      const user = await userService.setAccess(req.params.id, req.body)
+      res.json({ success: true, data: user })
+    } catch (err) {
+      next(err)
+    }
+  },
 }

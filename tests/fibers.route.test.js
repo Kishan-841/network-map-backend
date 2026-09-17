@@ -11,10 +11,16 @@ const tokenFor = (role) =>
     expiresIn: '1h',
   })
 
+// Fiber writes need the per-user tick, not just a role — see seed-test-users.
+const fiberManagerToken = jwt.sign({ sub: 'test-fiber-manager', role: 'MANAGER' }, env.jwtSecret, {
+  audience: 'staff',
+  expiresIn: '1h',
+})
+
 describe('fibers API', () => {
   it('places a splitter on the line: S-code, 1:6 ratio, then retype the point and delete it', async () => {
     const app = createApp()
-    const manager = ['Authorization', `Bearer ${tokenFor('MANAGER')}`]
+    const manager = ['Authorization', `Bearer ${fiberManagerToken}`]
     let fiberId = null
     let splitterId = null
     let popId = null
@@ -114,7 +120,7 @@ describe('fibers API', () => {
   it('runs the acceptance flow: create → splitter feed → cut → restore → delete', async () => {
     const app = createApp()
     const stamp = Date.now()
-    const manager = ['Authorization', `Bearer ${tokenFor('MANAGER')}`]
+    const manager = ['Authorization', `Bearer ${fiberManagerToken}`]
 
     let popId = null
     let oltId = null

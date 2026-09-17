@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { requireAuth, requireRole } from '../../middleware/auth.js'
+import { requireAuth, requireFiberWrite } from '../../middleware/auth.js'
 import { validateBody } from '../../middleware/validate.js'
 import { audit } from '../system-logs/audit.js'
 import { closureRepository } from './closure.repository.js'
@@ -9,7 +9,7 @@ import { splitterController } from './closure.controller.js'
 export const splitterRoutes = Router()
 
 splitterRoutes.use(requireAuth)
-const WRITE = requireRole('ADMIN', 'MANAGER')
+const WRITE = requireFiberWrite
 
 splitterRoutes.patch(
   '/:id',

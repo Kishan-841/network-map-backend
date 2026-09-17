@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs'
 import { ApiError } from '../../lib/api-error.js'
 import { toPublicUser } from '../auth/auth.service.js'
+import { FIBER_ACCESS_ROLES } from '../../middleware/auth.js'
 
 const BCRYPT_ROUNDS = 10
 
@@ -39,6 +40,16 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
     const found = await zoneRepository.countByIds(uniqueIds)
     if (found !== uniqueIds.length) throw ApiError.badRequest('One or more zones do not exist')
     return { [op]: uniqueIds.map((id) => ({ id })) }
+  }
+
+  // A role change can leave a fiber tick on someone who should no longer have
+  // it. Return the new value for canManageFiber, or undefined to leave the
+  // stored value alone. (Throwing an ApiError here refuses the role change.)
+  function fiberAccessAfterRoleChange(current, nextRole) {
+    // Cleared, not kept: a tick that survived a spell in another team would
+    // come back to life the day they return — an access nobody chose to give.
+    if (current.canManageFiber && !FIBER_ACCESS_ROLES.includes(nextRole)) return false
+    return undefined
   }
 
   return {
@@ -146,6 +157,10 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
         }
         data.email = email
       }
+      if (data.role && data.role !== current.role) {
+        const canManageFiber = fiberAccessAfterRoleChange(current, data.role)
+        if (canManageFiber !== undefined) data.canManageFiber = canManageFiber
+      }
       // Password is stored only as a hash, never plaintext.
       if (password) data.passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS)
 
@@ -171,6 +186,20 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
       }
 
       const user = await userRepository.update(id, data)
+      return toPublicUser(user)
+    },
+
+    // Per-user accesses, granted by an ADMIN one tick at a time. Only roles
+    // that work on the coverage map can hold fiber access; ADMIN has it anyway.
+    async setAccess(id, { canManageFiber }) {
+      const current = await userRepository.findById(id)
+      if (!current) throw ApiError.notFound('User not found')
+      if (!FIBER_ACCESS_ROLES.includes(current.role)) {
+        throw ApiError.badRequest(
+          'Fiber access can only be given to managers, surveyors and supervisors',
+        )
+      }
+      const user = await userRepository.update(id, { canManageFiber })
       return toPublicUser(user)
     },
   }

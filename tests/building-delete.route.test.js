@@ -14,6 +14,12 @@ describe('DELETE /api/v1/buildings/:id', () => {
     expect(res.status).toBe(401)
   })
 
+// Fiber writes need the per-user tick, not just a role — see seed-test-users.
+const fiberManagerToken = jwt.sign({ sub: 'test-fiber-manager', role: 'MANAGER' }, env.jwtSecret, {
+  audience: 'staff',
+  expiresIn: '1h',
+})
+
   it('rejects SURVEYOR', async () => {
     const res = await request(createApp())
       .delete('/api/v1/buildings/whatever')
@@ -63,7 +69,7 @@ describe('DELETE /api/v1/buildings/:id', () => {
   it('refuses to delete a building attached to a fiber, then succeeds once the fiber is gone', async () => {
     const stamp = Date.now()
     const admin = ['Authorization', `Bearer ${tokenFor('ADMIN')}`]
-    const manager = ['Authorization', `Bearer ${tokenFor('MANAGER')}`]
+    const manager = ['Authorization', `Bearer ${fiberManagerToken}`]
     const app = createApp()
 
     const building = await prisma.building.create({
