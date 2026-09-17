@@ -175,8 +175,9 @@ enum SplitterRatio {
 }
 
 enum SplitterLocation {
-  WAN
-  LAN
+  S1
+  S2
+  S3
 }
 
 model Pop {
@@ -293,7 +294,7 @@ model Splitter {
   closureId    String?
   closure      Closure?         @relation(fields: [closureId], references: [id], onDelete: Cascade)
   ratio        SplitterRatio
-  location     SplitterLocation @default(WAN)
+  location     SplitterLocation @default(S1)
   fiberType    String?                         // 'MAIN' | 'SUB'
   inputFiberId String?
   inputFiber   Fiber?           @relation("SplitterInput", fields: [inputFiberId], references: [id], onDelete: SetNull)

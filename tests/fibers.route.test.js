@@ -34,7 +34,7 @@ describe('fibers API', () => {
           coreCount: 4,
           points: [
             { type: 'POP', popId, latitude: 18.6, longitude: 73.9 },
-            { type: 'SPLITTER', newSplitter: { ratio: 'R1_6', fiberType: 'SUB', location: 'LAN' }, latitude: 18.601, longitude: 73.901 },
+            { type: 'SPLITTER', newSplitter: { ratio: 'R1_6', fiberType: 'SUB', location: 'S2' }, latitude: 18.601, longitude: 73.901 },
             { type: 'WAYPOINT', latitude: 18.602, longitude: 73.902 },
             { type: 'CLOSURE', newClosure: { kind: 'Compass' }, latitude: 18.603, longitude: 73.903 },
           ],
@@ -48,7 +48,7 @@ describe('fibers API', () => {
       expect(fiber.points[1].label).toMatch(/^S\d+$/)
       expect(fiber.points[1].splitter).toBe('1:6')
       expect(fiber.points[1].splitterFiberType).toBe('SUB')
-      expect(fiber.points[1].splitterLocation).toBe('LAN')
+      expect(fiber.points[1].splitterLocation).toBe('S2')
       expect(fiber.totals.splitterCount).toBe(1)
       // POP → SPLITTER → CLOSURE: the splitter bounds segments like a closure.
       expect(fiber.segments).toHaveLength(2)

@@ -25,7 +25,7 @@ const pointSchema = z
       .object({
         ratio: z.enum(Object.keys(RATIO_PORTS)),
         fiberType: z.enum(['MAIN', 'SUB']).nullish(),
-        location: z.enum(['WAN', 'LAN']).default('WAN'),
+        location: z.enum(['S1', 'S2', 'S3']).default('S1'),
       })
       .nullish(),
   })

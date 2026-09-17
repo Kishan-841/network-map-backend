@@ -47,7 +47,7 @@ describe('closures API', () => {
       const splitter = await request(app)
         .post(`/api/v1/closures/${closureId}/splitters`)
         .set(...auth)
-        .send({ ratio: 'R1_4', location: 'WAN', fiberType: 'MAIN' })
+        .send({ ratio: 'R1_4', location: 'S1', fiberType: 'MAIN' })
       expect(splitter.status).toBe(201)
       splitterId = splitter.body.data.id
       expect(splitter.body.data.outputs).toHaveLength(4)
@@ -60,10 +60,10 @@ describe('closures API', () => {
       const retyped = await request(app)
         .patch(`/api/v1/splitters/${splitterId}`)
         .set(...auth)
-        .send({ fiberType: 'SUB', location: 'LAN' })
+        .send({ fiberType: 'SUB', location: 'S2' })
       expect(retyped.status).toBe(200)
       expect(retyped.body.data.fiberType).toBe('SUB')
-      expect(retyped.body.data.location).toBe('LAN')
+      expect(retyped.body.data.location).toBe('S2')
 
       const outputPatch = await request(app)
         .patch(`/api/v1/splitters/${splitterId}/outputs/2`)
@@ -97,7 +97,7 @@ describe('closures API', () => {
       expect(closureGet.body.data.splitters[0].outputs[0].toBuilding).toBeNull()
       expect(closureGet.body.data.splitters[0].outputs[0].toFiber).toBeNull()
       expect(closureGet.body.data.splitters[0].fiberType).toBe('SUB')
-      expect(closureGet.body.data.splitters[0].location).toBe('LAN')
+      expect(closureGet.body.data.splitters[0].location).toBe('S2')
 
       expect(
         (
