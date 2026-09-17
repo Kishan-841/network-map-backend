@@ -107,6 +107,18 @@ export const buildingRepository = {
   findById: (id) => prisma.building.findUnique({ where: { id }, include: fullInclude }),
   update: (id, data) => prisma.building.update({ where: { id }, data, include: fullInclude }),
   delete: (id) => prisma.building.delete({ where: { id } }),
+  /**
+   * Fiber names still touching this building via a FiberPoint — the delete
+   * guard's evidence. Deduplicated + sorted so the 409 message is stable
+   * regardless of point order.
+   */
+  fiberNamesAttachedTo: async (buildingId) => {
+    const refs = await prisma.fiberPoint.findMany({
+      where: { buildingId },
+      select: { fiber: { select: { name: true } } },
+    })
+    return [...new Set(refs.map((r) => r.fiber.name))].sort()
+  },
   // Capped so a large/degenerate box can't pull the whole table into memory.
   // The nearby check only needs enough candidates to flag a duplicate.
   findWithinBounds: ({ minLat, maxLat, minLon, maxLon }) =>

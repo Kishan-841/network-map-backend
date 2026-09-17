@@ -669,6 +669,16 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       const building = await buildingRepository.findById(id)
       if (!building) throw ApiError.notFound('Building not found')
 
+      // A FiberPoint→Building reference is RESTRICT at the DB level, so an
+      // unguarded delete would fail with an opaque foreign-key error. Check
+      // first so the operator gets a clear next step (retype the point).
+      const fiberNames = await buildingRepository.fiberNamesAttachedTo(id)
+      if (fiberNames.length) {
+        throw ApiError.conflict(
+          `Attached to fiber ${fiberNames.join(', ')} — retype that point first`,
+        )
+      }
+
       // Collect every stored file before the row (and its cascaded photo/
       // permission children) disappears. The permission letter usually exists
       // as both a photo row and permission.documentUrl — the Set dedupes it.

@@ -111,6 +111,7 @@ model Operator {
   createdAt   DateTime     @default(now())
   zones       Zone[]
   fiberRoutes FiberRoute[]
+  fibers      Fiber[]
   /// Groups operators under a city; null for operators with no city yet.
   cityId    String?
   city      City?    @relation(fields: [cityId], references: [id], onDelete: SetNull)
@@ -151,6 +152,171 @@ model FiberRoute {
   updatedAt DateTime @updatedAt
 }
 
+enum FiberPointType {
+  WAYPOINT
+  POP
+  CLOSURE
+  BUILDING
+  SPLITTER
+}
+
+enum FiberStatus {
+  PLANNED
+  LIVE
+  CUT
+}
+
+enum SplitterRatio {
+  R1_2
+  R1_4
+  R1_6
+  R1_8
+  R1_16
+}
+
+enum SplitterLocation {
+  S1
+  S2
+  S3
+}
+
+model Pop {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  latitude  Float
+  longitude Float
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  olts      Olt[]
+  points    FiberPoint[]
+}
+
+model Olt {
+  id           String   @id @default(cuid())
+  popId        String
+  pop          Pop      @relation(fields: [popId], references: [id], onDelete: Cascade)
+  name         String
+  ponPortCount Int
+  createdAt    DateTime @default(now())
+  fibers       Fiber[]
+  @@unique([popId, name])
+}
+
+model Fiber {
+  id         String      @id @default(cuid())
+  name       String      @unique              // FIB-001…, editable
+  coreCount  Int                               // 2 | 4 | 6 | 12 | 24 | 48
+  cableType  String?
+  status     FiberStatus @default(PLANNED)
+  oltId      String?
+  olt        Olt?        @relation(fields: [oltId], references: [id], onDelete: SetNull)
+  ponPort    Int?
+  cableTag   String?                           // phase-1 fiberId (asset tag on the cable)
+  placement  String?                           // 'IN' | 'OUT'
+  operatorId String?
+  operator   Operator?   @relation(fields: [operatorId], references: [id], onDelete: SetNull)
+  notes      String?
+  images     Json?                             // upload URLs from our uploads API only
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  points     FiberPoint[]
+  segments   FiberSegment[]
+  fedBy      SplitterOutput? @relation("SplitterOutputFiber")
+  feeds      Splitter[]      @relation("SplitterInput")
+  @@unique([oltId, ponPort])                    // one fiber per PON port
+}
+
+model FiberPoint {
+  id         String         @id @default(cuid())
+  fiberId    String
+  fiber      Fiber          @relation(fields: [fiberId], references: [id], onDelete: Cascade)
+  sequence   Int
+  type       FiberPointType @default(WAYPOINT)
+  latitude   Float                              // for typed points: a copy of the entity's position
+  longitude  Float
+  popId      String?
+  pop        Pop?           @relation(fields: [popId], references: [id], onDelete: Restrict)
+  closureId  String?
+  closure    Closure?       @relation(fields: [closureId], references: [id], onDelete: Restrict)
+  buildingId String?
+  building   Building?      @relation(fields: [buildingId], references: [id], onDelete: Restrict)
+  splitterId String?
+  splitter   Splitter?      @relation(fields: [splitterId], references: [id], onDelete: Restrict)
+  segmentsFrom FiberSegment[] @relation("SegmentFrom")
+  segmentsTo   FiberSegment[] @relation("SegmentTo")
+  @@unique([fiberId, sequence])
+  @@index([closureId])
+  @@index([popId])
+  @@index([buildingId])
+  @@index([splitterId])
+}
+
+model FiberSegment {
+  id              String     @id @default(cuid())
+  fiberId         String
+  fiber           Fiber      @relation(fields: [fiberId], references: [id], onDelete: Cascade)
+  sequence        Int
+  fromPointId     String
+  fromPoint       FiberPoint @relation("SegmentFrom", fields: [fromPointId], references: [id], onDelete: Cascade)
+  toPointId       String
+  toPoint         FiberPoint @relation("SegmentTo",   fields: [toPointId],   references: [id], onDelete: Cascade)
+  mapMeters       Float
+  fiberLaidMeters Float?
+  isCut           Boolean    @default(false)
+  cutAt           DateTime?
+  cutNote         String?
+  @@unique([fiberId, sequence])
+}
+
+model Closure {
+  id         String    @id @default(cuid())
+  code       String    @unique               // CL-0001…
+  latitude   Float
+  longitude  Float
+  kind       String?                         // pole / wall / manhole… (free text; enum later)
+  buildingId String?
+  building   Building? @relation(fields: [buildingId], references: [id], onDelete: SetNull)
+  notes      String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  points     FiberPoint[]
+  splitters  Splitter[]
+}
+
+model Splitter {
+  id           String           @id @default(cuid())
+  code         String           @unique       // S1, S2… minted from Splitter_code_seq
+  latitude     Float                          // where it sits on the line
+  longitude    Float
+  /// Set only for the legacy "splitter attached to a closure" shape; a splitter
+  /// placed on the line directly has none.
+  closureId    String?
+  closure      Closure?         @relation(fields: [closureId], references: [id], onDelete: Cascade)
+  ratio        SplitterRatio
+  location     SplitterLocation @default(S1)
+  fiberType    String?                         // 'MAIN' | 'SUB'
+  inputFiberId String?
+  inputFiber   Fiber?           @relation("SplitterInput", fields: [inputFiberId], references: [id], onDelete: SetNull)
+  createdAt    DateTime         @default(now())
+  outputs      SplitterOutput[]
+  points       FiberPoint[]
+  @@index([inputFiberId])
+}
+
+model SplitterOutput {
+  id           String    @id @default(cuid())
+  splitterId   String
+  splitter     Splitter  @relation(fields: [splitterId], references: [id], onDelete: Cascade)
+  portNo       Int
+  toFiberId    String?   @unique
+  toFiber      Fiber?    @relation("SplitterOutputFiber", fields: [toFiberId], references: [id], onDelete: SetNull)
+  toBuildingId String?
+  toBuilding   Building? @relation(fields: [toBuildingId], references: [id], onDelete: SetNull)
+  label        String?
+  @@unique([splitterId, portNo])
+}
+
 model Building {
   id               String           @id @default(cuid())
   /// Google Place id. NOT globally unique: the same building can be added
@@ -184,6 +350,9 @@ model Building {
   permission       Permission?
   contact          BuildingContact?
   photos           Photo[]
+  fiberPoints      FiberPoint[]
+  splitterOutputs  SplitterOutput[]
+  closures         Closure[]
 
   @@index([latitude, longitude])
   @@index([source, createdById])
