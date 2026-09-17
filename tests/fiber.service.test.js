@@ -119,7 +119,7 @@ const P = {
   closure: (id) => ({ type: 'CLOSURE', closureId: id, latitude: 1.01, longitude: 1.01 }),
   newSplitter: {
     type: 'SPLITTER',
-    newSplitter: { ratio: 'R1_6', fiberType: 'SUB', location: 'LAN' },
+    newSplitter: { ratio: 'R1_6', fiberType: 'SUB', location: 'S2' },
     latitude: 1.007,
     longitude: 1.007,
   },
@@ -148,8 +148,8 @@ describe('fiber schemas', () => {
     expect(createFiberSchema.safeParse(bare).success).toBe(false)
     const ok = createFiberSchema.safeParse({ ...base, points: [P.pop, P.newSplitter, P.building] })
     expect(ok.success).toBe(true)
-    expect(ok.data.points[1].newSplitter).toEqual({ ratio: 'R1_6', fiberType: 'SUB', location: 'LAN' })
-    // An existing splitter is named by id instead; location defaults to WAN.
+    expect(ok.data.points[1].newSplitter).toEqual({ ratio: 'R1_6', fiberType: 'SUB', location: 'S2' })
+    // An existing splitter is named by id instead; location defaults to S1.
     const byId = createFiberSchema.safeParse({
       ...base,
       points: [P.pop, { type: 'SPLITTER', splitterId: 's1', latitude: 1, longitude: 1 }, P.building],
@@ -342,7 +342,7 @@ describe('fiber service', () => {
         latitude: 1.007,
         longitude: 1.007,
         ratio: 'R1_6',
-        location: 'LAN',
+        location: 'S2',
         fiberType: 'SUB',
         inputFiberId: 'new',
         closureId: null,
@@ -381,7 +381,7 @@ describe('fiber service', () => {
           splitterId: 'sp1',
           latitude: 1.02,
           longitude: 1.02,
-          splitter: { id: 'sp1', code: 'S7', ratio: 'R1_6', fiberType: 'SUB', location: 'LAN' },
+          splitter: { id: 'sp1', code: 'S7', ratio: 'R1_6', fiberType: 'SUB', location: 'S2' },
         },
       ],
     })
@@ -393,7 +393,7 @@ describe('fiber service', () => {
       splitterId: 'sp1',
       splitterRatio: 'R1_6',
       splitterFiberType: 'SUB',
-      splitterLocation: 'LAN',
+      splitterLocation: 'S2',
     })
     expect(shaped.totals.splitterCount).toBe(1)
   })

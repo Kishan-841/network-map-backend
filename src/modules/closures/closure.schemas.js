@@ -14,7 +14,7 @@ export const updateClosureSchema = createClosureSchema.partial()
 
 export const createSplitterSchema = z.object({
   ratio: z.enum(Object.keys(RATIO_PORTS)),
-  location: z.enum(['WAN', 'LAN']).default('WAN'),
+  location: z.enum(['S1', 'S2', 'S3']).default('S1'),
   fiberType: z.enum(['MAIN', 'SUB']).nullish(),
   inputFiberId: z.string().nullish(),
 })

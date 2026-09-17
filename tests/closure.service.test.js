@@ -126,9 +126,9 @@ describe('closure service', () => {
       sequences: { nextClosureCode: async () => 'JC-0042', nextSplitterCode: async () => 'S7' },
       prisma: { $transaction: (fn) => fn('tx') },
     })
-    await s.addSplitter('c1', { ratio: 'R1_4', location: 'WAN' })
+    await s.addSplitter('c1', { ratio: 'R1_4', location: 'S1' })
     expect(repo.createSplitter).toHaveBeenCalledWith(
-      { code: 'S7', latitude: 18.5, longitude: 73.8, closureId: 'c1', ratio: 'R1_4', location: 'WAN', fiberType: null, inputFiberId: 'f1' },
+      { code: 'S7', latitude: 18.5, longitude: 73.8, closureId: 'c1', ratio: 'R1_4', location: 'S1', fiberType: null, inputFiberId: 'f1' },
       4,
       'tx',
     )
@@ -142,16 +142,16 @@ describe('closure service', () => {
       sequences: { nextClosureCode: async () => 'JC-0042', nextSplitterCode: async () => 'S7' },
       prisma: { $transaction: (fn) => fn('tx') },
     })
-    await s.addSplitter('c1', { ratio: 'R1_8', location: 'WAN' })
+    await s.addSplitter('c1', { ratio: 'R1_8', location: 'S1' })
     expect(repo.createSplitter).toHaveBeenCalledWith(
-      { code: 'S7', latitude: 18.5, longitude: 73.8, closureId: 'c1', ratio: 'R1_8', location: 'WAN', fiberType: null, inputFiberId: null },
+      { code: 'S7', latitude: 18.5, longitude: 73.8, closureId: 'c1', ratio: 'R1_8', location: 'S1', fiberType: null, inputFiberId: null },
       8,
       'tx',
     )
   })
 
   it('404s addSplitter on an unknown closure', async () => {
-    await expect(svc().addSplitter('ghost', { ratio: 'R1_4', location: 'WAN' })).rejects.toMatchObject({
+    await expect(svc().addSplitter('ghost', { ratio: 'R1_4', location: 'S1' })).rejects.toMatchObject({
       status: 404,
     })
   })
@@ -169,7 +169,7 @@ describe('closure service', () => {
       sequences: { nextClosureCode: async () => 'JC-0042', nextSplitterCode: async () => 'S7' },
       prisma: { $transaction: (fn) => fn('tx') },
     })
-    await expect(s.addSplitter('c1', { ratio: 'R1_4', location: 'WAN' })).resolves.toBeDefined()
+    await expect(s.addSplitter('c1', { ratio: 'R1_4', location: 'S1' })).resolves.toBeDefined()
     expect(repo.createSplitter).toHaveBeenCalled()
   })
 
@@ -181,9 +181,9 @@ describe('closure service', () => {
       sequences: { nextClosureCode: async () => 'JC-0042', nextSplitterCode: async () => 'S7' },
       prisma: { $transaction: (fn) => fn('tx') },
     })
-    await s.addSplitter('c1', { ratio: 'R1_2', location: 'LAN', fiberType: 'SUB', inputFiberId: 'f7' })
+    await s.addSplitter('c1', { ratio: 'R1_2', location: 'S2', fiberType: 'SUB', inputFiberId: 'f7' })
     expect(repo.createSplitter).toHaveBeenCalledWith(
-      { code: 'S7', latitude: 18.5, longitude: 73.8, closureId: 'c1', ratio: 'R1_2', location: 'LAN', fiberType: 'SUB', inputFiberId: 'f7' },
+      { code: 'S7', latitude: 18.5, longitude: 73.8, closureId: 'c1', ratio: 'R1_2', location: 'S2', fiberType: 'SUB', inputFiberId: 'f7' },
       2,
       'tx',
     )
@@ -193,8 +193,8 @@ describe('closure service', () => {
   it('updateSplitter passes the fiber type through', async () => {
     const repo = fakeRepo()
     const s = svc({ updateSplitter: repo.updateSplitter })
-    await s.updateSplitter('s1', { fiberType: 'MAIN', location: 'WAN' })
-    expect(repo.updateSplitter).toHaveBeenCalledWith('s1', { fiberType: 'MAIN', location: 'WAN' }, null)
+    await s.updateSplitter('s1', { fiberType: 'MAIN', location: 'S1' })
+    expect(repo.updateSplitter).toHaveBeenCalledWith('s1', { fiberType: 'MAIN', location: 'S1' }, null)
   })
 
   it('deleteSplitter 409s when an output still feeds a fiber', async () => {
@@ -224,9 +224,9 @@ describe('closure service', () => {
       sequences: { nextClosureCode: async () => 'JC-0042', nextSplitterCode: async () => 'S7' },
       prisma: { $transaction: (fn) => fn('tx') },
     })
-    await s.addSplitter('c1', { ratio: 'R1_6', location: 'WAN' })
+    await s.addSplitter('c1', { ratio: 'R1_6', location: 'S1' })
     expect(repo.createSplitter).toHaveBeenCalledWith(
-      { code: 'S7', latitude: 18.5, longitude: 73.8, closureId: 'c1', ratio: 'R1_6', location: 'WAN', fiberType: null, inputFiberId: null },
+      { code: 'S7', latitude: 18.5, longitude: 73.8, closureId: 'c1', ratio: 'R1_6', location: 'S1', fiberType: null, inputFiberId: null },
       6,
       'tx',
     )

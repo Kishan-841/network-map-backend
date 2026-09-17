@@ -117,7 +117,7 @@ export function createFiberService(deps) {
                 latitude: p.latitude,
                 longitude: p.longitude,
                 ratio: p.newSplitter.ratio,
-                location: p.newSplitter.location ?? 'WAN',
+                location: p.newSplitter.location ?? 'S1',
                 fiberType: p.newSplitter.fiberType ?? null,
                 // The line it sits on is the line that feeds it.
                 inputFiberId: fiberId,
