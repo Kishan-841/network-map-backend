@@ -33,16 +33,26 @@ const auth = (id) => [
 
 const app = createApp()
 const closureBody = { latitude: 18.5, longitude: 73.8, kind: 'pole' }
+// A POP records its zone, and a surveyor may only use one they are assigned to.
+let tickedZoneId = null
 
 beforeAll(async () => {
+  tickedZoneId = (await prisma.zone.findFirst()).id
   for (const user of USERS) {
     await prisma.user.create({
-      data: { name: `FA ${user.role}`, email: `${user.id}@vitest.local`, passwordHash: 'x', ...user },
+      data: {
+        name: `FA ${user.role}`,
+        email: `${user.id}@vitest.local`,
+        passwordHash: 'x',
+        ...user,
+        ...(user.role === 'SURVEYOR' && { assignedZones: { connect: { id: tickedZoneId } } }),
+      },
     })
   }
 })
 
 afterAll(async () => {
+  await prisma.pop.deleteMany({ where: { name: { startsWith: 'FA POP ' } } })
   const ids = Object.values(IDS)
   await prisma.systemLog.deleteMany({ where: { userId: { in: ids } } })
   await prisma.user.deleteMany({ where: { id: { in: ids } } })
@@ -100,7 +110,7 @@ describe('fiber write access', () => {
     const created = await request(app)
       .post('/api/v1/pops')
       .set(...auth(IDS.ticked))
-      .send({ name: `FA POP ${STAMP}`, latitude: 18.52, longitude: 73.85 })
+      .send({ name: `FA POP ${STAMP}`, latitude: 18.52, longitude: 73.85, zoneId: tickedZoneId })
     expect(created.status).toBe(201)
     const popId = created.body.data.id
 
@@ -124,7 +134,7 @@ describe('fiber write access', () => {
     const write = await request(app)
       .post('/api/v1/pops')
       .set(...auth(IDS.manager))
-      .send({ name: `FA POP nope ${STAMP}`, latitude: 18.52, longitude: 73.85 })
+      .send({ name: `FA POP nope ${STAMP}`, latitude: 18.52, longitude: 73.85, zoneId: tickedZoneId })
     expect(write.status).toBe(403)
     const read = await request(app).get('/api/v1/pops').set(...auth(IDS.manager))
     expect(read.status).toBe(200)

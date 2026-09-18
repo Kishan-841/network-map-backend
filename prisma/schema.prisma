@@ -133,6 +133,7 @@ model Zone {
   createdAt DateTime   @default(now())
   buildings Building[]
   fibers    Fiber[]
+  pops      Pop[]
   assignedUsers User[] @relation("UserAssignedZones")
   /// Groups zones under an operator; null for zones with no operator yet.
   operatorId String?
@@ -193,6 +194,11 @@ model Pop {
   name      String   @unique
   latitude  Float
   longitude Float
+  /// The zone this site sits in. Required on new POPs — who may see a POP
+  /// follows its zone — but nullable, because the POPs recorded before this
+  /// have none and stay visible to everyone until one is set.
+  zoneId    String?
+  zone      Zone?    @relation(fields: [zoneId], references: [id], onDelete: SetNull)
   notes     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
