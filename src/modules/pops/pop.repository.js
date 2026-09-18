@@ -2,11 +2,12 @@ import { prisma } from '../../lib/prisma.js'
 
 const withOlts = {
   olts: { orderBy: { name: 'asc' }, include: { _count: { select: { fibers: true } } } },
+  zone: { select: { id: true, name: true } },
   _count: { select: { points: true } },
 }
 
 export const popRepository = {
-  list: () => prisma.pop.findMany({ orderBy: { name: 'asc' }, include: withOlts }),
+  list: (where = {}) => prisma.pop.findMany({ where, orderBy: { name: 'asc' }, include: withOlts }),
   findById: (id) => prisma.pop.findUnique({ where: { id }, include: withOlts }),
   findByName: (name) =>
     prisma.pop.findFirst({ where: { name: { equals: name, mode: 'insensitive' } } }),
