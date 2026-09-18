@@ -8,15 +8,17 @@ const TEST_USERS = [
   { id: 'test-manager', role: 'MANAGER' },
   // Fiber writes are a per-user grant now; this is the ticked manager.
   { id: 'test-fiber-manager', role: 'MANAGER', canManageFiber: true },
+  // Building editing is a per-user grant too; this is the ticked surveyor.
+  { id: 'test-edit-surveyor', role: 'SURVEYOR', canEditBuildings: true },
   { id: 'test-surveyor', role: 'SURVEYOR' },
   { id: 'test-user', role: 'SURVEYOR' },
 ]
 
 export async function setup() {
-  for (const { id, role, canManageFiber = false } of TEST_USERS) {
+  for (const { id, role, canManageFiber = false, canEditBuildings = false } of TEST_USERS) {
     await prisma.user.upsert({
       where: { id },
-      update: { role, isActive: true, canManageFiber },
+      update: { role, isActive: true, canManageFiber, canEditBuildings },
       create: {
         id,
         name: `Test ${role}`,
@@ -25,6 +27,7 @@ export async function setup() {
         role,
         isActive: true,
         canManageFiber,
+        canEditBuildings,
       },
     })
   }
