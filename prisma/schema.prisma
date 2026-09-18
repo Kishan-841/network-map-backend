@@ -70,6 +70,10 @@ model User {
   /// Granted by an ADMIN on Users → Assign accesses. Lets a MANAGER, SURVEYOR
   /// or SUPERVISOR draw fiber and closures; ADMIN never needs it.
   canManageFiber Boolean  @default(false)
+  /// Granted by an ADMIN on Users → Assign accesses. Lets a SURVEYOR edit the
+  /// buildings THEY logged — never anyone else's, and never the permission
+  /// record or the live flag. The other roles edit buildings by role already.
+  canEditBuildings Boolean @default(false)
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   buildings    Building[]

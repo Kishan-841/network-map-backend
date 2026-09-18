@@ -415,9 +415,29 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       return signUrls(withTier(building))
     },
 
-    async updateBuilding(id, { details, permission, ...building }) {
+    async updateBuilding(id, { details, permission, ...building }, actor) {
       const existing = await buildingRepository.findById(id)
       if (!existing) throw ApiError.notFound('Building not found')
+      // A granted surveyor edits what they logged and nothing else. The route
+      // has already checked the grant; this is the row-level half of it, and
+      // it mirrors the rules that applied when they created the building.
+      if (actor?.role === 'SURVEYOR') {
+        if (existing.createdById !== actor.id) {
+          throw ApiError.forbidden('You can only edit buildings you added')
+        }
+        if (permission) {
+          throw ApiError.forbidden('Only admins or managers can set permission details')
+        }
+        if (building.isLive !== undefined) {
+          throw ApiError.forbidden('Only admins or managers can mark a building live')
+        }
+        if (building.zoneId && building.zoneId !== existing.zoneId) {
+          const assigned = await userRepository.assignedZoneIds(actor.id)
+          if (!assigned.includes(building.zoneId)) {
+            throw ApiError.forbidden('You are not assigned to this zone')
+          }
+        }
+      }
       if (building.zoneId && building.zoneId !== existing.zoneId) {
         const zone = await zoneRepository.findById(building.zoneId)
         if (!zone) throw ApiError.badRequest('Zone does not exist')

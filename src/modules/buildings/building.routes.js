@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { requireAuth, requireRole } from '../../middleware/auth.js'
+import { requireAuth, requireRole, requireBuildingEdit } from '../../middleware/auth.js'
 import { validateBody, validateQuery } from '../../middleware/validate.js'
 import {
   createBuildingSchema,
@@ -83,7 +83,7 @@ buildingRoutes.patch(
 )
 buildingRoutes.patch(
   '/:id',
-  requireRole('ADMIN', 'MANAGER', 'SUPERVISOR'),
+  requireBuildingEdit,
   audit('Building', 'Update', {
     load: (req) => buildingRepository.findById(req.params.id),
     describe: (req, old) => `Building '${old?.buildingName ?? req.params.id}' updated`,

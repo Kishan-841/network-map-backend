@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs'
 import { ApiError } from '../../lib/api-error.js'
 import { toPublicUser } from '../auth/auth.service.js'
-import { FIBER_ACCESS_ROLES } from '../../middleware/auth.js'
+import { BUILDING_EDIT_ROLES, FIBER_ACCESS_ROLES } from '../../middleware/auth.js'
 
 const BCRYPT_ROUNDS = 10
 
@@ -49,6 +49,12 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
     // Cleared, not kept: a tick that survived a spell in another team would
     // come back to life the day they return — an access nobody chose to give.
     if (current.canManageFiber && !FIBER_ACCESS_ROLES.includes(nextRole)) return false
+    return undefined
+  }
+
+  // The same reasoning for the building-edit grant, which only a surveyor holds.
+  function buildingAccessAfterRoleChange(current, nextRole) {
+    if (current.canEditBuildings && !BUILDING_EDIT_ROLES.includes(nextRole)) return false
     return undefined
   }
 
@@ -160,6 +166,8 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
       if (data.role && data.role !== current.role) {
         const canManageFiber = fiberAccessAfterRoleChange(current, data.role)
         if (canManageFiber !== undefined) data.canManageFiber = canManageFiber
+        const canEditBuildings = buildingAccessAfterRoleChange(current, data.role)
+        if (canEditBuildings !== undefined) data.canEditBuildings = canEditBuildings
       }
       // Password is stored only as a hash, never plaintext.
       if (password) data.passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS)
@@ -189,17 +197,28 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
       return toPublicUser(user)
     },
 
-    // Per-user accesses, granted by an ADMIN one tick at a time. Only roles
-    // that work on the coverage map can hold fiber access; ADMIN has it anyway.
-    async setAccess(id, { canManageFiber }) {
+    // Per-user accesses, granted by an ADMIN one tick at a time. Each access
+    // has its own list of roles that can hold it, and only the ticks named in
+    // the request are touched — the others keep whatever they had.
+    async setAccess(id, accesses) {
       const current = await userRepository.findById(id)
       if (!current) throw ApiError.notFound('User not found')
-      if (!FIBER_ACCESS_ROLES.includes(current.role)) {
-        throw ApiError.badRequest(
-          'Fiber access can only be given to managers, surveyors and supervisors',
-        )
+      const data = {}
+      if (accesses.canManageFiber !== undefined) {
+        if (!FIBER_ACCESS_ROLES.includes(current.role)) {
+          throw ApiError.badRequest(
+            'Fiber access can only be given to managers, surveyors and supervisors',
+          )
+        }
+        data.canManageFiber = accesses.canManageFiber
       }
-      const user = await userRepository.update(id, { canManageFiber })
+      if (accesses.canEditBuildings !== undefined) {
+        if (!BUILDING_EDIT_ROLES.includes(current.role)) {
+          throw ApiError.badRequest('Building editing can only be given to surveyors')
+        }
+        data.canEditBuildings = accesses.canEditBuildings
+      }
+      const user = await userRepository.update(id, data)
       return toPublicUser(user)
     },
   }

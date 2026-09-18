@@ -66,6 +66,15 @@ export const updateUserSchema = z
 // Accesses an ADMIN hands to individual users (Users → Assign accesses).
 // Deliberately NOT part of updateUserSchema: that route is open to
 // acquisition leads, and an unknown key there is dropped, not applied.
-export const userAccessSchema = z.object({
-  canManageFiber: z.boolean(),
-})
+export const userAccessSchema = z
+  .object({
+    canManageFiber: z.boolean(),
+    canEditBuildings: z.boolean(),
+  })
+  .partial()
+  .strict()
+  // One tick per request, or both — but a PATCH that says nothing is a bug in
+  // the caller, not an instruction to change nothing.
+  .refine((data) => Object.keys(data).length > 0, {
+    message: 'Provide at least one access to change',
+  })
