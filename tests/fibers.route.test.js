@@ -32,7 +32,7 @@ describe('fibers API', () => {
       const pop = await request(app)
         .post('/api/v1/pops')
         .set(...manager)
-        .send({ name: `POP-SPL-${Date.now()}`, latitude: 18.6, longitude: 73.9 })
+        .send({ zoneId: await anyZoneId(), name: `POP-SPL-${Date.now()}`, latitude: 18.6, longitude: 73.9 })
       expect(pop.status).toBe(201)
       popId = pop.body.data.id
 
@@ -147,7 +147,7 @@ describe('fibers API', () => {
       const pop = await request(app)
         .post('/api/v1/pops')
         .set(...manager)
-        .send({ name: `POP-FIB-${stamp}`, latitude: 18.5, longitude: 73.8 })
+        .send({ zoneId: await anyZoneId(), name: `POP-FIB-${stamp}`, latitude: 18.5, longitude: 73.8 })
       expect(pop.status).toBe(201)
       popId = pop.body.data.id
 

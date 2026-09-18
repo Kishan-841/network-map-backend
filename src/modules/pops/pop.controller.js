@@ -3,7 +3,7 @@ import { popService } from './pop.service.js'
 export const popController = {
   async list(req, res, next) {
     try {
-      res.json({ success: true, data: await popService.listPops() })
+      res.json({ success: true, data: await popService.listPops(req.user) })
     } catch (err) {
       next(err)
     }
@@ -11,7 +11,7 @@ export const popController = {
 
   async create(req, res, next) {
     try {
-      const pop = await popService.createPop(req.body)
+      const pop = await popService.createPop(req.body, req.user)
       res.status(201).json({ success: true, data: pop })
     } catch (err) {
       next(err)
@@ -20,7 +20,7 @@ export const popController = {
 
   async update(req, res, next) {
     try {
-      res.json({ success: true, data: await popService.updatePop(req.params.id, req.body) })
+      res.json({ success: true, data: await popService.updatePop(req.params.id, req.body, req.user) })
     } catch (err) {
       next(err)
     }

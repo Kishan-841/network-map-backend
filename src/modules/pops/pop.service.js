@@ -1,8 +1,10 @@
 import { ApiError } from '../../lib/api-error.js'
 import { popRepository } from './pop.repository.js'
 import { fiberPointRepository } from '../fibers/fiber.repository.js'
+import { zoneRepository } from '../zones/zone.repository.js'
+import { userRepository } from '../users/user.repository.js'
 
-export function createPopService({ popRepository, fiberPointRepository }) {
+export function createPopService({ popRepository, fiberPointRepository, zoneRepository, userRepository }) {
   async function mustFind(id) {
     const pop = await popRepository.findById(id)
     if (!pop) throw ApiError.notFound('POP not found')
@@ -17,14 +19,46 @@ export function createPopService({ popRepository, fiberPointRepository }) {
     if (!olt || olt.popId !== popId) throw ApiError.notFound('OLT not found')
     return olt
   }
+  /**
+   * The zone a POP sits in must exist, and a SURVEYOR may only use the zones
+   * they are assigned to — the same rule that governs where they may log a
+   * building or draw a fiber. Managers and above work every zone.
+   */
+  async function assertZone(zoneId, actor) {
+    if (!zoneId) return
+    const zone = await zoneRepository.findById(zoneId)
+    if (!zone) throw ApiError.badRequest('Zone does not exist')
+    if (actor?.role === 'SURVEYOR') {
+      const assigned = await userRepository.assignedZoneIds(actor.id)
+      if (!assigned.includes(zoneId)) throw ApiError.forbidden('You are not assigned to this zone')
+    }
+  }
+
+  /**
+   * What a reader may see. A surveyor gets the POPs in their own zones, plus
+   * any POP recorded before zones existed — those belong to nobody yet, so
+   * hiding them would make sites disappear from a map that always had them.
+   */
+  async function listScope(actor) {
+    if (actor?.role !== 'SURVEYOR') return {}
+    const assigned = await userRepository.assignedZoneIds(actor.id)
+    return { OR: [{ zoneId: { in: assigned } }, { zoneId: null }] }
+  }
+
   return {
-    listPops: () => popRepository.list(),
-    async createPop(data) {
+    async listPops(actor) {
+      return popRepository.list(await listScope(actor))
+    },
+    async createPop(data, actor) {
+      await assertZone(data.zoneId, actor)
       await assertNameFree(data.name)
       return popRepository.create(data)
     },
-    async updatePop(id, data) {
-      await mustFind(id)
+    async updatePop(id, data, actor) {
+      const existing = await mustFind(id)
+      if (data.zoneId !== undefined && data.zoneId !== existing.zoneId) {
+        await assertZone(data.zoneId, actor)
+      }
       if (data.name) await assertNameFree(data.name, id)
       const pop = await popRepository.update(id, data)
       // A POP's position is the truth for every fiber point that sits on it (spec §2.8).
@@ -69,4 +103,9 @@ export function createPopService({ popRepository, fiberPointRepository }) {
   }
 }
 
-export const popService = createPopService({ popRepository, fiberPointRepository })
+export const popService = createPopService({
+  popRepository,
+  fiberPointRepository,
+  zoneRepository,
+  userRepository,
+})

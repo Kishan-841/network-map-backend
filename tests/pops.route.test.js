@@ -3,12 +3,16 @@ import request from 'supertest'
 import jwt from 'jsonwebtoken'
 import { createApp } from '../src/app.js'
 import { env } from '../src/config/env.js'
+import { prisma } from '../src/lib/prisma.js'
 
 const tokenFor = (role) =>
   jwt.sign({ sub: `test-${role.toLowerCase()}`, role }, env.jwtSecret, {
     audience: 'staff',
     expiresIn: '1h',
   })
+
+// A POP records the zone it sits in; these fixtures pick any real one.
+const anyZoneId = async () => (await prisma.zone.findFirst()).id
 
 // POP writes follow the fiber grant now — see seed-test-users.
 const fiberManagerToken = jwt.sign({ sub: 'test-fiber-manager', role: 'MANAGER' }, env.jwtSecret, {
@@ -42,7 +46,7 @@ describe('pops API', () => {
       const created = await request(app)
         .post('/api/v1/pops')
         .set(...auth)
-        .send({ name: `POP-${stamp}`, latitude: 18.5, longitude: 73.8 })
+        .send({ zoneId: await anyZoneId(), name: `POP-${stamp}`, latitude: 18.5, longitude: 73.8 })
       expect(created.status).toBe(201)
       id = created.body.data.id
 
