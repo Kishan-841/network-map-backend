@@ -16,7 +16,9 @@ export const operatorRoutes = Router()
 operatorRoutes.use(requireAuth)
 operatorRoutes.get(
   '/',
-  requireRole('ADMIN', 'MANAGER', 'SUPERVISOR'),
+  // SURVEYOR reads it too: a surveyor drawing a fiber picks the operator whose
+  // network it belongs to. The list is names and cities, nothing sensitive.
+  requireRole('ADMIN', 'MANAGER', 'SUPERVISOR', 'SURVEYOR'),
   validateQuery(listOperatorsQuerySchema),
   operatorController.list,
 )

@@ -5,6 +5,8 @@ import { createFiberSchema, updateFiberSchema, CORE_COUNTS } from '../src/module
 import { fiberRepository as realFiberRepo } from '../src/modules/fibers/fiber.repository.js'
 import { closureRepository as realClosureRepo } from '../src/modules/closures/closure.repository.js'
 import { popRepository as realPopRepo } from '../src/modules/pops/pop.repository.js'
+import { zoneRepository as realZoneRepo } from '../src/modules/zones/zone.repository.js'
+import { userRepository as realUserRepo } from '../src/modules/users/user.repository.js'
 
 // Only URLs that came out of our own uploads API are accepted as images.
 const fakeStorage = () => ({
@@ -95,12 +97,25 @@ const fakeBuildingRepo = (over = {}) => ({
   ...over,
 })
 
-function svc({ fiber, closure, pop, building } = {}) {
+// A fiber records the zone it runs in; the service checks the zone exists and,
+// for a surveyor, that they are assigned to it.
+const fakeZoneRepo = (over = {}) => ({
+  findById: vi.fn(async (id) => (id === 'ghost-zone' ? null : { id, name: 'Zone A' })),
+  ...over,
+})
+const fakeUserRepo = (over = {}) => ({
+  assignedZoneIds: vi.fn(async () => ['zone-1']),
+  ...over,
+})
+
+function svc({ fiber, closure, pop, building, zone, user } = {}) {
   const deps = {
     fiberRepository: fiber ?? fakeFiberRepo(),
     closureRepository: closure ?? fakeClosureRepo(),
     popRepository: pop ?? fakePopRepo(),
     buildingRepository: building ?? fakeBuildingRepo(),
+    zoneRepository: zone ?? fakeZoneRepo(),
+    userRepository: user ?? fakeUserRepo(),
     storage: fakeStorage(),
     sequences: {
       nextFiberName: vi.fn(async () => 'FIB-001'),
@@ -126,7 +141,7 @@ const P = {
   building: { type: 'BUILDING', buildingId: 'b1', latitude: 0, longitude: 0 },
 }
 
-const base = { coreCount: 12, status: 'PLANNED' }
+const base = { coreCount: 12, status: 'PLANNED', zoneId: 'zone-1' }
 
 describe('fiber schemas', () => {
   it('exports the sanctioned core counts and coerces blank numeric strings to undefined', () => {
@@ -168,6 +183,18 @@ describe('fiber service', () => {
     for (const k of Object.keys(fakeFiberRepo())) expect(typeof realFiberRepo[k]).toBe('function')
     for (const k of Object.keys(fakeClosureRepo())) expect(typeof realClosureRepo[k]).toBe('function')
     for (const k of Object.keys(fakePopRepo())) expect(typeof realPopRepo[k]).toBe('function')
+    for (const k of Object.keys(fakeZoneRepo())) expect(typeof realZoneRepo[k]).toBe('function')
+    for (const k of Object.keys(fakeUserRepo())) expect(typeof realUserRepo[k]).toBe('function')
+  })
+
+  it('refuses a zone that does not exist, and a zone a surveyor does not hold', async () => {
+    const { service } = svc()
+    await expect(
+      service.createFiber({ ...base, zoneId: 'ghost-zone', points: [P.pop, P.waypoint] }),
+    ).rejects.toMatchObject({ status: 400 })
+    await expect(
+      service.createFiber({ ...base, zoneId: 'zone-9', points: [P.pop, P.waypoint] }, { id: 'u1', role: 'SURVEYOR' }),
+    ).rejects.toMatchObject({ status: 403 })
   })
 
   it('404s on an unknown fiber', async () => {

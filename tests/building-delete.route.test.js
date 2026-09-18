@@ -14,6 +14,9 @@ describe('DELETE /api/v1/buildings/:id', () => {
     expect(res.status).toBe(401)
   })
 
+// A fiber records the zone it runs in, so these fixtures pick any real one.
+const anyZoneId = async () => (await prisma.zone.findFirst()).id
+
 // Fiber writes need the per-user tick, not just a role — see seed-test-users.
 const fiberManagerToken = jwt.sign({ sub: 'test-fiber-manager', role: 'MANAGER' }, env.jwtSecret, {
   audience: 'staff',
@@ -88,6 +91,7 @@ const fiberManagerToken = jwt.sign({ sub: 'test-fiber-manager', role: 'MANAGER' 
         .post('/api/v1/fibers')
         .set(...manager)
         .send({
+          zoneId: await anyZoneId(),
           coreCount: 2,
           points: [
             { type: 'WAYPOINT', latitude: 18.561, longitude: 73.861 },

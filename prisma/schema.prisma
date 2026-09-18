@@ -132,6 +132,7 @@ model Zone {
   boundary  Json?
   createdAt DateTime   @default(now())
   buildings Building[]
+  fibers    Fiber[]
   assignedUsers User[] @relation("UserAssignedZones")
   /// Groups zones under an operator; null for zones with no operator yet.
   operatorId String?
@@ -223,6 +224,12 @@ model Fiber {
   placement  String?                           // 'IN' | 'OUT'
   operatorId String?
   operator   Operator?   @relation(fields: [operatorId], references: [id], onDelete: SetNull)
+  /// The zone this cable runs in. Required on new fibers — the map's zone
+  /// filter is only trustworthy if every fiber has one — but nullable, because
+  /// the fibers drawn before this column existed have none. A surveyor may
+  /// only pick a zone they are assigned to.
+  zoneId     String?
+  zone       Zone?       @relation(fields: [zoneId], references: [id], onDelete: SetNull)
   notes      String?
   images     Json?                             // upload URLs from our uploads API only
   createdAt  DateTime    @default(now())

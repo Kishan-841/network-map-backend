@@ -9,17 +9,14 @@ const tokenFor = (role) =>
   jwt.sign({ sub: `test-${role.toLowerCase()}`, role }, env.jwtSecret, { expiresIn: '1h' })
 
 describe('operators API', () => {
-  it('lists operators for MANAGER, blocks SURVEYOR', async () => {
-    const ok = await request(createApp())
-      .get('/api/v1/operators')
-      .set('Authorization', `Bearer ${tokenFor('MANAGER')}`)
-    expect(ok.status).toBe(200)
-    expect(Array.isArray(ok.body.data)).toBe(true)
-
-    const denied = await request(createApp())
-      .get('/api/v1/operators')
-      .set('Authorization', `Bearer ${tokenFor('SURVEYOR')}`)
-    expect(denied.status).toBe(403)
+  it('lists operators for MANAGER and for SURVEYOR, who picks one when drawing a fiber', async () => {
+    for (const role of ['MANAGER', 'SURVEYOR']) {
+      const res = await request(createApp())
+        .get('/api/v1/operators')
+        .set('Authorization', `Bearer ${tokenFor(role)}`)
+      expect(res.status, role).toBe(200)
+      expect(Array.isArray(res.body.data)).toBe(true)
+    }
   })
 
   it('import is ADMIN-only', async () => {
