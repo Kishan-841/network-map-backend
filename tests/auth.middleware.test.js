@@ -50,7 +50,12 @@ describe('auth middleware', () => {
       .get('/me')
       .set('Authorization', `Bearer ${tokenFor(SURV_ID)}`)
     expect(res.status).toBe(200)
-    expect(res.body.data).toEqual({ id: SURV_ID, role: 'SURVEYOR', canManageFiber: false })
+    expect(res.body.data).toEqual({
+      id: SURV_ID,
+      role: 'SURVEYOR',
+      canManageFiber: false,
+      canEditBuildings: false,
+    })
   })
 
   it('blocks a surveyor from an admin route', async () => {

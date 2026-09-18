@@ -57,8 +57,18 @@ userRoutes.patch(
   requireRole('ADMIN'),
   audit('User', 'AccessChange', {
     load: (req) => userRepository.findById(req.params.id),
-    describe: (req, old) =>
-      `Fiber access ${req.body?.canManageFiber === true ? 'given to' : 'removed from'} '${old?.email ?? req.params.id}'`,
+    describe: (req, old) => {
+      const who = old?.email ?? req.params.id
+      const said = (key, label) =>
+        req.body?.[key] === undefined
+          ? null
+          : `${label} ${req.body[key] === true ? 'given to' : 'removed from'} '${who}'`
+      return (
+        [said('canManageFiber', 'Fiber access'), said('canEditBuildings', 'Building editing')]
+          .filter(Boolean)
+          .join('; ') || `Access changed for '${who}'`
+      )
+    },
   }),
   validateBody(userAccessSchema),
   userController.setAccess,

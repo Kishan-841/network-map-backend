@@ -137,4 +137,29 @@ describe('user service', () => {
       expect(typeof real[key], `userRepository.${key}`).toBe('function')
     }
   })
+
+  it('clears the building-edit grant when a ticked surveyor stops being one', async () => {
+    const repo = fakeUserRepository([
+      { id: 'u1', email: 'a@isp.local', passwordHash: 'x', role: 'SURVEYOR', canEditBuildings: true },
+    ])
+    const service = createUserService({ userRepository: repo })
+    expect((await service.updateUser('u1', { role: 'MANAGER' })).canEditBuildings).toBe(false)
+  })
+
+  it('setAccess touches only the ticks the request names', async () => {
+    const repo = fakeUserRepository([
+      {
+        id: 'u1',
+        email: 'a@isp.local',
+        passwordHash: 'x',
+        role: 'SURVEYOR',
+        canManageFiber: true,
+        canEditBuildings: false,
+      },
+    ])
+    const service = createUserService({ userRepository: repo })
+    const updated = await service.setAccess('u1', { canEditBuildings: true })
+    expect(updated.canEditBuildings).toBe(true)
+    expect(updated.canManageFiber).toBe(true)
+  })
 })

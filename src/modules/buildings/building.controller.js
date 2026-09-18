@@ -104,7 +104,7 @@ export const buildingController = {
 
   async update(req, res, next) {
     try {
-      const building = await buildingService.updateBuilding(req.params.id, req.body)
+      const building = await buildingService.updateBuilding(req.params.id, req.body, req.user)
       res.json({ success: true, data: building })
     } catch (err) {
       next(err)
