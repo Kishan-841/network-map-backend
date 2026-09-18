@@ -96,6 +96,40 @@ describe('fiber write access', () => {
     expect(res.status).toBe(403)
   })
 
+  it('lets a ticked SURVEYOR run POPs too — add, edit and remove', async () => {
+    const created = await request(app)
+      .post('/api/v1/pops')
+      .set(...auth(IDS.ticked))
+      .send({ name: `FA POP ${STAMP}`, latitude: 18.52, longitude: 73.85 })
+    expect(created.status).toBe(201)
+    const popId = created.body.data.id
+
+    const olt = await request(app)
+      .post(`/api/v1/pops/${popId}/olts`)
+      .set(...auth(IDS.ticked))
+      .send({ name: 'OLT-1', ponPortCount: 8 })
+    expect(olt.status).toBe(201)
+
+    const renamed = await request(app)
+      .patch(`/api/v1/pops/${popId}`)
+      .set(...auth(IDS.ticked))
+      .send({ name: `FA POP ${STAMP} renamed` })
+    expect(renamed.status).toBe(200)
+
+    const removed = await request(app).delete(`/api/v1/pops/${popId}`).set(...auth(IDS.ticked))
+    expect(removed.status).toBe(200)
+  })
+
+  it('refuses an unticked MANAGER on POPs, but still lets them read the list', async () => {
+    const write = await request(app)
+      .post('/api/v1/pops')
+      .set(...auth(IDS.manager))
+      .send({ name: `FA POP nope ${STAMP}`, latitude: 18.52, longitude: 73.85 })
+    expect(write.status).toBe(403)
+    const read = await request(app).get('/api/v1/pops').set(...auth(IDS.manager))
+    expect(read.status).toBe(200)
+  })
+
   it('lets an ADMIN write without a tick', async () => {
     const created = await request(app).post('/api/v1/closures').set(...auth(IDS.admin)).send(closureBody)
     expect(created.status).toBe(201)
