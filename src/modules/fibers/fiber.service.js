@@ -11,6 +11,8 @@ import { closureRepository } from '../closures/closure.repository.js'
 import { RATIO_PORTS } from '../closures/closure.schemas.js'
 import { popRepository } from '../pops/pop.repository.js'
 import { buildingRepository } from '../buildings/building.repository.js'
+import { userRepository } from '../users/user.repository.js'
+import { zoneRepository } from '../zones/zone.repository.js'
 
 const RATIO_LABEL = { R1_2: '1:2', R1_4: '1:4', R1_6: '1:6', R1_8: '1:8', R1_16: '1:16' }
 
@@ -46,7 +48,7 @@ export function shapeFiber(fiber, extras = {}) {
 }
 
 export function createFiberService(deps) {
-  const { fiberRepository, closureRepository, popRepository, buildingRepository, storage, sequences, prisma } = deps
+  const { fiberRepository, closureRepository, popRepository, buildingRepository, zoneRepository, userRepository, storage, sequences, prisma } = deps
 
   async function assertNameFree(name, selfId) {
     const clash = await fiberRepository.findByName(name)
@@ -216,6 +218,21 @@ export function createFiberService(deps) {
 
   const detailsOf = ({ points, segmentLaidMeters, fromSplitterOutput, ...rest }) => rest
 
+  /**
+   * The zone a fiber runs in must exist, and a surveyor may only use the zones
+   * they are assigned to — the same rule that governs where they may log a
+   * building. Managers and above work every zone.
+   */
+  async function assertZone(zoneId, actor) {
+    if (!zoneId) return
+    const zone = await zoneRepository.findById(zoneId)
+    if (!zone) throw ApiError.badRequest('Zone does not exist')
+    if (actor?.role === 'SURVEYOR') {
+      const assigned = await userRepository.assignedZoneIds(actor.id)
+      if (!assigned.includes(zoneId)) throw ApiError.forbidden('You are not assigned to this zone')
+    }
+  }
+
   async function getFiber(id) {
     const fiber = await fiberRepository.findById(id)
     if (!fiber) throw ApiError.notFound('Fiber not found')
@@ -239,7 +256,8 @@ export function createFiberService(deps) {
       return Promise.all((await fiberRepository.list()).map(async (f) => shapeFiber(await signImages(f))))
     },
 
-    async createFiber(data) {
+    async createFiber(data, actor) {
+      await assertZone(data.zoneId, actor)
       if (data.name) await assertNameFree(data.name)
       await assertPort(data)
       assertOwnedImages(data.images)
@@ -252,9 +270,14 @@ export function createFiberService(deps) {
       return getFiber(id)
     },
 
-    async updateFiber(id, data) {
+    async updateFiber(id, data, actor) {
       const existing = await fiberRepository.findById(id)
       if (!existing) throw ApiError.notFound('Fiber not found')
+      // Only when the PATCH actually moves the fiber — leaving the zone alone
+      // must not fail for a surveyor who never had it in their list.
+      if (data.zoneId !== undefined && data.zoneId !== existing.zoneId) {
+        await assertZone(data.zoneId, actor)
+      }
       if (data.name) await assertNameFree(data.name, id)
       // A PATCH is a fragment, so the create schema's cross-field rules are
       // re-run here against what the fiber will actually look like afterwards.
@@ -330,6 +353,8 @@ export function createFiberService(deps) {
 
 export const fiberService = createFiberService({
   fiberRepository,
+  zoneRepository,
+  userRepository,
   closureRepository,
   popRepository,
   buildingRepository,
