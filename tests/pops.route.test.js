@@ -10,8 +10,14 @@ const tokenFor = (role) =>
     expiresIn: '1h',
   })
 
+// POP writes follow the fiber grant now — see seed-test-users.
+const fiberManagerToken = jwt.sign({ sub: 'test-fiber-manager', role: 'MANAGER' }, env.jwtSecret, {
+  audience: 'staff',
+  expiresIn: '1h',
+})
+
 describe('pops API', () => {
-  it('SURVEYOR reads, cannot write; MANAGER create → olt → duplicate olt 409 → delete', async () => {
+  it('SURVEYOR reads but cannot write without the grant; a granted MANAGER create → olt → duplicate olt 409 → delete', async () => {
     const app = createApp()
     const stamp = Date.now()
     let id = null
@@ -32,7 +38,7 @@ describe('pops API', () => {
         ).status,
       ).toBe(403)
 
-      const auth = ['Authorization', `Bearer ${tokenFor('MANAGER')}`]
+      const auth = ['Authorization', `Bearer ${fiberManagerToken}`]
       const created = await request(app)
         .post('/api/v1/pops')
         .set(...auth)
@@ -53,7 +59,7 @@ describe('pops API', () => {
       expect(dup.status).toBe(409)
     } finally {
       if (id) {
-        const auth = ['Authorization', `Bearer ${tokenFor('MANAGER')}`]
+        const auth = ['Authorization', `Bearer ${fiberManagerToken}`]
         expect(
           (
             await request(app)

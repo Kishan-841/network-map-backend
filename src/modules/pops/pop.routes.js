@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { requireAuth, requireRole } from '../../middleware/auth.js'
+import { requireAuth, requireRole, requireFiberWrite } from '../../middleware/auth.js'
 import { validateBody } from '../../middleware/validate.js'
 import { audit } from '../system-logs/audit.js'
 import { popRepository } from './pop.repository.js'
@@ -10,7 +10,9 @@ export const popRoutes = Router()
 
 popRoutes.use(requireAuth)
 const READ = requireRole('ADMIN', 'MANAGER', 'SURVEYOR', 'SUPERVISOR')
-const WRITE = requireRole('ADMIN', 'MANAGER')
+// POPs are part of building the fiber network, so they follow the same
+// per-user grant as fibers and closures rather than a role of their own.
+const WRITE = requireFiberWrite
 
 popRoutes.get('/', READ, popController.list)
 popRoutes.post(
