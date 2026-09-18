@@ -19,7 +19,7 @@ export const fiberController = {
 
   async create(req, res, next) {
     try {
-      const fiber = await fiberService.createFiber(req.body)
+      const fiber = await fiberService.createFiber(req.body, req.user)
       res.status(201).json({ success: true, data: fiber })
     } catch (err) {
       next(err)
@@ -28,7 +28,7 @@ export const fiberController = {
 
   async update(req, res, next) {
     try {
-      res.json({ success: true, data: await fiberService.updateFiber(req.params.id, req.body) })
+      res.json({ success: true, data: await fiberService.updateFiber(req.params.id, req.body, req.user) })
     } catch (err) {
       next(err)
     }

@@ -52,6 +52,7 @@ const fiberFields = z
     cableTag: z.string().trim().max(100).nullish(),
     placement: z.enum(['IN', 'OUT']).nullish(),
     operatorId: z.string().nullish(),
+    zoneId: z.string().min(1),
     notes: z.string().trim().max(500).nullish(),
     images: z.array(z.string()).max(20).nullish(),
     fromSplitterOutput: z.object({ splitterId: z.string(), portNo: z.number().int().min(1) }).nullish(),
@@ -64,6 +65,8 @@ const fiberFields = z
 // semantics anyway: a PATCH carries a fragment, so `{ ponPort: 5 }` is legal when
 // the stored fiber already has an OLT. The service re-checks both rules against
 // the merged values once it has loaded the existing row.
+// zoneId is required here and optional in the partial below: every NEW fiber
+// must say where it runs, or the map's zone filter quietly lies.
 export const createFiberSchema = fiberFields.superRefine((f, ctx) => {
   if ((f.oltId == null) !== (f.ponPort == null)) {
     ctx.addIssue({ code: 'custom', message: 'oltId and ponPort go together' })

@@ -6,6 +6,7 @@ export const FIBER_INCLUDE = {
   segments: { orderBy: { sequence: 'asc' } },
   olt: { select: { id: true, name: true, pop: { select: { id: true, name: true } } } },
   operator: { select: { id: true, name: true } },
+  zone: { select: { id: true, name: true } },
   fedBy: { select: { portNo: true, splitter: { select: { id: true, code: true, ratio: true, location: true, fiberType: true, closure: { select: { id: true, code: true } }, inputFiber: { select: { id: true, name: true } } } } } },
 }
 
