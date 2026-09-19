@@ -205,3 +205,31 @@ describe('rows nobody can be traced to', () => {
     await prisma.pop.delete({ where: { id: orphan.id } })
   })
 })
+
+describe('GET /pops/:id — one POP in full, for the detail drawer', () => {
+  it('gives the maker every field, who added it, and the fibers there', async () => {
+    const res = await request(app).get(`/api/v1/pops/${mine.pop}`).set(...as(IDS.alice))
+    expect(res.status).toBe(200)
+    expect(res.body.data).toMatchObject({ id: mine.pop, zone: { id: zoneId }, createdBy: { id: IDS.alice } })
+    expect(Array.isArray(res.body.data.olts)).toBe(true)
+    expect(Array.isArray(res.body.data.devices)).toBe(true)
+    expect(Array.isArray(res.body.data.fibers)).toBe(true)
+  })
+
+  it('answers 404 to another surveyor and to a manager', async () => {
+    for (const who of [IDS.bob, IDS.manager]) {
+      expect((await request(app).get(`/api/v1/pops/${mine.pop}`).set(...as(who))).status).toBe(404)
+    }
+  })
+
+  it('opens for an ADMIN', async () => {
+    expect((await request(app).get(`/api/v1/pops/${mine.pop}`).set(...as(IDS.admin))).status).toBe(200)
+  })
+
+  it('names who added a fiber and a closure too', async () => {
+    const fiber = await request(app).get(`/api/v1/fibers/${mine.fiber}`).set(...as(IDS.alice))
+    expect(fiber.body.data.createdBy).toMatchObject({ id: IDS.alice })
+    const closure = await request(app).get(`/api/v1/closures/${mine.closure}`).set(...as(IDS.alice))
+    expect(closure.body.data.createdBy).toMatchObject({ id: IDS.alice })
+  })
+})

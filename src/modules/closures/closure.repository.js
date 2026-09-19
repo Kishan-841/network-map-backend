@@ -11,6 +11,7 @@ const outputsWithTargets = {
 const withDetail = {
   splitters: { include: { outputs: outputsWithTargets } },
   building: true,
+  createdBy: { select: { id: true, name: true } },
   _count: { select: { points: true } },
 }
 

@@ -133,6 +133,14 @@ export function createPopService({
   }
 
   return {
+    /** One POP in full, with only the cables this reader could open. */
+    async getPop(id, actor) {
+      await mustFind(id, actor)
+      const pop = await popRepository.findDetail(id)
+      const fibers = (await popRepository.fibersAtPop(id)).filter((f) => mayOwn(actor, f))
+      const olts = pop.olts.map((olt) => ({ ...olt, fibers: olt.fibers.filter((f) => mayOwn(actor, f)) }))
+      return signImages({ ...pop, olts, fibers })
+    },
     async listPops(actor) {
       // The zone is recorded, but it is ownership that decides who sees a POP.
       const pops = await popRepository.list(ownerScope(actor))
