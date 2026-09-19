@@ -200,10 +200,50 @@ model Pop {
   zoneId    String?
   zone      Zone?    @relation(fields: [zoneId], references: [id], onDelete: SetNull)
   notes     String?
+  /// Where the rack stands on site — floor, room, building. The map pin says
+  /// where the POP is; this says where to walk once you are there.
+  serverLocation String?
+  /// '16U' | '20U' | '22U' | '27U' | '32U'
+  rackSize       String?
+  /// 'OK' | 'DAMAGED'
+  rackCondition  String?
+  /// Batteries on the UPS: 1, 2 or 4. Null means nothing recorded yet.
+  upsBatteryCount Int?
+  /// Photos of the rack, as upload-API URLs — same shape as Fiber.images.
+  images    Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   olts      Olt[]
+  devices   PopDevice[]
   points    FiberPoint[]
+}
+
+/// What kind of box a PopDevice is. OLTs are their own table — they carry PON
+/// ports and the fibers that leave them; these three only carry an address or
+/// a port count, so one table with a kind beats three near-identical ones.
+enum PopDeviceKind {
+  SWITCH
+  MIKROTIK
+  FMS
+}
+
+model PopDevice {
+  id        String        @id @default(cuid())
+  popId     String
+  pop       Pop           @relation(fields: [popId], references: [id], onDelete: Cascade)
+  kind      PopDeviceKind
+  /// What it is called on site, if anything — "Switch 1", "Core MT".
+  label     String?
+  /// Required for a SWITCH or a MIKROTIK; an FMS is passive and has none.
+  ipAddress String?
+  /// FMS only: 12 | 24 | 48 | 96.
+  portCount Int?
+  /// SWITCH only: '1G' | '10G'.
+  speed     String?
+  /// What is written on the box — e.g. CRS326, RB4011.
+  model     String?
+  createdAt DateTime      @default(now())
+  @@index([popId])
 }
 
 model Olt {
@@ -212,6 +252,11 @@ model Olt {
   pop          Pop      @relation(fields: [popId], references: [id], onDelete: Cascade)
   name         String
   ponPortCount Int
+  ipAddress    String?
+  /// 'GPON' | 'EPON'
+  type         String?
+  /// What is written on the box — e.g. C320.
+  model        String?
   createdAt    DateTime @default(now())
   fibers       Fiber[]
   @@unique([popId, name])
@@ -294,7 +339,14 @@ model Closure {
   code       String    @unique               // CL-0001…
   latitude   Float
   longitude  Float
-  kind       String?                         // pole / wall / manhole… (free text; enum later)
+  kind       String?                         // Jumbo / Tiffin / Compass / FDC / PatchPanel (free text; older rows may hold anything)
+  /// Which kind of cable this closure sits on: 'MAIN_SF' | 'SUB_SF' | 'DROP_CABLE'.
+  fiberType  String?
+  /// Tubes in the cable: 0–4.
+  tubeCount  Int?
+  /// Cores of the cable coming in and the one going out — the usual counts.
+  inCoreCount  Int?
+  outCoreCount Int?
   buildingId String?
   building   Building? @relation(fields: [buildingId], references: [id], onDelete: SetNull)
   notes      String?
