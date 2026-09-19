@@ -1,7 +1,9 @@
 import { z } from 'zod'
 import { RATIO_PORTS } from '../closures/closure.schemas.js'
+import { CORE_COUNTS, FIBER_TYPES } from '../../lib/fiber-constants.js'
 
-export const CORE_COUNTS = [2, 4, 6, 12, 24, 48]
+// Shared with the closure schemas — see lib/fiber-constants.js for why.
+export { CORE_COUNTS, FIBER_TYPES } from '../../lib/fiber-constants.js'
 
 // Numbers arrive from HTML forms as strings; a blank field means "not supplied",
 // not "zero". z.coerce would turn '' into 0, so preprocess to undefined instead.
@@ -16,8 +18,24 @@ const pointSchema = z
     closureId: z.string().nullish(),
     buildingId: z.string().nullish(),
     splitterId: z.string().nullish(),
+    // A closure dropped while drawing is minted through this payload, so it
+    // has to carry the same survey sheet the closure form asks for — otherwise
+    // what the card collected is quietly thrown away.
     newClosure: z
-      .object({ kind: z.string().trim().max(50).nullish(), notes: z.string().trim().max(500).nullish() })
+      .object({
+        kind: z.string().trim().max(50).nullish(),
+        notes: z.string().trim().max(500).nullish(),
+        fiberType: z.enum(FIBER_TYPES).nullish(),
+        tubeCount: num(z.number().int().min(0).max(4).nullish()),
+        inCoreCount: num(z.number().int().nullish()).refine(
+          (v) => v == null || CORE_COUNTS.includes(v),
+          'Cores must be one of 2, 4, 6, 12, 24, 48',
+        ),
+        outCoreCount: num(z.number().int().nullish()).refine(
+          (v) => v == null || CORE_COUNTS.includes(v),
+          'Cores must be one of 2, 4, 6, 12, 24, 48',
+        ),
+      })
       .nullish(),
     newPop: z.object({ name: z.string().trim().min(1).max(100) }).nullish(),
     // A splitter dropped straight onto the line: no closure, its own S-code.
@@ -45,7 +63,7 @@ const fiberFields = z
   .object({
     name: z.string().trim().min(1).max(100).optional(),
     coreCount: z.number().refine((n) => CORE_COUNTS.includes(n), 'coreCount must be one of 2,4,6,12,24,48'),
-    cableType: z.string().trim().max(100).nullish(),
+    cableType: z.enum(FIBER_TYPES).nullish(),
     status: z.enum(['PLANNED', 'LIVE', 'CUT']).default('PLANNED'),
     oltId: z.string().nullish(),
     ponPort: num(z.number().int().min(1).max(256).nullish()),
