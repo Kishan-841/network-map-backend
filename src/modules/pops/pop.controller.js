@@ -61,4 +61,31 @@ export const popController = {
       next(err)
     }
   },
+
+  async addDevice(req, res, next) {
+    try {
+      const device = await popService.addDevice(req.params.id, req.body)
+      res.status(201).json({ success: true, data: device })
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  async updateDevice(req, res, next) {
+    try {
+      const device = await popService.updateDevice(req.params.id, req.params.deviceId, req.body)
+      res.json({ success: true, data: device })
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  async deleteDevice(req, res, next) {
+    try {
+      await popService.removeDevice(req.params.id, req.params.deviceId)
+      res.json({ success: true, data: null })
+    } catch (err) {
+      next(err)
+    }
+  },
 }

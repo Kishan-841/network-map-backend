@@ -2,6 +2,7 @@ import { prisma } from '../../lib/prisma.js'
 
 const withOlts = {
   olts: { orderBy: { name: 'asc' }, include: { _count: { select: { fibers: true } } } },
+  devices: { orderBy: [{ kind: 'asc' }, { createdAt: 'asc' }] },
   zone: { select: { id: true, name: true } },
   _count: { select: { points: true } },
 }
@@ -23,4 +24,8 @@ export const popRepository = {
   maxUsedPort: async (oltId) =>
     (await prisma.fiber.aggregate({ where: { oltId }, _max: { ponPort: true } }))._max.ponPort ?? 0,
   countFibersForOlt: (oltId) => prisma.fiber.count({ where: { oltId } }),
+  createDevice: (data) => prisma.popDevice.create({ data }),
+  findDeviceById: (id) => prisma.popDevice.findUnique({ where: { id } }),
+  updateDevice: (id, data) => prisma.popDevice.update({ where: { id }, data }),
+  deleteDevice: (id) => prisma.popDevice.delete({ where: { id } }),
 }
