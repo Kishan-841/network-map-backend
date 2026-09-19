@@ -105,6 +105,10 @@ export function createFiberService(deps) {
                 longitude: p.longitude,
                 kind: p.newClosure.kind ?? null,
                 notes: p.newClosure.notes ?? null,
+                fiberType: p.newClosure.fiberType ?? null,
+                tubeCount: p.newClosure.tubeCount ?? null,
+                inCoreCount: p.newClosure.inCoreCount ?? null,
+                outCoreCount: p.newClosure.outCoreCount ?? null,
               },
               tx,
             )
