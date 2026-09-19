@@ -3,7 +3,7 @@ import { fiberService } from './fiber.service.js'
 export const fiberController = {
   async list(req, res, next) {
     try {
-      res.json({ success: true, data: await fiberService.listFibers() })
+      res.json({ success: true, data: await fiberService.listFibers(req.user) })
     } catch (err) {
       next(err)
     }
@@ -11,7 +11,7 @@ export const fiberController = {
 
   async get(req, res, next) {
     try {
-      res.json({ success: true, data: await fiberService.getFiber(req.params.id) })
+      res.json({ success: true, data: await fiberService.getFiber(req.params.id, req.user) })
     } catch (err) {
       next(err)
     }
@@ -36,7 +36,7 @@ export const fiberController = {
 
   async setSegmentLaid(req, res, next) {
     try {
-      const fiber = await fiberService.setSegmentLaid(req.params.id, req.params.segmentId, req.body)
+      const fiber = await fiberService.setSegmentLaid(req.params.id, req.params.segmentId, req.body, req.user)
       res.json({ success: true, data: fiber })
     } catch (err) {
       next(err)
@@ -45,7 +45,7 @@ export const fiberController = {
 
   async cut(req, res, next) {
     try {
-      res.json({ success: true, data: await fiberService.cutFiber(req.params.id, req.body) })
+      res.json({ success: true, data: await fiberService.cutFiber(req.params.id, req.body, req.user) })
     } catch (err) {
       next(err)
     }
@@ -53,7 +53,7 @@ export const fiberController = {
 
   async restore(req, res, next) {
     try {
-      res.json({ success: true, data: await fiberService.restoreFiber(req.params.id) })
+      res.json({ success: true, data: await fiberService.restoreFiber(req.params.id, req.user) })
     } catch (err) {
       next(err)
     }
@@ -61,7 +61,7 @@ export const fiberController = {
 
   async remove(req, res, next) {
     try {
-      await fiberService.deleteFiber(req.params.id)
+      await fiberService.deleteFiber(req.params.id, req.user)
       res.json({ success: true, data: null })
     } catch (err) {
       next(err)

@@ -4,39 +4,45 @@ import { closureRepository } from './closure.repository.js'
 import { fiberPointRepository } from '../fibers/fiber.repository.js'
 import { RATIO_PORTS } from './closure.schemas.js'
 import { nextClosureCode, nextSplitterCode } from '../../lib/sequences.js'
+import { mayOwn, ownerScope } from '../../lib/ownership.js'
 
 export function createClosureService({ closureRepository, fiberPointRepository, sequences, prisma }) {
-  async function mustFind(id) {
+  // Somebody else's closure or splitter reads exactly like one that does not exist.
+  async function mustFind(id, actor) {
     const closure = await closureRepository.findById(id)
-    if (!closure) throw ApiError.notFound('Closure not found')
+    if (!mayOwn(actor, closure)) throw ApiError.notFound('Closure not found')
     return closure
   }
-  async function mustFindSplitter(id) {
+  async function mustFindSplitter(id, actor) {
     const splitter = await closureRepository.findSplitterById(id)
-    if (!splitter) throw ApiError.notFound('Splitter not found')
+    if (!mayOwn(actor, splitter)) throw ApiError.notFound('Splitter not found')
     return splitter
   }
 
   return {
-    listClosures: () => closureRepository.list(),
+    listClosures: (actor) => closureRepository.list(ownerScope(actor)),
 
-    async getClosure(id) {
-      const closure = await mustFind(id)
+    async getClosure(id, actor) {
+      const closure = await mustFind(id, actor)
       const through = await closureRepository.fibersThrough(id)
-      const fibers = through.map(({ fiber, pointSeq, maxSeq }) => ({
+      // Only the cables the reader could open themselves.
+      const fibers = through.filter(({ fiber }) => mayOwn(actor, fiber)).map(({ fiber, pointSeq, maxSeq }) => ({
         ...fiber,
         role: pointSeq === maxSeq ? 'in' : pointSeq === 0 ? 'out' : 'through',
       }))
       return { ...closure, fibers }
     },
 
-    createClosure: (data) =>
+    createClosure: (data, actor) =>
       prisma.$transaction(async (tx) =>
-        closureRepository.create({ ...data, code: await sequences.nextClosureCode(tx) }, tx),
+        closureRepository.create(
+          { ...data, code: await sequences.nextClosureCode(tx), createdById: actor.id },
+          tx,
+        ),
       ),
 
-    async updateClosure(id, data) {
-      await mustFind(id)
+    async updateClosure(id, data, actor) {
+      await mustFind(id, actor)
       const closure = await closureRepository.update(id, data)
       if (data.latitude != null && data.longitude != null) {
         await fiberPointRepository.updatePositionForClosure(id, {
@@ -48,16 +54,19 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
       return closure
     },
 
-    async deleteClosure(id) {
-      const closure = await mustFind(id)
+    async deleteClosure(id, actor) {
+      const closure = await mustFind(id, actor)
       if (closure._count.points > 0) {
         throw ApiError.conflict('Fibers pass through this closure — retype those points first')
       }
       await closureRepository.delete(id)
     },
 
-    async addSplitter(closureId, data) {
-      const closure = await mustFind(closureId)
+    async addSplitter(closureId, data, actor) {
+      const closure = await mustFind(closureId, actor)
+      if (data.inputFiberId && !mayOwn(actor, await closureRepository.findFiberOwner(data.inputFiberId))) {
+        throw ApiError.badRequest('Fiber does not exist')
+      }
       // A splitter may sit on any closure of a line — passing through one is
       // fine. The caller names the fiber that feeds it; when it does not, a
       // lone fiber ending here is the only unambiguous candidate.
@@ -79,6 +88,8 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
             location: data.location,
             fiberType: data.fiberType ?? null,
             inputFiberId,
+            // The closure's owner, so whoever runs that closure sees what hangs off it.
+            createdById: closure.createdById,
           },
           RATIO_PORTS[data.ratio],
           tx,
@@ -86,8 +97,8 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
       )
     },
 
-    async updateSplitter(id, data) {
-      const splitter = await mustFindSplitter(id)
+    async updateSplitter(id, data, actor) {
+      const splitter = await mustFindSplitter(id, actor)
       if (data.ratio) {
         const used = Math.max(
           0,
@@ -100,8 +111,8 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
       return closureRepository.updateSplitter(id, data, data.ratio ? RATIO_PORTS[data.ratio] : null)
     },
 
-    async deleteSplitter(id) {
-      const splitter = await mustFindSplitter(id)
+    async deleteSplitter(id, actor) {
+      const splitter = await mustFindSplitter(id, actor)
       if (splitter.outputs.some((o) => o.toFiberId)) {
         throw ApiError.conflict('An output still feeds a fiber')
       }
@@ -113,9 +124,9 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
       await closureRepository.deleteSplitter(id)
     },
 
-    async setOutput(splitterId, portNo, data) {
+    async setOutput(splitterId, portNo, data, actor) {
       const splitter = await closureRepository.findSplitterById(splitterId)
-      if (!splitter || !splitter.outputs.some((o) => o.portNo === portNo)) {
+      if (!mayOwn(actor, splitter) || !splitter.outputs.some((o) => o.portNo === portNo)) {
         throw ApiError.notFound('Output not found')
       }
       return closureRepository.updateOutput(splitterId, portNo, data)
