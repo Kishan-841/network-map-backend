@@ -9,6 +9,14 @@ export const popController = {
     }
   },
 
+  async get(req, res, next) {
+    try {
+      res.json({ success: true, data: await popService.getPop(req.params.id, req.user) })
+    } catch (err) {
+      next(err)
+    }
+  },
+
   async create(req, res, next) {
     try {
       const pop = await popService.createPop(req.body, req.user)

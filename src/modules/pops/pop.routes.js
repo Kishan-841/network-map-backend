@@ -22,6 +22,7 @@ const READ = requireRole('ADMIN', 'MANAGER', 'SURVEYOR', 'SUPERVISOR')
 const WRITE = requireFiberWrite
 
 popRoutes.get('/', READ, popController.list)
+popRoutes.get('/:id', READ, popController.get)
 popRoutes.post(
   '/',
   WRITE,
