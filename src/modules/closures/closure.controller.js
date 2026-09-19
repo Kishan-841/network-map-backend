@@ -10,7 +10,7 @@ function parsePortNo(req) {
 export const closureController = {
   async list(req, res, next) {
     try {
-      res.json({ success: true, data: await closureService.listClosures() })
+      res.json({ success: true, data: await closureService.listClosures(req.user) })
     } catch (err) {
       next(err)
     }
@@ -18,7 +18,7 @@ export const closureController = {
 
   async get(req, res, next) {
     try {
-      res.json({ success: true, data: await closureService.getClosure(req.params.id) })
+      res.json({ success: true, data: await closureService.getClosure(req.params.id, req.user) })
     } catch (err) {
       next(err)
     }
@@ -26,7 +26,7 @@ export const closureController = {
 
   async create(req, res, next) {
     try {
-      const closure = await closureService.createClosure(req.body)
+      const closure = await closureService.createClosure(req.body, req.user)
       res.status(201).json({ success: true, data: closure })
     } catch (err) {
       next(err)
@@ -35,7 +35,7 @@ export const closureController = {
 
   async update(req, res, next) {
     try {
-      res.json({ success: true, data: await closureService.updateClosure(req.params.id, req.body) })
+      res.json({ success: true, data: await closureService.updateClosure(req.params.id, req.body, req.user) })
     } catch (err) {
       next(err)
     }
@@ -43,7 +43,7 @@ export const closureController = {
 
   async remove(req, res, next) {
     try {
-      await closureService.deleteClosure(req.params.id)
+      await closureService.deleteClosure(req.params.id, req.user)
       res.json({ success: true, data: null })
     } catch (err) {
       next(err)
@@ -52,7 +52,7 @@ export const closureController = {
 
   async addSplitter(req, res, next) {
     try {
-      const splitter = await closureService.addSplitter(req.params.id, req.body)
+      const splitter = await closureService.addSplitter(req.params.id, req.body, req.user)
       res.status(201).json({ success: true, data: splitter })
     } catch (err) {
       next(err)
@@ -63,7 +63,7 @@ export const closureController = {
 export const splitterController = {
   async update(req, res, next) {
     try {
-      res.json({ success: true, data: await closureService.updateSplitter(req.params.id, req.body) })
+      res.json({ success: true, data: await closureService.updateSplitter(req.params.id, req.body, req.user) })
     } catch (err) {
       next(err)
     }
@@ -71,7 +71,7 @@ export const splitterController = {
 
   async remove(req, res, next) {
     try {
-      await closureService.deleteSplitter(req.params.id)
+      await closureService.deleteSplitter(req.params.id, req.user)
       res.json({ success: true, data: null })
     } catch (err) {
       next(err)
@@ -81,7 +81,7 @@ export const splitterController = {
   async setOutput(req, res, next) {
     try {
       const portNo = parsePortNo(req)
-      const output = await closureService.setOutput(req.params.id, portNo, req.body)
+      const output = await closureService.setOutput(req.params.id, portNo, req.body, req.user)
       res.json({ success: true, data: output })
     } catch (err) {
       next(err)

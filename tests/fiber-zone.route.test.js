@@ -53,8 +53,10 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
+  // As an ADMIN: the surveyor's fibers are theirs alone, so the manager would
+  // get a 404 and leave them behind.
   for (const id of created) {
-    await request(app).delete(`/api/v1/fibers/${id}`).set(...auth(IDS.manager))
+    await request(app).delete(`/api/v1/fibers/${id}`).set(...auth('test-admin'))
   }
   const ids = Object.values(IDS)
   await prisma.systemLog.deleteMany({ where: { userId: { in: ids } } })

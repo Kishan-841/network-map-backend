@@ -6,6 +6,7 @@ import { getStorageProvider } from '../../lib/storage/index.js'
 import { nextFiberName, nextClosureCode, nextSplitterCode } from '../../lib/sequences.js'
 import { deriveSegments, carryForward, keyedSegments } from './fiber-geometry.js'
 import { collectDownstream } from './fiber-downstream.js'
+import { mayOwn, ownerScope } from '../../lib/ownership.js'
 import { fiberRepository } from './fiber.repository.js'
 import { closureRepository } from '../closures/closure.repository.js'
 import { RATIO_PORTS } from '../closures/closure.schemas.js'
@@ -82,7 +83,15 @@ export function createFiberService(deps) {
     return { ...fiber, images: await Promise.all(fiber.images.map((u) => storage.readUrl(u))) }
   }
 
-  async function resolvePoints(points, fiberId, tx) {
+  /**
+   * `owner` is who anything minted here belongs to — the fiber's owner, not
+   * whoever pressed Save, so an ADMIN adding a closure to a surveyor's line
+   * leaves the surveyor able to see what is on their own cable. An existing
+   * POP/closure/splitter must be one the actor may see, unless it is already
+   * on this line (`onLine`): re-saving a fiber an ADMIN extended must not fail.
+   */
+  async function resolvePoints(points, fiberId, tx, { actor, owner, onLine = new Set() }) {
+    const reachable = (row) => row && (mayOwn(actor, row) || onLine.has(row.id))
     // Typed points take the entity's coordinates; new closures/POPs are created here (spec §2.12 steps 2–3).
     const out = []
     for (const p of points) {
@@ -92,9 +101,12 @@ export function createFiberService(deps) {
       }
       if (p.type === 'POP') {
         const pop = p.newPop
-          ? await popRepository.create({ name: p.newPop.name, latitude: p.latitude, longitude: p.longitude }, tx)
+          ? await popRepository.create(
+              { name: p.newPop.name, latitude: p.latitude, longitude: p.longitude, createdById: owner },
+              tx,
+            )
           : await popRepository.findById(p.popId)
-        if (!pop) throw ApiError.badRequest('POP does not exist')
+        if (!p.newPop && !reachable(pop)) throw ApiError.badRequest('POP does not exist')
         out.push({ type: 'POP', popId: pop.id, latitude: pop.latitude, longitude: pop.longitude })
       } else if (p.type === 'CLOSURE') {
         const closure = p.newClosure
@@ -109,11 +121,12 @@ export function createFiberService(deps) {
                 tubeCount: p.newClosure.tubeCount ?? null,
                 inCoreCount: p.newClosure.inCoreCount ?? null,
                 outCoreCount: p.newClosure.outCoreCount ?? null,
+                createdById: owner,
               },
               tx,
             )
           : await closureRepository.findById(p.closureId)
-        if (!closure) throw ApiError.badRequest('Closure does not exist')
+        if (!p.newClosure && !reachable(closure)) throw ApiError.badRequest('Closure does not exist')
         out.push({ type: 'CLOSURE', closureId: closure.id, latitude: closure.latitude, longitude: closure.longitude })
       } else if (p.type === 'SPLITTER') {
         const splitter = p.newSplitter
@@ -128,12 +141,13 @@ export function createFiberService(deps) {
                 // The line it sits on is the line that feeds it.
                 inputFiberId: fiberId,
                 closureId: null,
+                createdById: owner,
               },
               RATIO_PORTS[p.newSplitter.ratio],
               tx,
             )
           : await closureRepository.findSplitterById(p.splitterId)
-        if (!splitter) throw ApiError.badRequest('Splitter does not exist')
+        if (!p.newSplitter && !reachable(splitter)) throw ApiError.badRequest('Splitter does not exist')
         out.push({
           type: 'SPLITTER',
           splitterId: splitter.id,
@@ -149,10 +163,13 @@ export function createFiberService(deps) {
     return out
   }
 
-  async function assertPort(data, selfId) {
+  async function assertPort(data, selfId, { actor, keptOltId } = {}) {
     if (data.oltId == null) return
     const olt = await popRepository.findOltById(data.oltId)
-    if (!olt) throw ApiError.badRequest('OLT does not exist')
+    // The OLT is only as visible as the POP it stands in.
+    if (!olt || (olt.id !== keptOltId && !mayOwn(actor, olt.pop))) {
+      throw ApiError.badRequest('OLT does not exist')
+    }
     if (data.ponPort > olt.ponPortCount) throw ApiError.badRequest(`OLT has only ${olt.ponPortCount} PON ports`)
     const taken = await fiberRepository.findUsingPort(data.oltId, data.ponPort)
     if (taken && taken.id !== selfId) throw ApiError.conflict(`Port ${data.ponPort} already feeds ${taken.name}`)
@@ -162,10 +179,10 @@ export function createFiberService(deps) {
    * A splitter may sit on any closure of a line, so there is no placement rule
    * left — only the ownership of the output a fed fiber claims.
    */
-  async function assertSplitterRules(points, fromSplitterOutput, selfId) {
+  async function assertSplitterRules(points, fromSplitterOutput, selfId, { actor, keptSplitterId } = {}) {
     if (!fromSplitterOutput) return
     const splitter = await closureRepository.findSplitterById(fromSplitterOutput.splitterId)
-    if (!splitter) throw ApiError.badRequest('Splitter does not exist')
+    if (!splitter || (splitter.id !== keptSplitterId && !mayOwn(actor, splitter))) throw ApiError.badRequest('Splitter does not exist')
     const output = splitter.outputs.find((o) => o.portNo === fromSplitterOutput.portNo)
     if (!output) throw ApiError.badRequest('That splitter has no such output')
     if (output.toFiberId && output.toFiberId !== selfId) {
@@ -200,9 +217,15 @@ export function createFiberService(deps) {
     return oldFiber?.fedBy ? { splitterId: oldFiber.fedBy.splitter.id, portNo: oldFiber.fedBy.portNo } : null
   }
 
-  async function saveGeometry(fiberId, rawPoints, data, oldFiber, tx) {
-    const points = await resolvePoints(rawPoints, fiberId, tx)
-    await assertSplitterRules(points, mergedFeed(data, oldFiber), fiberId)
+  async function saveGeometry(fiberId, rawPoints, data, oldFiber, tx, { actor, owner }) {
+    const onLine = new Set(
+      (oldFiber?.points ?? []).flatMap((p) => [p.popId, p.closureId, p.splitterId]).filter(Boolean),
+    )
+    const points = await resolvePoints(rawPoints, fiberId, tx, { actor, owner, onLine })
+    await assertSplitterRules(points, mergedFeed(data, oldFiber), fiberId, {
+      actor,
+      keptSplitterId: oldFiber?.fedBy?.splitter.id,
+    })
     let segments = deriveSegments(points)
     if (oldFiber) segments = carryForward(keyedSegments(oldFiber), segments)
     segments = applyLaid(segments, data.segmentLaidMeters)
@@ -237,9 +260,15 @@ export function createFiberService(deps) {
     }
   }
 
-  async function getFiber(id) {
+  /** Out of the reader's scope reads exactly like "does not exist". */
+  async function mustFindVisible(id, actor) {
     const fiber = await fiberRepository.findById(id)
-    if (!fiber) throw ApiError.notFound('Fiber not found')
+    if (!mayOwn(actor, fiber)) throw ApiError.notFound('Fiber not found')
+    return fiber
+  }
+
+  async function getFiber(id, actor) {
+    const fiber = await mustFindVisible(id, actor)
     const splitters = await fiberRepository.splittersFedBy(id)
     const shaped = shapeFiber(await signImages(fiber), { splitters })
     const downstream =
@@ -250,33 +279,38 @@ export function createFiberService(deps) {
             loadFiber: async (fid) => shapeFiber(await fiberRepository.findById(fid)),
           })
         : null
+    // The walk follows the light, whoever drew each cable; the reader is told
+    // only about the cables they could open.
+    if (downstream) downstream.fibers = downstream.fibers.filter((f) => mayOwn(actor, f))
     return { ...shaped, downstream }
   }
 
   return {
     getFiber,
 
-    async listFibers() {
-      return Promise.all((await fiberRepository.list()).map(async (f) => shapeFiber(await signImages(f))))
+    async listFibers(actor) {
+      return Promise.all((await fiberRepository.list(ownerScope(actor))).map(async (f) => shapeFiber(await signImages(f))))
     },
 
     async createFiber(data, actor) {
       await assertZone(data.zoneId, actor)
       if (data.name) await assertNameFree(data.name)
-      await assertPort(data)
+      await assertPort(data, undefined, { actor })
       assertOwnedImages(data.images)
       const id = await prisma.$transaction(async (tx) => {
         const name = data.name ?? (await sequences.nextFiberName(tx))
-        const fiber = await fiberRepository.create({ ...canonicalImages(detailsOf(data)), name }, tx)
-        await saveGeometry(fiber.id, data.points, data, null, tx)
+        const fiber = await fiberRepository.create(
+          { ...canonicalImages(detailsOf(data)), name, createdById: actor.id },
+          tx,
+        )
+        await saveGeometry(fiber.id, data.points, data, null, tx, { actor, owner: actor.id })
         return fiber.id
       })
-      return getFiber(id)
+      return getFiber(id, actor)
     },
 
     async updateFiber(id, data, actor) {
-      const existing = await fiberRepository.findById(id)
-      if (!existing) throw ApiError.notFound('Fiber not found')
+      const existing = await mustFindVisible(id, actor)
       // Only when the PATCH actually moves the fiber — leaving the zone alone
       // must not fail for a surveyor who never had it in their list.
       if (data.zoneId !== undefined && data.zoneId !== existing.zoneId) {
@@ -292,7 +326,7 @@ export function createFiberService(deps) {
       if (mergedFeed(data, existing) && oltId != null) {
         throw ApiError.badRequest('A fiber fed by a splitter has no OLT port of its own')
       }
-      await assertPort({ oltId, ponPort }, id)
+      await assertPort({ oltId, ponPort }, id, { actor, keptOltId: existing.oltId })
       assertOwnedImages(data.images)
       await prisma.$transaction(async (tx) => {
         await fiberRepository.update(id, canonicalImages(detailsOf(data)), tx)
@@ -321,36 +355,39 @@ export function createFiberService(deps) {
             tx,
           )
         }
-        if (data.points) await saveGeometry(id, data.points, data, existing, tx)
+        if (data.points) {
+          await saveGeometry(id, data.points, data, existing, tx, { actor, owner: existing.createdById })
+        }
       })
-      return getFiber(id)
+      return getFiber(id, actor)
     },
 
-    async deleteFiber(id) {
-      const fiber = await fiberRepository.findById(id)
-      if (!fiber) throw ApiError.notFound('Fiber not found')
+    async deleteFiber(id, actor) {
+      const fiber = await mustFindVisible(id, actor)
       // Splitters that live on this line and nowhere else go with it; the
       // repository keeps any that are still attached to a closure.
       const lineSplitterIds = [...new Set(fiber.points.filter((p) => p.splitterId).map((p) => p.splitterId))]
       await fiberRepository.delete(id, lineSplitterIds)
     },
 
-    async setSegmentLaid(fiberId, segmentId, { fiberLaidMeters }) {
+    async setSegmentLaid(fiberId, segmentId, { fiberLaidMeters }, actor) {
+      await mustFindVisible(fiberId, actor)
       if (!(await fiberRepository.findSegment(fiberId, segmentId))) throw ApiError.notFound('Segment not found')
       await fiberRepository.updateSegment(segmentId, { fiberLaidMeters })
-      return getFiber(fiberId)
+      return getFiber(fiberId, actor)
     },
 
-    async cutFiber(fiberId, { segmentId, note }) {
+    async cutFiber(fiberId, { segmentId, note }, actor) {
+      await mustFindVisible(fiberId, actor)
       if (!(await fiberRepository.findSegment(fiberId, segmentId))) throw ApiError.notFound('Segment not found')
       await fiberRepository.cutSegment(fiberId, segmentId, note)
-      return getFiber(fiberId)
+      return getFiber(fiberId, actor)
     },
 
-    async restoreFiber(fiberId) {
-      if (!(await fiberRepository.findById(fiberId))) throw ApiError.notFound('Fiber not found')
+    async restoreFiber(fiberId, actor) {
+      await mustFindVisible(fiberId, actor)
       await fiberRepository.restoreAll(fiberId)
-      return getFiber(fiberId)
+      return getFiber(fiberId, actor)
     },
   }
 }

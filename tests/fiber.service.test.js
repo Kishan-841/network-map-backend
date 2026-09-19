@@ -1,6 +1,10 @@
 import { describe, it, expect, vi } from 'vitest'
 import { Prisma } from '@prisma/client'
-import { createFiberService } from '../src/modules/fibers/fiber.service.js'
+import { createFiberService as createRaw } from '../src/modules/fibers/fiber.service.js'
+import { asAdmin } from './setup/as-admin.js'
+
+// Run as an ADMIN: these tests are about the rules, not who may see a row.
+const createFiberService = (deps) => asAdmin(createRaw(deps))
 import { createFiberSchema, updateFiberSchema, CORE_COUNTS } from '../src/modules/fibers/fiber.schemas.js'
 import { fiberRepository as realFiberRepo } from '../src/modules/fibers/fiber.repository.js'
 import { closureRepository as realClosureRepo } from '../src/modules/closures/closure.repository.js'
@@ -87,7 +91,7 @@ function fakePopRepo(over = {}) {
   return {
     findById: vi.fn(async (id) => ({ id, name: 'POP A', latitude: 1, longitude: 1 })),
     create: vi.fn(async (d) => ({ id: 'popnew', ...d })),
-    findOltById: vi.fn(async (id) => ({ id, name: 'OLT-1', ponPortCount: 16 })),
+    findOltById: vi.fn(async (id) => ({ id, name: 'OLT-1', ponPortCount: 16, pop: { createdById: null } })),
     ...over,
   }
 }
@@ -373,6 +377,8 @@ describe('fiber service', () => {
         fiberType: 'SUB',
         inputFiberId: 'new',
         closureId: null,
+        // Belongs to the fiber's owner — here the ADMIN who drew it.
+        createdById: 'u-admin',
       },
       6,
       'tx',

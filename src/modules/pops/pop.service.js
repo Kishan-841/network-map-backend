@@ -6,6 +6,7 @@ import { zoneRepository } from '../zones/zone.repository.js'
 import { userRepository } from '../users/user.repository.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
 import { prisma } from '../../lib/prisma.js'
+import { mayOwn, ownerScope } from '../../lib/ownership.js'
 
 export function createPopService({
   popRepository,
@@ -101,9 +102,10 @@ export function createPopService({
     }
   }
 
-  async function mustFind(id) {
+  // Somebody else's POP reads exactly like one that does not exist.
+  async function mustFind(id, actor) {
     const pop = await popRepository.findById(id)
-    if (!pop) throw ApiError.notFound('POP not found')
+    if (!mayOwn(actor, pop)) throw ApiError.notFound('POP not found')
     return pop
   }
   async function assertNameFree(name, selfId) {
@@ -130,20 +132,10 @@ export function createPopService({
     }
   }
 
-  /**
-   * What a reader may see. A surveyor gets the POPs in their own zones, plus
-   * any POP recorded before zones existed — those belong to nobody yet, so
-   * hiding them would make sites disappear from a map that always had them.
-   */
-  async function listScope(actor) {
-    if (actor?.role !== 'SURVEYOR') return {}
-    const assigned = await userRepository.assignedZoneIds(actor.id)
-    return { OR: [{ zoneId: { in: assigned } }, { zoneId: null }] }
-  }
-
   return {
     async listPops(actor) {
-      const pops = await popRepository.list(await listScope(actor))
+      // The zone is recorded, but it is ownership that decides who sees a POP.
+      const pops = await popRepository.list(ownerScope(actor))
       return Promise.all(pops.map(signImages))
     },
     async createPop({ olts, devices, ...data }, actor) {
@@ -151,7 +143,7 @@ export function createPopService({
       await assertNameFree(data.name)
       assertOwnedImages(data.images)
       const id = await prisma.$transaction(async (tx) => {
-        const pop = await tx.pop.create({ data: canonicalImages(data) })
+        const pop = await tx.pop.create({ data: { ...canonicalImages(data), createdById: actor.id } })
         await syncOlts(pop.id, olts, tx)
         await syncDevices(pop.id, devices, tx)
         return pop.id
@@ -159,7 +151,7 @@ export function createPopService({
       return signImages(await popRepository.findById(id))
     },
     async updatePop(id, { olts, devices, ...data }, actor) {
-      const existing = await mustFind(id)
+      const existing = await mustFind(id, actor)
       if (data.zoneId !== undefined && data.zoneId !== existing.zoneId) {
         await assertZone(data.zoneId, actor)
       }
@@ -180,37 +172,40 @@ export function createPopService({
       }
       return signImages(pop)
     },
-    async deletePop(id) {
-      await mustFind(id)
+    async deletePop(id, actor) {
+      await mustFind(id, actor)
       if ((await popRepository.countPointsForPop(id)) > 0) {
         throw ApiError.conflict('Fibers still start at this POP — retype or delete them first')
       }
       await popRepository.delete(id)
     },
-    async addDevice(popId, data) {
-      await mustFind(popId)
+    async addDevice(popId, data, actor) {
+      await mustFind(popId, actor)
       assertDeviceRules(data)
       return popRepository.createDevice({ ...data, popId })
     },
 
-    async updateDevice(popId, deviceId, data) {
+    async updateDevice(popId, deviceId, data, actor) {
+      await mustFind(popId, actor)
       const existing = await mustFindDevice(popId, deviceId)
       assertDeviceRules({ ...existing, ...data })
       return popRepository.updateDevice(deviceId, data)
     },
 
-    async removeDevice(popId, deviceId) {
+    async removeDevice(popId, deviceId, actor) {
+      await mustFind(popId, actor)
       await mustFindDevice(popId, deviceId)
       await popRepository.deleteDevice(deviceId)
     },
 
-    async createOlt(popId, data) {
-      await mustFind(popId)
+    async createOlt(popId, data, actor) {
+      await mustFind(popId, actor)
       const clash = await popRepository.findOltByName(popId, data.name)
       if (clash) throw ApiError.conflict('An OLT with this name already exists at this POP')
       return popRepository.createOlt({ ...data, popId })
     },
-    async updateOlt(popId, oltId, data) {
+    async updateOlt(popId, oltId, data, actor) {
+      await mustFind(popId, actor)
       await mustFindOlt(popId, oltId)
       if (data.ponPortCount != null) {
         const used = await popRepository.maxUsedPort(oltId)
@@ -220,7 +215,8 @@ export function createPopService({
       }
       return popRepository.updateOlt(oltId, data)
     },
-    async deleteOlt(popId, oltId) {
+    async deleteOlt(popId, oltId, actor) {
+      await mustFind(popId, actor)
       await mustFindOlt(popId, oltId)
       if ((await popRepository.countFibersForOlt(oltId)) > 0) {
         throw ApiError.conflict('Fibers are assigned to this OLT')

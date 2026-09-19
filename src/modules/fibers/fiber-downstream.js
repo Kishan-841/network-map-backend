@@ -14,7 +14,7 @@ export async function collectDownstream({ fiber, splittersFedBy, loadFiber }) {
       if (!(s.closureId ? laterClosures.has(s.closureId) : laterSplitters.has(s.id))) continue
       for (const o of s.outputs) {
         if (o.toBuilding) buildings.set(o.toBuilding.id, o.toBuilding)
-        if (o.toFiber) { fibers.set(o.toFiber.id, { id: o.toFiber.id, name: o.toFiber.name }); await walk(await loadFiber(o.toFiber.id), -1, depth + 1) }
+        if (o.toFiber) { fibers.set(o.toFiber.id, { id: o.toFiber.id, name: o.toFiber.name, createdById: o.toFiber.createdById ?? null }); await walk(await loadFiber(o.toFiber.id), -1, depth + 1) }
       }
     }
   }

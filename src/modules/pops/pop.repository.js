@@ -16,7 +16,8 @@ export const popRepository = {
   update: (id, data, tx = prisma) => tx.pop.update({ where: { id }, data, include: withOlts }),
   delete: (id) => prisma.pop.delete({ where: { id } }),
   createOlt: (data) => prisma.olt.create({ data }),
-  findOltById: (id) => prisma.olt.findUnique({ where: { id } }),
+  // With its POP's owner: an OLT is only as visible as the POP it stands in.
+  findOltById: (id) => prisma.olt.findUnique({ where: { id }, include: { pop: { select: { createdById: true } } } }),
   findOltByName: (popId, name) => prisma.olt.findFirst({ where: { popId, name } }),
   updateOlt: (id, data) => prisma.olt.update({ where: { id }, data }),
   deleteOlt: (id) => prisma.olt.delete({ where: { id } }),

@@ -11,7 +11,7 @@ export const FIBER_INCLUDE = {
 }
 
 export const fiberRepository = {
-  list: () => prisma.fiber.findMany({ orderBy: { name: 'asc' }, include: FIBER_INCLUDE }),
+  list: (where = {}) => prisma.fiber.findMany({ where, orderBy: { name: 'asc' }, include: FIBER_INCLUDE }),
   findById: (id, tx = prisma) => tx.fiber.findUnique({ where: { id }, include: FIBER_INCLUDE }),
   findByName: (name) => prisma.fiber.findFirst({ where: { name: { equals: name, mode: 'insensitive' } } }),
   // findUnique rejects null components in a compound unique key — guard rather than let Prisma throw.
@@ -54,7 +54,7 @@ export const fiberRepository = {
     prisma.fiberSegment.updateMany({ where: { fiberId }, data: { isCut: false, cutAt: null, cutNote: null } }),
     prisma.fiber.update({ where: { id: fiberId }, data: { status: 'LIVE' } }),
   ]),
-  splittersFedBy: (fiberId) => prisma.splitter.findMany({ where: { inputFiberId: fiberId }, include: { closure: { select: { id: true, code: true } }, outputs: { orderBy: { portNo: 'asc' }, include: { toFiber: { select: { id: true, name: true, status: true } }, toBuilding: { select: { id: true, buildingName: true } } } } } }),
+  splittersFedBy: (fiberId) => prisma.splitter.findMany({ where: { inputFiberId: fiberId }, include: { closure: { select: { id: true, code: true } }, outputs: { orderBy: { portNo: 'asc' }, include: { toFiber: { select: { id: true, name: true, status: true, createdById: true } }, toBuilding: { select: { id: true, buildingName: true } } } } } }),
   /** The SplitterOutput (with its splitter/closure/inputFiber) that feeds this fiber, or null. */
   fedBy: (fiberId) => prisma.fiber.findUnique({ where: { id: fiberId }, select: { fedBy: FIBER_INCLUDE.fedBy } }).then((r) => r?.fedBy ?? null),
 }

@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createClosureService } from '../src/modules/closures/closure.service.js'
+import { createClosureService as createRaw } from '../src/modules/closures/closure.service.js'
+import { asAdmin } from './setup/as-admin.js'
+
+// Run as an ADMIN: these tests are about the rules, not who may see a row.
+const createClosureService = (deps) => asAdmin(createRaw(deps))
 import { closureRepository as realRepo } from '../src/modules/closures/closure.repository.js'
 
 function fakeRepo(over = {}) {
@@ -29,6 +33,7 @@ function fakeRepo(over = {}) {
     delete: vi.fn(async () => {}),
     fibersThrough: vi.fn(async () => []),
     fibersEndingAt: vi.fn(async () => []),
+    findFiberOwner: vi.fn(async (id) => ({ id, createdById: null })),
     createSplitter: vi.fn(async (d, portCount) => ({ id: 'news', ...d, portCount })),
     findSplitterById: vi.fn(async (id) => (id === 's1' ? splitter : null)),
     updateSplitter: vi.fn(async (id, d) => ({ ...splitter, ...d })),

@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createPopService } from '../src/modules/pops/pop.service.js'
+import { createPopService as createRaw } from '../src/modules/pops/pop.service.js'
+import { asAdmin } from './setup/as-admin.js'
+
+// Run as an ADMIN: these tests are about the rules, not who may see a row.
+const createPopService = (deps) => asAdmin(createRaw(deps))
 import { popRepository as realRepo } from '../src/modules/pops/pop.repository.js'
 
 function fakeRepo(over = {}) {
