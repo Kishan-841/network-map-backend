@@ -28,7 +28,7 @@ export const popController = {
 
   async remove(req, res, next) {
     try {
-      await popService.deletePop(req.params.id)
+      await popService.deletePop(req.params.id, req.user)
       res.json({ success: true, data: null })
     } catch (err) {
       next(err)
@@ -37,7 +37,7 @@ export const popController = {
 
   async createOlt(req, res, next) {
     try {
-      const olt = await popService.createOlt(req.params.id, req.body)
+      const olt = await popService.createOlt(req.params.id, req.body, req.user)
       res.status(201).json({ success: true, data: olt })
     } catch (err) {
       next(err)
@@ -46,7 +46,7 @@ export const popController = {
 
   async updateOlt(req, res, next) {
     try {
-      const olt = await popService.updateOlt(req.params.id, req.params.oltId, req.body)
+      const olt = await popService.updateOlt(req.params.id, req.params.oltId, req.body, req.user)
       res.json({ success: true, data: olt })
     } catch (err) {
       next(err)
@@ -55,7 +55,7 @@ export const popController = {
 
   async deleteOlt(req, res, next) {
     try {
-      await popService.deleteOlt(req.params.id, req.params.oltId)
+      await popService.deleteOlt(req.params.id, req.params.oltId, req.user)
       res.json({ success: true, data: null })
     } catch (err) {
       next(err)
@@ -64,7 +64,7 @@ export const popController = {
 
   async addDevice(req, res, next) {
     try {
-      const device = await popService.addDevice(req.params.id, req.body)
+      const device = await popService.addDevice(req.params.id, req.body, req.user)
       res.status(201).json({ success: true, data: device })
     } catch (err) {
       next(err)
@@ -73,7 +73,7 @@ export const popController = {
 
   async updateDevice(req, res, next) {
     try {
-      const device = await popService.updateDevice(req.params.id, req.params.deviceId, req.body)
+      const device = await popService.updateDevice(req.params.id, req.params.deviceId, req.body, req.user)
       res.json({ success: true, data: device })
     } catch (err) {
       next(err)
@@ -82,7 +82,7 @@ export const popController = {
 
   async deleteDevice(req, res, next) {
     try {
-      await popService.removeDevice(req.params.id, req.params.deviceId)
+      await popService.removeDevice(req.params.id, req.params.deviceId, req.user)
       res.json({ success: true, data: null })
     } catch (err) {
       next(err)

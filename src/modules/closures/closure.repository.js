@@ -20,7 +20,7 @@ const withDetail = {
 async function fibersThrough(closureId) {
   const points = await prisma.fiberPoint.findMany({
     where: { closureId },
-    include: { fiber: { select: { id: true, name: true, coreCount: true, status: true } } },
+    include: { fiber: { select: { id: true, name: true, coreCount: true, status: true, createdById: true } } },
   })
   const maxSeqs = await prisma.fiberPoint.groupBy({
     by: ['fiberId'],
@@ -32,13 +32,15 @@ async function fibersThrough(closureId) {
 }
 
 export const closureRepository = {
-  list: () => prisma.closure.findMany({ orderBy: { code: 'asc' }, include: withDetail }),
+  list: (where = {}) => prisma.closure.findMany({ where, orderBy: { code: 'asc' }, include: withDetail }),
   findById: (id) => prisma.closure.findUnique({ where: { id }, include: withDetail }),
   create: (data, tx = prisma) => tx.closure.create({ data, include: withDetail }),
   update: (id, data, tx = prisma) => tx.closure.update({ where: { id }, data, include: withDetail }),
   delete: (id) => prisma.closure.delete({ where: { id } }),
 
   fibersThrough,
+  /** Just enough of a fiber to decide whether the reader may use it. */
+  findFiberOwner: (id) => prisma.fiber.findUnique({ where: { id }, select: { id: true, createdById: true } }),
   fibersEndingAt: async (closureId) =>
     (await fibersThrough(closureId)).filter((x) => x.pointSeq === x.maxSeq).map((x) => x.fiber),
 

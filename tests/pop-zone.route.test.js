@@ -101,8 +101,10 @@ describe('a surveyor only uses their own zones', () => {
   })
 })
 
+// The zone is recorded, but it no longer decides who sees a POP: its maker
+// and an ADMIN do (network-ownership.route.test.js covers the rule itself).
 describe('who sees which POPs', () => {
-  it('shows a surveyor the POPs in their zones, and hides other zones', async () => {
+  it('shows a surveyor the POPs they made, not one an ADMIN made elsewhere', async () => {
     if (otherZoneId === myZoneId) return
     const theirs = await request(app)
       .post('/api/v1/pops')
@@ -117,13 +119,15 @@ describe('who sees which POPs', () => {
     expect(names).not.toContain(`PZ elsewhere-${STAMP}`)
   })
 
-  it('still shows a POP that has no zone yet — nothing vanishes from an old map', async () => {
+  it('hides a POP nobody can be traced to — that one is the ADMIN\'s alone', async () => {
     const legacy = await prisma.pop.create({
       data: { name: `PZ legacy-${STAMP}`, latitude: 18.5, longitude: 73.8 },
     })
     made.push(legacy.id)
     const list = await request(app).get('/api/v1/pops').set(...auth(IDS.mine))
-    expect(list.body.data.map((p) => p.name)).toContain(`PZ legacy-${STAMP}`)
+    expect(list.body.data.map((p) => p.name)).not.toContain(`PZ legacy-${STAMP}`)
+    const adminList = await request(app).get('/api/v1/pops').set(...auth(IDS.admin))
+    expect(adminList.body.data.map((p) => p.name)).toContain(`PZ legacy-${STAMP}`)
   })
 
   it('shows an ADMIN every POP, whatever the zone', async () => {

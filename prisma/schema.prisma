@@ -78,6 +78,10 @@ model User {
   updatedAt    DateTime   @updatedAt
   buildings    Building[]
   /// Zones a SURVEYOR may work in; unused for other roles.
+  fibersCreated    Fiber[]    @relation("FiberCreatedBy")
+  closuresCreated  Closure[]  @relation("ClosureCreatedBy")
+  popsCreated      Pop[]      @relation("PopCreatedBy")
+  splittersCreated Splitter[] @relation("SplitterCreatedBy")
   assignedZones Zone[]    @relation("UserAssignedZones")
   /// City + pincodes an ACQUISITION_AGENT covers; unused for other roles.
   pincodes     UserPincode[]
@@ -211,6 +215,11 @@ model Pop {
   upsBatteryCount Int?
   /// Photos of the rack, as upload-API URLs — same shape as Fiber.images.
   images    Json?
+  /// Who made it. Only they and an ADMIN can see or change it. Null only for
+  /// rows the migration could not trace to anyone — those are ADMIN's alone.
+  createdById String?
+  createdBy   User?    @relation("PopCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   olts      Olt[]
@@ -283,6 +292,10 @@ model Fiber {
   zone       Zone?       @relation(fields: [zoneId], references: [id], onDelete: SetNull)
   notes      String?
   images     Json?                             // upload URLs from our uploads API only
+  /// Who made it. Only they and an ADMIN can see or change it. Null only for
+  /// rows the migration could not trace to anyone — those are ADMIN's alone.
+  createdById String?
+  createdBy   User?    @relation("FiberCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
   points     FiberPoint[]
@@ -350,6 +363,10 @@ model Closure {
   buildingId String?
   building   Building? @relation(fields: [buildingId], references: [id], onDelete: SetNull)
   notes      String?
+  /// Who made it. Only they and an ADMIN can see or change it. Null only for
+  /// rows the migration could not trace to anyone — those are ADMIN's alone.
+  createdById String?
+  createdBy   User?    @relation("ClosureCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
   points     FiberPoint[]
@@ -370,6 +387,10 @@ model Splitter {
   fiberType    String?                         // 'MAIN' | 'SUB'
   inputFiberId String?
   inputFiber   Fiber?           @relation("SplitterInput", fields: [inputFiberId], references: [id], onDelete: SetNull)
+  /// Who made it. Only they and an ADMIN can see or change it. Null only for
+  /// rows the migration could not trace to anyone — those are ADMIN's alone.
+  createdById String?
+  createdBy   User?    @relation("SplitterCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt    DateTime         @default(now())
   outputs      SplitterOutput[]
   points       FiberPoint[]
