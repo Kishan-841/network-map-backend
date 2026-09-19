@@ -3,7 +3,14 @@ import { requireAuth, requireRole, requireFiberWrite } from '../../middleware/au
 import { validateBody } from '../../middleware/validate.js'
 import { audit } from '../system-logs/audit.js'
 import { popRepository } from './pop.repository.js'
-import { createPopSchema, updatePopSchema, createOltSchema, updateOltSchema } from './pop.schemas.js'
+import {
+  createPopSchema,
+  updatePopSchema,
+  createOltSchema,
+  updateOltSchema,
+  createPopDeviceSchema,
+  updatePopDeviceSchema,
+} from './pop.schemas.js'
 import { popController } from './pop.controller.js'
 
 export const popRoutes = Router()
@@ -65,4 +72,29 @@ popRoutes.delete(
   WRITE,
   audit('Pop', 'OltDelete', { recordId: (req) => req.params.id }),
   popController.deleteOlt,
+)
+
+// Switches, Mikrotiks and FMS units — one route family, the kind is in the body.
+popRoutes.post(
+  '/:id/devices',
+  WRITE,
+  audit('Pop', 'DeviceCreate', {
+    recordId: (req) => req.params.id,
+    describe: (req) => `${req.body?.kind ?? 'Device'} '${req.body?.label ?? req.body?.ipAddress ?? ''}' added`,
+  }),
+  validateBody(createPopDeviceSchema),
+  popController.addDevice,
+)
+popRoutes.patch(
+  '/:id/devices/:deviceId',
+  WRITE,
+  audit('Pop', 'DeviceUpdate', { recordId: (req) => req.params.id }),
+  validateBody(updatePopDeviceSchema),
+  popController.updateDevice,
+)
+popRoutes.delete(
+  '/:id/devices/:deviceId',
+  WRITE,
+  audit('Pop', 'DeviceDelete', { recordId: (req) => req.params.id }),
+  popController.deleteDevice,
 )

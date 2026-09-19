@@ -24,10 +24,25 @@ function fakeRepo(over = {}) {
   }
   return repo
 }
+// A POP now saves its OLTs and devices in the same transaction as itself, so
+// the service needs a prisma to open one. Nothing here passes those lists, so
+// the sync helpers return immediately and only pop.create/update is reached.
+const fakePrisma = (over = {}) => ({
+  $transaction: (fn) =>
+    fn({
+      pop: { create: async (args) => ({ id: 'pop1', ...args.data }), update: async () => ({}) },
+      olt: { findMany: async () => [], create: async () => ({}), update: async () => ({}), delete: async () => ({}) },
+      popDevice: { deleteMany: async () => ({}), create: async () => ({}), update: async () => ({}) },
+      fiber: { count: async () => 0 },
+      ...over,
+    }),
+})
+
 const svc = (over) =>
   createPopService({
     popRepository: fakeRepo(over),
     fiberPointRepository: { updatePositionForPop: vi.fn(async () => 0) },
+    prisma: fakePrisma(),
   })
 
 describe('pop service', () => {
@@ -69,7 +84,11 @@ describe('pop service', () => {
 
   it('moving a POP rewrites its fiber points', async () => {
     const fp = { updatePositionForPop: vi.fn(async () => 1) }
-    const s = createPopService({ popRepository: fakeRepo(), fiberPointRepository: fp })
+    const s = createPopService({
+      popRepository: fakeRepo(),
+      fiberPointRepository: fp,
+      prisma: fakePrisma(),
+    })
     await s.updatePop('pop1', { latitude: 18.6, longitude: 73.9 })
     expect(fp.updatePositionForPop).toHaveBeenCalledWith('pop1', {
       latitude: 18.6,
