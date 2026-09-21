@@ -55,6 +55,8 @@ describe('auth middleware', () => {
       role: 'SURVEYOR',
       canManageFiber: false,
       canEditBuildings: false,
+      // The zones they work — what fiber, POP and closure visibility reads.
+      zoneIds: [],
     })
   })
 
