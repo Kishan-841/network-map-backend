@@ -104,12 +104,26 @@ const deviceFields = z.object({
     .refine((v) => v == null || FMS_PORT_COUNTS.includes(v), 'FMS ports must be 12, 24, 48 or 96'),
 })
 
+/**
+ * A device is worth keeping if it carries anything at all — a name, an IP, a
+ * model, a speed or a port count. None of those is individually required: a
+ * switch known only by its model, or a Mikrotik with just a label, is real
+ * kit worth recording, and dropping it silently is how a survey loses data.
+ * Only a wholly empty row is refused, so a stray "Add switch" click cannot
+ * create a blank device.
+ */
+export function deviceHasContent(d) {
+  const filled = (v) => v != null && String(v).trim() !== ''
+  return filled(d.label) || filled(d.ipAddress) || filled(d.model) || filled(d.speed) || d.portCount != null
+}
+
 function deviceRules(d, ctx) {
-  if ((d.kind === 'SWITCH' || d.kind === 'MIKROTIK') && !d.ipAddress) {
-    ctx.addIssue({ code: 'custom', path: ['ipAddress'], message: 'An address is what we came for' })
-  }
-  if (d.kind === 'FMS' && d.portCount == null) {
-    ctx.addIssue({ code: 'custom', path: ['portCount'], message: 'How many ports does it have?' })
+  if (!deviceHasContent(d)) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['label'],
+      message: 'Record at least a name, IP, model, speed or port count',
+    })
   }
 }
 

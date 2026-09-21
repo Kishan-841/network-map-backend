@@ -107,11 +107,28 @@ describe('the boxes in the rack', () => {
     expect(switches).toHaveLength(2)
   })
 
-  it('wants an address on a switch, because that is the point of recording it', async () => {
+  it('keeps a switch known only by its model — no IP is not a reason to drop it', async () => {
     const res = await request(app)
       .post(`/api/v1/pops/${popId}/devices`)
       .set(...auth)
-      .send({ kind: 'SWITCH', label: 'no ip' })
+      .send({ kind: 'SWITCH', label: 'model only', model: 'CRS326', speed: '10G' })
+    expect(res.status).toBe(201)
+    expect(res.body.data).toMatchObject({ model: 'CRS326', speed: '10G', ipAddress: null })
+  })
+
+  it('keeps a Mikrotik with just a name', async () => {
+    const res = await request(app)
+      .post(`/api/v1/pops/${popId}/devices`)
+      .set(...auth)
+      .send({ kind: 'MIKROTIK', label: 'RB by the door' })
+    expect(res.status).toBe(201)
+  })
+
+  it('refuses a device with nothing filled in at all', async () => {
+    const res = await request(app)
+      .post(`/api/v1/pops/${popId}/devices`)
+      .set(...auth)
+      .send({ kind: 'SWITCH' })
     expect(res.status).toBe(400)
   })
 
@@ -123,7 +140,7 @@ describe('the boxes in the rack', () => {
     expect(res.status).toBe(400)
   })
 
-  it('takes an FMS by its port count, and refuses a count we do not stock', async () => {
+  it('takes an FMS by its port count, keeps one known only by name, and refuses a count we do not stock', async () => {
     const ok = await request(app)
       .post(`/api/v1/pops/${popId}/devices`)
       .set(...auth)
@@ -134,11 +151,12 @@ describe('the boxes in the rack', () => {
       .set(...auth)
       .send({ kind: 'FMS', portCount: 36 })
     expect(bad.status).toBe(400)
-    const none = await request(app)
+    // A port count we do not know yet is not a reason to lose the FMS.
+    const portless = await request(app)
       .post(`/api/v1/pops/${popId}/devices`)
       .set(...auth)
       .send({ kind: 'FMS', label: 'portless' })
-    expect(none.status).toBe(400)
+    expect(portless.status).toBe(201)
   })
 
   it('edits and removes one', async () => {

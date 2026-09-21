@@ -7,6 +7,7 @@ import { userRepository } from '../users/user.repository.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
 import { prisma } from '../../lib/prisma.js'
 import { canSeeFiber, zoneScope } from '../../lib/visibility.js'
+import { deviceHasContent } from './pop.schemas.js'
 
 export function createPopService({
   popRepository,
@@ -89,16 +90,14 @@ export function createPopService({
   }
 
   /**
-   * What each kind must carry. Re-checked here as well as in the schema,
-   * because a PATCH is a fragment: clearing the address of a switch has to
-   * fail even though the fragment itself looks fine.
+   * A device must carry something. Re-checked here as well as in the schema,
+   * because a PATCH is a fragment: a device edited down to nothing at all has
+   * to fail even though the fragment itself looks fine. No single field is
+   * required — a switch known only by its model is kept, not dropped.
    */
   function assertDeviceRules(device) {
-    if ((device.kind === 'SWITCH' || device.kind === 'MIKROTIK') && !device.ipAddress) {
-      throw ApiError.badRequest('An address is what we came for')
-    }
-    if (device.kind === 'FMS' && device.portCount == null) {
-      throw ApiError.badRequest('How many ports does it have?')
+    if (!deviceHasContent(device)) {
+      throw ApiError.badRequest('Record at least a name, IP, model, speed or port count')
     }
   }
 
