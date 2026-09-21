@@ -25,6 +25,9 @@ export async function requireAuth(req, res, next) {
       role: user.role,
       canManageFiber: user.canManageFiber === true,
       canEditBuildings: user.canEditBuildings === true,
+      // The zones they work. Fiber, POP and closure visibility reads these,
+      // and `findById` already loads them — no extra query per request.
+      zoneIds: (user.assignedZones ?? []).map((zone) => zone.id),
     }
     next()
   } catch (err) {

@@ -11,6 +11,7 @@ const withOlts = {
 export const popRepository = {
   list: (where = {}) => prisma.pop.findMany({ where, orderBy: { name: 'asc' }, include: withOlts }),
   findById: (id) => prisma.pop.findUnique({ where: { id }, include: withOlts }),
+  findVisible: (id, where = {}) => prisma.pop.findFirst({ where: { id, ...where }, include: withOlts }),
   /**
    * Everything the detail drawer shows: each OLT with the fibers on its ports,
    * and every fiber that has a point at this POP. Owners come along so the
@@ -27,7 +28,7 @@ export const popRepository = {
             _count: { select: { fibers: true } },
             fibers: {
               orderBy: { ponPort: 'asc' },
-              select: { id: true, name: true, ponPort: true, coreCount: true, createdById: true },
+              select: { id: true, name: true, ponPort: true, coreCount: true, createdById: true, zoneId: true },
             },
           },
         },
@@ -37,7 +38,7 @@ export const popRepository = {
     prisma.fiber.findMany({
       where: { points: { some: { popId } } },
       orderBy: { name: 'asc' },
-      select: { id: true, name: true, coreCount: true, status: true, createdById: true },
+      select: { id: true, name: true, coreCount: true, status: true, createdById: true, zoneId: true },
     }),
   findByName: (name) =>
     prisma.pop.findFirst({ where: { name: { equals: name, mode: 'insensitive' } } }),
@@ -45,8 +46,10 @@ export const popRepository = {
   update: (id, data, tx = prisma) => tx.pop.update({ where: { id }, data, include: withOlts }),
   delete: (id) => prisma.pop.delete({ where: { id } }),
   createOlt: (data) => prisma.olt.create({ data }),
-  // With its POP's owner: an OLT is only as visible as the POP it stands in.
-  findOltById: (id) => prisma.olt.findUnique({ where: { id }, include: { pop: { select: { createdById: true } } } }),
+  // An OLT is only as visible as the POP it stands in.
+  findOltById: (id) =>
+    prisma.olt.findUnique({ where: { id }, include: { pop: { select: { createdById: true, zoneId: true } } } }),
+  findOltVisible: (id, popWhere = {}) => prisma.olt.findFirst({ where: { id, pop: popWhere } }),
   findOltByName: (popId, name) => prisma.olt.findFirst({ where: { popId, name } }),
   updateOlt: (id, data) => prisma.olt.update({ where: { id }, data }),
   deleteOlt: (id) => prisma.olt.delete({ where: { id } }),

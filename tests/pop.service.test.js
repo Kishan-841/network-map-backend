@@ -26,6 +26,10 @@ function fakeRepo(over = {}) {
     countFibersForOlt: vi.fn(async () => 0),
     ...over,
   }
+  // The scoped reads mirror the plain ones unless a test overrides them: the
+  // scope itself is proved end to end in network-visibility.route.test.js,
+  // and these unit tests run as an ADMIN, whose scope is everything.
+  repo.findVisible = over.findVisible ?? repo.findById
   return repo
 }
 // A POP now saves its OLTs and devices in the same transaction as itself, so

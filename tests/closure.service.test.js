@@ -33,7 +33,7 @@ function fakeRepo(over = {}) {
     delete: vi.fn(async () => {}),
     fibersThrough: vi.fn(async () => []),
     fibersEndingAt: vi.fn(async () => []),
-    findFiberOwner: vi.fn(async (id) => ({ id, createdById: null })),
+    findFiberOwner: vi.fn(async (id) => ({ id, createdById: null, zoneId: null })),
     createSplitter: vi.fn(async (d, portCount) => ({ id: 'news', ...d, portCount })),
     findSplitterById: vi.fn(async (id) => (id === 's1' ? splitter : null)),
     updateSplitter: vi.fn(async (id, d) => ({ ...splitter, ...d })),
@@ -43,6 +43,11 @@ function fakeRepo(over = {}) {
     claimSplitterInput: vi.fn(async () => ({ count: 0 })),
     ...over,
   }
+  // The scoped reads mirror the plain ones unless a test overrides them: the
+  // scope itself is proved end to end in network-visibility.route.test.js,
+  // and these unit tests run as an ADMIN, whose scope is everything.
+  repo.findVisible = over.findVisible ?? repo.findById
+  repo.findSplitterVisible = over.findSplitterVisible ?? repo.findSplitterById
   return repo
 }
 
