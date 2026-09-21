@@ -6,7 +6,7 @@ import { zoneRepository } from '../zones/zone.repository.js'
 import { userRepository } from '../users/user.repository.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
 import { prisma } from '../../lib/prisma.js'
-import { mayOwn, ownerScope } from '../../lib/ownership.js'
+import { canSeeFiber, zoneScope } from '../../lib/visibility.js'
 
 export function createPopService({
   popRepository,
@@ -102,10 +102,10 @@ export function createPopService({
     }
   }
 
-  // Somebody else's POP reads exactly like one that does not exist.
+  // Out of the reader's zones reads exactly like one that does not exist.
   async function mustFind(id, actor) {
-    const pop = await popRepository.findById(id)
-    if (!mayOwn(actor, pop)) throw ApiError.notFound('POP not found')
+    const pop = await popRepository.findVisible(id, zoneScope(actor))
+    if (!pop) throw ApiError.notFound('POP not found')
     return pop
   }
   async function assertNameFree(name, selfId) {
@@ -137,13 +137,13 @@ export function createPopService({
     async getPop(id, actor) {
       await mustFind(id, actor)
       const pop = await popRepository.findDetail(id)
-      const fibers = (await popRepository.fibersAtPop(id)).filter((f) => mayOwn(actor, f))
-      const olts = pop.olts.map((olt) => ({ ...olt, fibers: olt.fibers.filter((f) => mayOwn(actor, f)) }))
+      const fibers = (await popRepository.fibersAtPop(id)).filter((f) => canSeeFiber(actor, f))
+      const olts = pop.olts.map((olt) => ({ ...olt, fibers: olt.fibers.filter((f) => canSeeFiber(actor, f)) }))
       return signImages({ ...pop, olts, fibers })
     },
     async listPops(actor) {
-      // The zone is recorded, but it is ownership that decides who sees a POP.
-      const pops = await popRepository.list(ownerScope(actor))
+      // The zone decides who sees a POP; your own work stays yours either way.
+      const pops = await popRepository.list(zoneScope(actor))
       return Promise.all(pops.map(signImages))
     },
     async createPop({ olts, devices, ...data }, actor) {

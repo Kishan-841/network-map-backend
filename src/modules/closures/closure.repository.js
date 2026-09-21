@@ -21,7 +21,7 @@ const withDetail = {
 async function fibersThrough(closureId) {
   const points = await prisma.fiberPoint.findMany({
     where: { closureId },
-    include: { fiber: { select: { id: true, name: true, coreCount: true, status: true, createdById: true } } },
+    include: { fiber: { select: { id: true, name: true, coreCount: true, status: true, createdById: true, zoneId: true } } },
   })
   const maxSeqs = await prisma.fiberPoint.groupBy({
     by: ['fiberId'],
@@ -35,13 +35,15 @@ async function fibersThrough(closureId) {
 export const closureRepository = {
   list: (where = {}) => prisma.closure.findMany({ where, orderBy: { code: 'asc' }, include: withDetail }),
   findById: (id) => prisma.closure.findUnique({ where: { id }, include: withDetail }),
+  findVisible: (id, where = {}) => prisma.closure.findFirst({ where: { id, ...where }, include: withDetail }),
   create: (data, tx = prisma) => tx.closure.create({ data, include: withDetail }),
   update: (id, data, tx = prisma) => tx.closure.update({ where: { id }, data, include: withDetail }),
   delete: (id) => prisma.closure.delete({ where: { id } }),
 
   fibersThrough,
   /** Just enough of a fiber to decide whether the reader may use it. */
-  findFiberOwner: (id) => prisma.fiber.findUnique({ where: { id }, select: { id: true, createdById: true } }),
+  findFiberOwner: (id) =>
+    prisma.fiber.findUnique({ where: { id }, select: { id: true, createdById: true, zoneId: true } }),
   fibersEndingAt: async (closureId) =>
     (await fibersThrough(closureId)).filter((x) => x.pointSeq === x.maxSeq).map((x) => x.fiber),
 
@@ -55,6 +57,8 @@ export const closureRepository = {
       include: { outputs: outputsWithTargets },
     }),
   findSplitterById: (id) => prisma.splitter.findUnique({ where: { id }, include: { outputs: true, _count: { select: { points: true } } } }),
+  findSplitterVisible: (id, where = {}) =>
+    prisma.splitter.findFirst({ where: { id, ...where }, include: { outputs: true, _count: { select: { points: true } } } }),
   updateSplitter: (id, data, newPortCount) => {
     if (!newPortCount) return prisma.splitter.update({ where: { id }, data, include: { outputs: true } })
     return prisma.$transaction(async (tx) => {

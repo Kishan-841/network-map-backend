@@ -55,7 +55,7 @@ const splitterFeeding = (toFiberId = 'f1') =>
   })
 
 function fakeFiberRepo(over = {}) {
-  return {
+  const repo = {
     list: vi.fn(async () => [existingFiber()]),
     findById: vi.fn(async (id) => (id === 'ghost' ? null : existingFiber())),
     findByName: vi.fn(async () => null),
@@ -72,10 +72,19 @@ function fakeFiberRepo(over = {}) {
     fedBy: vi.fn(async () => null),
     ...over,
   }
+  return mirrorScoped(repo, over, [['findVisible', 'findById']])
+}
+
+// The scoped reads mirror the plain ones unless a test overrides them: the
+// scope itself is proved end to end in network-visibility.route.test.js, and
+// these unit tests run as an ADMIN, whose scope is everything.
+const mirrorScoped = (repo, over, pairs) => {
+  for (const [scoped, plain] of pairs) repo[scoped] = over[scoped] ?? repo[plain]
+  return repo
 }
 
 function fakeClosureRepo(over = {}) {
-  return {
+  const repo = {
     findById: vi.fn(async (id) => ({ id, code: 'JC-0001', latitude: 1.01, longitude: 1.01 })),
     create: vi.fn(async (d) => ({ id: 'cnew', ...d })),
     findSplitterById: vi.fn(async () => null),
@@ -85,15 +94,23 @@ function fakeClosureRepo(over = {}) {
     claimSplitterInput: vi.fn(async () => ({ count: 0 })),
     ...over,
   }
+  return mirrorScoped(repo, over, [
+    ['findVisible', 'findById'],
+    ['findSplitterVisible', 'findSplitterById'],
+  ])
 }
 
 function fakePopRepo(over = {}) {
-  return {
+  const repo = {
     findById: vi.fn(async (id) => ({ id, name: 'POP A', latitude: 1, longitude: 1 })),
     create: vi.fn(async (d) => ({ id: 'popnew', ...d })),
-    findOltById: vi.fn(async (id) => ({ id, name: 'OLT-1', ponPortCount: 16, pop: { createdById: null } })),
+    findOltById: vi.fn(async (id) => ({ id, name: 'OLT-1', ponPortCount: 16, pop: { createdById: null, zoneId: null } })),
     ...over,
   }
+  return mirrorScoped(repo, over, [
+    ['findVisible', 'findById'],
+    ['findOltVisible', 'findOltById'],
+  ])
 }
 
 const fakeBuildingRepo = (over = {}) => ({

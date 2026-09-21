@@ -6,7 +6,7 @@ import { getStorageProvider } from '../../lib/storage/index.js'
 import { nextFiberName, nextClosureCode, nextSplitterCode } from '../../lib/sequences.js'
 import { deriveSegments, carryForward, keyedSegments } from './fiber-geometry.js'
 import { collectDownstream } from './fiber-downstream.js'
-import { mayOwn, ownerScope } from '../../lib/ownership.js'
+import { canSeeFiber, closureScope, splitterScope, zoneScope } from '../../lib/visibility.js'
 import { fiberRepository } from './fiber.repository.js'
 import { closureRepository } from '../closures/closure.repository.js'
 import { RATIO_PORTS } from '../closures/closure.schemas.js'
@@ -87,11 +87,14 @@ export function createFiberService(deps) {
    * `owner` is who anything minted here belongs to — the fiber's owner, not
    * whoever pressed Save, so an ADMIN adding a closure to a surveyor's line
    * leaves the surveyor able to see what is on their own cable. An existing
-   * POP/closure/splitter must be one the actor may see, unless it is already
-   * on this line (`onLine`): re-saving a fiber an ADMIN extended must not fail.
+   * POP/closure/splitter must be one the actor may see — its zone, or theirs —
+   * unless it is already on this line (`onLine`): re-saving a fiber someone
+   * else extended must not fail.
    */
   async function resolvePoints(points, fiberId, tx, { actor, owner, onLine = new Set() }) {
-    const reachable = (row) => row && (mayOwn(actor, row) || onLine.has(row.id))
+    // Already on the line? Read it as it is. Otherwise it has to be in scope.
+    const reach = (id, findById, findVisible, scope) =>
+      onLine.has(id) ? findById(id) : findVisible(id, scope)
     // Typed points take the entity's coordinates; new closures/POPs are created here (spec §2.12 steps 2–3).
     const out = []
     for (const p of points) {
@@ -105,8 +108,8 @@ export function createFiberService(deps) {
               { name: p.newPop.name, latitude: p.latitude, longitude: p.longitude, createdById: owner },
               tx,
             )
-          : await popRepository.findById(p.popId)
-        if (!p.newPop && !reachable(pop)) throw ApiError.badRequest('POP does not exist')
+          : await reach(p.popId, popRepository.findById, popRepository.findVisible, zoneScope(actor))
+        if (!pop) throw ApiError.badRequest('POP does not exist')
         out.push({ type: 'POP', popId: pop.id, latitude: pop.latitude, longitude: pop.longitude })
       } else if (p.type === 'CLOSURE') {
         const closure = p.newClosure
@@ -125,8 +128,13 @@ export function createFiberService(deps) {
               },
               tx,
             )
-          : await closureRepository.findById(p.closureId)
-        if (!p.newClosure && !reachable(closure)) throw ApiError.badRequest('Closure does not exist')
+          : await reach(
+              p.closureId,
+              closureRepository.findById,
+              closureRepository.findVisible,
+              closureScope(actor),
+            )
+        if (!closure) throw ApiError.badRequest('Closure does not exist')
         out.push({ type: 'CLOSURE', closureId: closure.id, latitude: closure.latitude, longitude: closure.longitude })
       } else if (p.type === 'SPLITTER') {
         const splitter = p.newSplitter
@@ -146,8 +154,13 @@ export function createFiberService(deps) {
               RATIO_PORTS[p.newSplitter.ratio],
               tx,
             )
-          : await closureRepository.findSplitterById(p.splitterId)
-        if (!p.newSplitter && !reachable(splitter)) throw ApiError.badRequest('Splitter does not exist')
+          : await reach(
+              p.splitterId,
+              closureRepository.findSplitterById,
+              closureRepository.findSplitterVisible,
+              splitterScope(actor),
+            )
+        if (!splitter) throw ApiError.badRequest('Splitter does not exist')
         out.push({
           type: 'SPLITTER',
           splitterId: splitter.id,
@@ -165,11 +178,13 @@ export function createFiberService(deps) {
 
   async function assertPort(data, selfId, { actor, keptOltId } = {}) {
     if (data.oltId == null) return
-    const olt = await popRepository.findOltById(data.oltId)
-    // The OLT is only as visible as the POP it stands in.
-    if (!olt || (olt.id !== keptOltId && !mayOwn(actor, olt.pop))) {
-      throw ApiError.badRequest('OLT does not exist')
-    }
+    // The OLT is only as visible as the POP it stands in — unless the fiber
+    // already sits on this port, which a PATCH elsewhere must not disturb.
+    const olt =
+      data.oltId === keptOltId
+        ? await popRepository.findOltById(data.oltId)
+        : await popRepository.findOltVisible(data.oltId, zoneScope(actor))
+    if (!olt) throw ApiError.badRequest('OLT does not exist')
     if (data.ponPort > olt.ponPortCount) throw ApiError.badRequest(`OLT has only ${olt.ponPortCount} PON ports`)
     const taken = await fiberRepository.findUsingPort(data.oltId, data.ponPort)
     if (taken && taken.id !== selfId) throw ApiError.conflict(`Port ${data.ponPort} already feeds ${taken.name}`)
@@ -181,8 +196,11 @@ export function createFiberService(deps) {
    */
   async function assertSplitterRules(points, fromSplitterOutput, selfId, { actor, keptSplitterId } = {}) {
     if (!fromSplitterOutput) return
-    const splitter = await closureRepository.findSplitterById(fromSplitterOutput.splitterId)
-    if (!splitter || (splitter.id !== keptSplitterId && !mayOwn(actor, splitter))) throw ApiError.badRequest('Splitter does not exist')
+    const splitter =
+      fromSplitterOutput.splitterId === keptSplitterId
+        ? await closureRepository.findSplitterById(fromSplitterOutput.splitterId)
+        : await closureRepository.findSplitterVisible(fromSplitterOutput.splitterId, splitterScope(actor))
+    if (!splitter) throw ApiError.badRequest('Splitter does not exist')
     const output = splitter.outputs.find((o) => o.portNo === fromSplitterOutput.portNo)
     if (!output) throw ApiError.badRequest('That splitter has no such output')
     if (output.toFiberId && output.toFiberId !== selfId) {
@@ -262,8 +280,8 @@ export function createFiberService(deps) {
 
   /** Out of the reader's scope reads exactly like "does not exist". */
   async function mustFindVisible(id, actor) {
-    const fiber = await fiberRepository.findById(id)
-    if (!mayOwn(actor, fiber)) throw ApiError.notFound('Fiber not found')
+    const fiber = await fiberRepository.findVisible(id, zoneScope(actor))
+    if (!fiber) throw ApiError.notFound('Fiber not found')
     return fiber
   }
 
@@ -281,7 +299,7 @@ export function createFiberService(deps) {
         : null
     // The walk follows the light, whoever drew each cable; the reader is told
     // only about the cables they could open.
-    if (downstream) downstream.fibers = downstream.fibers.filter((f) => mayOwn(actor, f))
+    if (downstream) downstream.fibers = downstream.fibers.filter((f) => canSeeFiber(actor, f))
     return { ...shaped, downstream }
   }
 
@@ -289,7 +307,7 @@ export function createFiberService(deps) {
     getFiber,
 
     async listFibers(actor) {
-      return Promise.all((await fiberRepository.list(ownerScope(actor))).map(async (f) => shapeFiber(await signImages(f))))
+      return Promise.all((await fiberRepository.list(zoneScope(actor))).map(async (f) => shapeFiber(await signImages(f))))
     },
 
     async createFiber(data, actor) {
