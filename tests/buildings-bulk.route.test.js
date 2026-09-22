@@ -124,12 +124,16 @@ describe('PATCH /buildings/bulk-olt', () => {
     return jwt.sign({ sub: admin.id, role: 'ADMIN' }, env.jwtSecret, { audience: 'staff', expiresIn: '1h' })
   }
 
-  it('needs building-edit permission (403 for an unticked surveyor)', async () => {
+  it('is open to any surveyor with no edit tick — not a 403', async () => {
+    // The OLT-assign action is wider than building editing: an unticked
+    // surveyor is let through the auth gate (the service still keeps it
+    // zone-safe). A bogus OLT id therefore fails at the service (400), not 403.
     const res = await request(app)
       .patch('/api/v1/buildings/bulk-olt')
       .set('Authorization', `Bearer ${tokenFor('SURVEYOR')}`)
       .send({ ids: ['x'], oltId: 'y', ponPort: 1 })
-    expect(res.status).toBe(403)
+    expect(res.status).not.toBe(403)
+    expect(res.status).toBe(400)
   })
 
   it('rejects an empty id list, and a missing OLT', async () => {
