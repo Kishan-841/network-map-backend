@@ -220,6 +220,38 @@ export function createBuildingService({ buildingRepository, storage, userReposit
     if (!canRead(building)) throw ApiError.forbidden('You cannot change this building')
   }
 
+  /**
+   * Delete one building — shared by the single delete and the bulk delete.
+   * Throws (404 / 409) rather than swallowing, so the single route reports the
+   * exact reason and the bulk route can record it as a skip.
+   */
+  async function removeOneBuilding(id) {
+    const building = await buildingRepository.findById(id)
+    if (!building) throw ApiError.notFound('Building not found')
+    // A FiberPoint→Building reference is RESTRICT at the DB level, so an
+    // unguarded delete would fail with an opaque foreign-key error.
+    const fiberNames = await buildingRepository.fiberNamesAttachedTo(id)
+    if (fiberNames.length) {
+      throw ApiError.conflict(`Attached to fiber ${fiberNames.join(', ')} — retype that point first`)
+    }
+    // Every stored file, before the row (and its cascaded photo/permission
+    // children) disappears; the Set dedupes a permission letter held twice.
+    const urls = new Set(building.photos?.map((photo) => photo.url) ?? [])
+    if (building.permission?.documentUrl) urls.add(building.permission.documentUrl)
+    await buildingRepository.delete(id)
+    // File removal is best-effort — the record is gone either way.
+    for (const url of urls) {
+      const key = storage?.keyFromUrl(url)
+      if (!key) continue
+      try {
+        await storage.delete({ key })
+      } catch (err) {
+        console.error('File deletion failed (row removed):', err.message)
+      }
+    }
+    return building
+  }
+
   return {
     async createBuilding(input, createdById, actor) {
       // eslint-disable-next-line prefer-const -- photos is normalised below
@@ -686,37 +718,27 @@ export function createBuildingService({ buildingRepository, storage, userReposit
     },
 
     async deleteBuilding(id) {
-      const building = await buildingRepository.findById(id)
-      if (!building) throw ApiError.notFound('Building not found')
+      await removeOneBuilding(id)
+    },
 
-      // A FiberPoint→Building reference is RESTRICT at the DB level, so an
-      // unguarded delete would fail with an opaque foreign-key error. Check
-      // first so the operator gets a clear next step (retype the point).
-      const fiberNames = await buildingRepository.fiberNamesAttachedTo(id)
-      if (fiberNames.length) {
-        throw ApiError.conflict(
-          `Attached to fiber ${fiberNames.join(', ')} — retype that point first`,
-        )
-      }
-
-      // Collect every stored file before the row (and its cascaded photo/
-      // permission children) disappears. The permission letter usually exists
-      // as both a photo row and permission.documentUrl — the Set dedupes it.
-      const urls = new Set(building.photos?.map((photo) => photo.url) ?? [])
-      if (building.permission?.documentUrl) urls.add(building.permission.documentUrl)
-
-      await buildingRepository.delete(id)
-
-      // File removal is best-effort — the record is gone either way.
-      for (const url of urls) {
-        const key = storage?.keyFromUrl(url)
-        if (!key) continue
+    // ADMIN-only bulk delete of the ticked rows. Each is deleted with the very
+    // same guard as the single delete, so a building still on a fiber is
+    // skipped (with a reason) rather than force-deleted into an orphan — the
+    // caller gets counts, not an all-or-nothing failure.
+    async bulkDeleteBuildings({ ids }) {
+      const deleted = []
+      const skipped = []
+      for (const id of ids) {
+        const existing = await buildingRepository.findById(id)
+        const name = existing?.buildingName ?? id
         try {
-          await storage.delete({ key })
+          await removeOneBuilding(id)
+          deleted.push({ id, name })
         } catch (err) {
-          console.error('File deletion failed (row removed):', err.message)
+          skipped.push({ id, name, reason: err.message })
         }
       }
+      return { deletedCount: deleted.length, deleted, skipped }
     },
   }
 }

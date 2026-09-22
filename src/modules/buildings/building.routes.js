@@ -10,6 +10,7 @@ import {
   updateBuildingSchema,
   bulkBuildingsSchema,
   bulkStatusSchema,
+  bulkDeleteSchema,
 } from './building.schemas.js'
 import { buildingController } from './building.controller.js'
 import { audit } from '../system-logs/audit.js'
@@ -50,6 +51,19 @@ buildingRoutes.patch(
   }),
   validateBody(bulkStatusSchema),
   buildingController.bulkStatus,
+)
+// Bulk delete of the ticked rows. Above /:id so 'bulk-delete' is not read as an id.
+buildingRoutes.post(
+  '/bulk-delete',
+  requireRole('ADMIN'),
+  audit('Building', 'BulkDelete', {
+    describe: (req, old, body) =>
+      body?.data
+        ? `${body.data.deletedCount} building(s) deleted, ${body.data.skipped.length} skipped`
+        : 'Bulk building delete',
+  }),
+  validateBody(bulkDeleteSchema),
+  buildingController.bulkDelete,
 )
 buildingRoutes.get('/', validateQuery(listQuerySchema), buildingController.list)
 // Above /:id, or Express reads 'export' as a building id.

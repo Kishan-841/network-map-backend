@@ -105,3 +105,46 @@ describe('building service delete', () => {
     expect(repo.delete).toHaveBeenCalledWith('b1')
   })
 })
+
+describe('building service bulk delete', () => {
+  const fakeStorage = () => ({ delete: vi.fn(async () => {}), keyFromUrl: () => null })
+
+  it('deletes each ticked building and skips one still attached to a fiber', async () => {
+    const rows = {
+      b1: { id: 'b1', buildingName: 'Tower A', photos: [], permission: null },
+      b2: { id: 'b2', buildingName: 'Tower B', photos: [], permission: null },
+      b3: { id: 'b3', buildingName: 'Tower C', photos: [], permission: null },
+    }
+    const repo = {
+      findById: vi.fn(async (id) => rows[id] ?? null),
+      delete: vi.fn(async () => {}),
+      fiberNamesAttachedTo: vi.fn(async (id) => (id === 'b2' ? ['FIB-1'] : [])),
+    }
+    const service = createBuildingService({ buildingRepository: repo, storage: fakeStorage() })
+
+    const res = await service.bulkDeleteBuildings({ ids: ['b1', 'b2', 'b3'] })
+
+    expect(res.deletedCount).toBe(2)
+    expect(res.deleted.map((d) => d.id).sort()).toEqual(['b1', 'b3'])
+    expect(res.skipped).toHaveLength(1)
+    expect(res.skipped[0]).toMatchObject({ id: 'b2', name: 'Tower B' })
+    expect(res.skipped[0].reason).toContain('FIB-1')
+    expect(repo.delete).toHaveBeenCalledTimes(2)
+    expect(repo.delete).not.toHaveBeenCalledWith('b2')
+  })
+
+  it('records a missing id as skipped rather than crashing the batch', async () => {
+    const repo = {
+      findById: vi.fn(async () => null),
+      delete: vi.fn(async () => {}),
+      fiberNamesAttachedTo: vi.fn(async () => []),
+    }
+    const service = createBuildingService({ buildingRepository: repo, storage: fakeStorage() })
+
+    const res = await service.bulkDeleteBuildings({ ids: ['ghost'] })
+
+    expect(res.deletedCount).toBe(0)
+    expect(res.skipped[0].reason).toMatch(/not found/i)
+    expect(repo.delete).not.toHaveBeenCalled()
+  })
+})
