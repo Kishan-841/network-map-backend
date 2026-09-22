@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { requireAuth, requireRole, requireBuildingEdit } from '../../middleware/auth.js'
+import { requireAuth, requireRole, requireBuildingEdit, requireOltAssign } from '../../middleware/auth.js'
 import { validateBody, validateQuery } from '../../middleware/validate.js'
 import {
   createBuildingSchema,
@@ -66,10 +66,11 @@ buildingRoutes.post(
   validateBody(bulkDeleteSchema),
   buildingController.bulkDelete,
 )
-// Bulk OLT + PON mapping of the ticked buildings. Above /:id.
+// Bulk OLT + PON mapping of the ticked buildings. Above /:id. Open to every
+// coverage role (a surveyor needs no edit tick); the service keeps it zone-safe.
 buildingRoutes.patch(
   '/bulk-olt',
-  requireBuildingEdit,
+  requireOltAssign,
   audit('Building', 'BulkOltMap', {
     describe: (req, old, body) =>
       body?.data
