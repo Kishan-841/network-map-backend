@@ -116,3 +116,33 @@ describe('POST /buildings/bulk-delete', () => {
     expect(res.status).toBe(400)
   })
 })
+
+describe('PATCH /buildings/bulk-olt', () => {
+  const app = createApp()
+  const adminToken = async () => {
+    const admin = await prisma.user.findFirst({ where: { role: 'ADMIN' } })
+    return jwt.sign({ sub: admin.id, role: 'ADMIN' }, env.jwtSecret, { audience: 'staff', expiresIn: '1h' })
+  }
+
+  it('needs building-edit permission (403 for an unticked surveyor)', async () => {
+    const res = await request(app)
+      .patch('/api/v1/buildings/bulk-olt')
+      .set('Authorization', `Bearer ${tokenFor('SURVEYOR')}`)
+      .send({ ids: ['x'], oltId: 'y', ponPort: 1 })
+    expect(res.status).toBe(403)
+  })
+
+  it('rejects an empty id list, and a missing OLT', async () => {
+    const token = await adminToken()
+    const empty = await request(app)
+      .patch('/api/v1/buildings/bulk-olt')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ids: [], oltId: 'y', ponPort: 1 })
+    expect(empty.status).toBe(400)
+    const noOlt = await request(app)
+      .patch('/api/v1/buildings/bulk-olt')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ids: ['x'], ponPort: 1 })
+    expect(noOlt.status).toBe(400)
+  })
+})
