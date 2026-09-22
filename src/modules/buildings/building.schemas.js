@@ -76,6 +76,12 @@ export const bulkStatusSchema = z
     message: 'Provide either ids or a filter, not both',
   })
 
+// Bulk delete acts on the ticked rows only — never a whole filter, because a
+// delete cannot be undone. ADMIN-only at the route.
+export const bulkDeleteSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1).max(500),
+})
+
 export const listQuerySchema = z.object({
   source: z.enum(['COVERAGE', 'ACQUISITION']).optional(),
   pincode: z.string().optional(),

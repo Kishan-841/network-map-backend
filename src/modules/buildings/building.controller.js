@@ -77,6 +77,15 @@ export const buildingController = {
     }
   },
 
+  async bulkDelete(req, res, next) {
+    try {
+      const result = await buildingService.bulkDeleteBuildings(req.body, req.user)
+      res.json({ success: true, data: result })
+    } catch (err) {
+      next(err)
+    }
+  },
+
   async bulkStatus(req, res, next) {
     try {
       const result = await buildingService.bulkSetLive(req.body, req.user)

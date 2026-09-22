@@ -59,3 +59,60 @@ describe('POST /buildings/bulk', () => {
     await prisma.operator.deleteMany({ where: { name: `BulkOp-${stamp}` } })
   })
 })
+
+describe('POST /buildings/bulk-delete', () => {
+  const app = createApp()
+  const adminToken = async () => {
+    const admin = await prisma.user.findFirst({ where: { role: 'ADMIN' } })
+    return jwt.sign({ sub: admin.id, role: 'ADMIN' }, env.jwtSecret, { audience: 'staff', expiresIn: '1h' })
+  }
+
+  it('is ADMIN-only', async () => {
+    for (const role of ['SURVEYOR', 'MANAGER']) {
+      const res = await request(app)
+        .post('/api/v1/buildings/bulk-delete')
+        .set('Authorization', `Bearer ${tokenFor(role)}`)
+        .send({ ids: ['x'] })
+      expect(res.status).toBe(403)
+    }
+  })
+
+  it('deletes the ticked buildings and reports the count', async () => {
+    const stamp = Date.now()
+    const token = await adminToken()
+    const admin = await prisma.user.findFirst({ where: { role: 'ADMIN' } })
+    const make = (n) =>
+      prisma.building.create({
+        data: {
+          buildingName: `BD-${stamp}-${n}`,
+          formattedAddress: 'Test address',
+          latitude: 18.5,
+          longitude: 73.8,
+          // ACQUISITION so the parallel building-markers test (which counts
+          // COVERAGE buildings) is unaffected by these transient rows.
+          source: 'ACQUISITION',
+          createdById: admin.id,
+        },
+      })
+    const b1 = await make(1)
+    const b2 = await make(2)
+
+    const res = await request(app)
+      .post('/api/v1/buildings/bulk-delete')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ids: [b1.id, b2.id] })
+    expect(res.status).toBe(200)
+    expect(res.body.data.deletedCount).toBe(2)
+    expect(res.body.data.skipped).toHaveLength(0)
+    expect(await prisma.building.findUnique({ where: { id: b1.id } })).toBeNull()
+    expect(await prisma.building.findUnique({ where: { id: b2.id } })).toBeNull()
+  })
+
+  it('rejects an empty id list', async () => {
+    const res = await request(app)
+      .post('/api/v1/buildings/bulk-delete')
+      .set('Authorization', `Bearer ${await adminToken()}`)
+      .send({ ids: [] })
+    expect(res.status).toBe(400)
+  })
+})
