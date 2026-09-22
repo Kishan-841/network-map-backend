@@ -82,6 +82,14 @@ export const bulkDeleteSchema = z.object({
   ids: z.array(z.string().min(1)).min(1).max(500),
 })
 
+// Map the ticked buildings to one OLT + PON port. ids only (no filter). The
+// zone rules and the PON range are validated in the service against the OLT.
+export const bulkOltSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1).max(500),
+  oltId: z.string().min(1),
+  ponPort: z.number().int().min(1),
+})
+
 export const listQuerySchema = z.object({
   source: z.enum(['COVERAGE', 'ACQUISITION']).optional(),
   pincode: z.string().optional(),

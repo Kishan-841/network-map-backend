@@ -8,6 +8,15 @@ const fullInclude = {
   permission: true,
   photos: true,
   createdBy: { select: { id: true, name: true } },
+  // The OLT + PON that serve this building (Zone → Operator → OLT → PON).
+  olt: {
+    select: {
+      id: true,
+      name: true,
+      ponPortCount: true,
+      pop: { select: { id: true, name: true, zone: { select: { id: true, name: true } } } },
+    },
+  },
 }
 
 // List rows only need the zone's NAME — `zone: true` would ship the zone's
@@ -59,6 +68,14 @@ export const buildingRepository = {
     }),
   count: (where = {}) => prisma.building.count({ where }),
   updateMany: (where, data) => prisma.building.updateMany({ where, data }),
+  // Just id + zone, for the bulk OLT map's same-zone check.
+  findManyScoped: (where) => prisma.building.findMany({ where, select: { id: true, zoneId: true } }),
+  // An OLT with its POP's zone and its port count — for the bulk OLT map.
+  findOltWithZone: (id) =>
+    prisma.olt.findUnique({
+      where: { id },
+      select: { id: true, name: true, ponPortCount: true, pop: { select: { zoneId: true } } },
+    }),
   /**
    * Name/address lookup for the PARTNER portal. Coverage registry only, and a
    * deliberately narrow select — partner rows must never carry survey data.

@@ -86,6 +86,15 @@ export const buildingController = {
     }
   },
 
+  async bulkAssignOlt(req, res, next) {
+    try {
+      const result = await buildingService.bulkAssignOlt(req.body, req.user)
+      res.json({ success: true, data: result })
+    } catch (err) {
+      next(err)
+    }
+  },
+
   async markers(req, res, next) {
     try {
       const markers = await buildingService.listMarkers(req.user)
