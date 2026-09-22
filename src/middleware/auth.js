@@ -75,3 +75,20 @@ export const requireBuildingEdit = (req, res, next) => {
   if (!mayEditBuildings(req.user)) return next(ApiError.forbidden())
   next()
 }
+
+/**
+ * Assigning an OLT + PON port to buildings in bulk. Deliberately wider than
+ * building editing: EVERY coverage role may do it, a SURVEYOR without the edit
+ * tick included (the user's choice). It stays safe because the service scopes
+ * the buildings to the actor and, for a non-admin, refuses anything but one
+ * zone with an OLT in that zone — a surveyor can only map their own zone.
+ */
+export const OLT_ASSIGN_ROLES = ['ADMIN', 'MANAGER', 'SUPERVISOR', 'SURVEYOR']
+
+export const mayAssignOlt = (actor) => OLT_ASSIGN_ROLES.includes(actor?.role)
+
+export const requireOltAssign = (req, res, next) => {
+  if (!req.user) return next(ApiError.unauthorized())
+  if (!mayAssignOlt(req.user)) return next(ApiError.forbidden())
+  next()
+}
