@@ -8,6 +8,15 @@ const fullInclude = {
   permission: true,
   photos: true,
   createdBy: { select: { id: true, name: true } },
+  // The OLT + PON that serve this building (Zone → Operator → OLT → PON).
+  olt: {
+    select: {
+      id: true,
+      name: true,
+      ponPortCount: true,
+      pop: { select: { id: true, name: true, zone: { select: { id: true, name: true } } } },
+    },
+  },
 }
 
 // List rows only need the zone's NAME — `zone: true` would ship the zone's
@@ -90,6 +99,14 @@ export const buildingRepository = {
       orderBy: { createdAt: 'desc' },
       skip,
       take,
+    }),
+  // Just id + zone, for the bulk OLT map's same-zone check.
+  findManyScoped: (where) => prisma.building.findMany({ where, select: { id: true, zoneId: true } }),
+  // An OLT with its POP's zone and its port count — for the bulk OLT map.
+  findOltWithZone: (id) =>
+    prisma.olt.findUnique({
+      where: { id },
+      select: { id: true, name: true, ponPortCount: true, pop: { select: { zoneId: true } } },
     }),
   /**
    * Every matching building, lean. Deliberately unpaginated: the map is not a

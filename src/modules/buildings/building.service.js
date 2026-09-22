@@ -505,6 +505,40 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       return { count, isLive }
     },
 
+    /**
+     * Map the ticked buildings to one OLT + PON port (olt-mapping.md). The zone
+     * rule is the point of the feature: a non-admin may only map buildings that
+     * all sit in ONE zone, to an OLT that belongs to that same zone. An ADMIN
+     * may cross zones. Whatever the UI sends, this is where it is enforced.
+     */
+    async bulkAssignOlt({ ids, oltId, ponPort }, actor) {
+      const olt = await buildingRepository.findOltWithZone(oltId)
+      if (!olt) throw ApiError.badRequest('That OLT does not exist')
+      if (!Number.isInteger(ponPort) || ponPort < 1 || ponPort > olt.ponPortCount) {
+        throw ApiError.badRequest(`PON port must be between 1 and ${olt.ponPortCount}`)
+      }
+      const oltZoneId = olt.pop?.zoneId ?? null
+
+      // Only the buildings this actor may touch — the same scope the list uses.
+      const scope = await buildListWhere({}, actor)
+      const where = { AND: [scope, { id: { in: ids } }] }
+      const rows = await buildingRepository.findManyScoped(where)
+      if (rows.length === 0) throw ApiError.badRequest('None of those buildings are available to you')
+
+      if (actor?.role !== 'ADMIN') {
+        const zones = new Set(rows.map((row) => row.zoneId))
+        if (zones.size > 1) {
+          throw ApiError.badRequest('Select buildings from the same zone to assign an OLT')
+        }
+        if (!oltZoneId || oltZoneId !== rows[0].zoneId) {
+          throw ApiError.badRequest('That OLT is in a different zone from the selected buildings')
+        }
+      }
+
+      const { count } = await buildingRepository.updateMany(where, { oltId, ponPort })
+      return { count, oltId, ponPort }
+    },
+
     async updateStatus(id, { feasibleStatus, surveyStatus, isLive }) {
       const building = await buildingRepository.findById(id)
       if (!building) throw ApiError.notFound('Building not found')

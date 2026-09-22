@@ -11,6 +11,7 @@ import {
   bulkBuildingsSchema,
   bulkStatusSchema,
   bulkDeleteSchema,
+  bulkOltSchema,
 } from './building.schemas.js'
 import { buildingController } from './building.controller.js'
 import { audit } from '../system-logs/audit.js'
@@ -64,6 +65,19 @@ buildingRoutes.post(
   }),
   validateBody(bulkDeleteSchema),
   buildingController.bulkDelete,
+)
+// Bulk OLT + PON mapping of the ticked buildings. Above /:id.
+buildingRoutes.patch(
+  '/bulk-olt',
+  requireBuildingEdit,
+  audit('Building', 'BulkOltMap', {
+    describe: (req, old, body) =>
+      body?.data
+        ? `${body.data.count} building(s) mapped to an OLT on PON port ${body.data.ponPort}`
+        : 'Bulk OLT mapping',
+  }),
+  validateBody(bulkOltSchema),
+  buildingController.bulkAssignOlt,
 )
 buildingRoutes.get('/', validateQuery(listQuerySchema), buildingController.list)
 // Above /:id, or Express reads 'export' as a building id.

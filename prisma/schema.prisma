@@ -268,6 +268,7 @@ model Olt {
   model        String?
   createdAt    DateTime @default(now())
   fibers       Fiber[]
+  buildings    Building[]
   @@unique([popId, name])
 }
 
@@ -437,6 +438,12 @@ model Building {
   isLive           Boolean          @default(false)
   createdById      String
   createdBy        User             @relation(fields: [createdById], references: [id])
+  /// Which OLT + PON port serves this building (set in bulk from the Buildings
+  /// tab). Nullable: existing buildings are unmapped until someone maps them.
+  /// The OLT's zone is its POP's zone; deleting the OLT clears the mapping.
+  oltId            String?
+  olt              Olt?             @relation(fields: [oltId], references: [id], onDelete: SetNull)
+  ponPort          Int?
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
   details          BuildingDetails?
