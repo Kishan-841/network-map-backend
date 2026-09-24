@@ -79,6 +79,48 @@ export function createSalesService({ repo = salesRepository } = {}) {
       await repo.reassign({ buildingIds: ids, assignedToId, assignedById: actor.id })
       return { count: ids.length, assignedToId }
     },
+
+    /** Record a visit to a building the actor holds (or has in their pool). */
+    async recordVisit({ buildingId, note }, actor) {
+      const building = await assertBuildingInScope(buildingId, actor)
+      return repo.recordVisit({ buildingId: building.id, userId: actor.id, note: note ?? null })
+    },
+
+    /** Raise a customer inquiry; the address is snapshotted from the building. */
+    async createInquiry({ buildingId, customerName, phone, email }, actor) {
+      const building = await assertBuildingInScope(buildingId, actor)
+      return repo.createInquiry({
+        buildingId: building.id,
+        createdById: actor.id,
+        customerName,
+        phone,
+        email: email ?? null,
+        address: building.formattedAddress,
+      })
+    },
+
+    async listVisits(actor, filters = {}) {
+      const ids = await scopeIdsFor(actor)
+      if (ids !== null && ids.length === 0) return []
+      return repo.listVisits(ids, filters)
+    },
+
+    async listInquiries(actor, filters = {}) {
+      const ids = await scopeIdsFor(actor)
+      if (ids !== null && ids.length === 0) return []
+      return repo.listInquiries(ids, filters)
+    },
+  }
+
+  // A building the actor may act on: it must be in their sales scope. Anything
+  // else is a 404, never a hint that it exists.
+  async function assertBuildingInScope(buildingId, actor) {
+    const ids = await scopeIdsFor(actor)
+    const inScope = await repo.assignedInScope([buildingId], ids)
+    if (!inScope.has(buildingId)) throw ApiError.notFound('Building not found')
+    const building = await repo.buildingBasic(buildingId)
+    if (!building) throw ApiError.notFound('Building not found')
+    return building
   }
 }
 

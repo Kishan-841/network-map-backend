@@ -113,8 +113,10 @@ model User {
   teamLeaderId    String?
   teamLeader      User?   @relation("TeamLeaderReports", fields: [teamLeaderId], references: [id])
   teamMembers     User[]  @relation("TeamLeaderReports")
-  assignmentsHeld BuildingAssignment[] @relation("AssignmentHolder")
-  assignmentsMade BuildingAssignment[] @relation("AssignmentBy")
+  assignmentsHeld  BuildingAssignment[] @relation("AssignmentHolder")
+  assignmentsMade  BuildingAssignment[] @relation("AssignmentBy")
+  visitsRecorded   BuildingVisit[]      @relation("VisitBy")
+  inquiriesCreated CustomerInquiry[]    @relation("InquiryBy")
 }
 
 /// One row per pincode an acquisition agent covers (within one city).
@@ -484,6 +486,8 @@ model Building {
   splitterOutputs  SplitterOutput[]
   closures         Closure[]
   salesAssignments BuildingAssignment[]
+  salesVisits      BuildingVisit[]
+  salesInquiries   CustomerInquiry[]
 
   @@index([latitude, longitude])
   @@index([source, createdById])
@@ -507,6 +511,40 @@ model BuildingAssignment {
 
   @@index([buildingId, status])
   @@index([assignedToId, status])
+}
+
+/// A recorded visit to a building by a sales user. A visit is separate from an
+/// inquiry — someone visits many buildings and raises an inquiry only where a
+/// customer is interested.
+model BuildingVisit {
+  id         String   @id @default(cuid())
+  buildingId String
+  building   Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User     @relation("VisitBy", fields: [userId], references: [id])
+  visitedAt  DateTime @default(now())
+  note       String?
+
+  @@index([userId, visitedAt])
+  @@index([buildingId])
+}
+
+/// A lightweight customer inquiry raised in the field, for the calling team to
+/// follow up. The building address is snapshotted so the record stands alone.
+model CustomerInquiry {
+  id           String   @id @default(cuid())
+  buildingId   String
+  building     Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  createdById  String
+  createdBy    User     @relation("InquiryBy", fields: [createdById], references: [id])
+  customerName String
+  phone        String
+  email        String?
+  address      String
+  createdAt    DateTime @default(now())
+
+  @@index([buildingId])
+  @@index([createdById, createdAt])
 }
 
 model BuildingDetails {

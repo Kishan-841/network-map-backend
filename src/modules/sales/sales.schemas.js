@@ -10,3 +10,21 @@ export const assignBuildingsSchema = z.object({
 export const historyQuerySchema = z.object({
   buildingId: z.string().min(1),
 })
+
+export const recordVisitSchema = z.object({
+  buildingId: z.string().min(1),
+  note: z.string().trim().max(500).optional(),
+})
+
+// Kept deliberately simple — the calling team collects the detail later.
+export const createInquirySchema = z.object({
+  buildingId: z.string().min(1),
+  customerName: z.string().trim().min(1, 'Customer name is required').max(120),
+  phone: z.string().trim().min(6, 'Enter a valid phone number').max(20),
+  // Optional: '' from the form becomes undefined, otherwise a real email.
+  email: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.string().trim().email().optional()),
+})
+
+export const activityQuerySchema = z.object({
+  buildingId: z.string().min(1).optional(),
+})

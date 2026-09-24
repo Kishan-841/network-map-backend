@@ -86,6 +86,31 @@ export const salesRepository = {
 
   buildingExists: (id) => prisma.building.findUnique({ where: { id }, select: { id: true } }),
 
+  buildingBasic: (id) =>
+    prisma.building.findUnique({ where: { id }, select: { id: true, buildingName: true, formattedAddress: true } }),
+
+  recordVisit: (data) => prisma.buildingVisit.create({ data }),
+
+  createInquiry: (data) => prisma.customerInquiry.create({ data }),
+
+  // Scoped activity. `scopeIds` null = admin = everything; an array restricts to
+  // that team; [] would match nothing (the service short-circuits before here).
+  listVisits: (scopeIds, { buildingId } = {}) =>
+    prisma.buildingVisit.findMany({
+      where: { ...(scopeIds === null ? {} : { userId: { in: scopeIds } }), ...(buildingId ? { buildingId } : {}) },
+      orderBy: { visitedAt: 'desc' },
+      take: 500,
+      include: { user: holder, building: { select: { id: true, buildingName: true, formattedAddress: true } } },
+    }),
+
+  listInquiries: (scopeIds, { buildingId } = {}) =>
+    prisma.customerInquiry.findMany({
+      where: { ...(scopeIds === null ? {} : { createdById: { in: scopeIds } }), ...(buildingId ? { buildingId } : {}) },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+      include: { createdBy: holder, building: { select: { id: true, buildingName: true } } },
+    }),
+
   // Close every ACTIVE assignment for these buildings, then open a fresh one —
   // in one transaction, so history is preserved and a building never has two
   // ACTIVE holders.
