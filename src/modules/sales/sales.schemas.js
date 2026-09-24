@@ -11,6 +11,10 @@ export const historyQuerySchema = z.object({
   buildingId: z.string().min(1),
 })
 
+export const searchBuildingsQuerySchema = z.object({
+  q: z.string().trim().min(2, 'Type at least two characters').max(120),
+})
+
 export const recordVisitSchema = z.object({
   buildingId: z.string().min(1),
   note: z.string().trim().max(500).optional(),

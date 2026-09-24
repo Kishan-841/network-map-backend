@@ -5,6 +5,7 @@ import { audit } from '../system-logs/audit.js'
 import {
   assignBuildingsSchema,
   historyQuerySchema,
+  searchBuildingsQuerySchema,
   recordVisitSchema,
   createInquirySchema,
   activityQuerySchema,
@@ -24,6 +25,15 @@ const ASSIGNER = requireRole('ADMIN', 'SALES_MANAGER', 'TEAM_LEADER')
 salesRoutes.get('/buildings', SALES_ANY, salesController.myBuildings)
 
 salesRoutes.get('/team', ASSIGNER, salesController.team)
+
+// Registry search to assign from — a manager (or admin) only; a team leader
+// distributes their own pool instead.
+salesRoutes.get(
+  '/search-buildings',
+  requireRole('ADMIN', 'SALES_MANAGER'),
+  validateQuery(searchBuildingsQuerySchema),
+  salesController.searchBuildings,
+)
 
 // Manager / team-leader dashboard: team totals + per-person activity.
 salesRoutes.get('/dashboard', ASSIGNER, validateQuery(dashboardQuerySchema), salesController.dashboard)
