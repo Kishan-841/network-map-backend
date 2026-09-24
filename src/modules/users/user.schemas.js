@@ -29,6 +29,10 @@ export const createUserSchema = z.object({
   // Acquisition agents are mapped to one city + its pincodes.
   cityId: z.string().min(1).nullish(),
   pincodes: z.array(pincodeSchema).max(50).optional(),
+  // Field-sales hierarchy — only meaningful for the sales roles; the service
+  // clears it for everyone else and checks the referenced roles.
+  managerId: z.string().min(1).nullish(),
+  teamLeaderId: z.string().min(1).nullish(),
 })
 
 export const bulkZoneAssignSchema = z.object({
@@ -60,6 +64,8 @@ export const updateUserSchema = z
     zoneIds: z.array(z.string().min(1)).max(200),
     cityId: z.string().min(1).nullable(),
     pincodes: z.array(pincodeSchema).max(50),
+    managerId: z.string().min(1).nullable(),
+    teamLeaderId: z.string().min(1).nullable(),
   })
   .partial()
 

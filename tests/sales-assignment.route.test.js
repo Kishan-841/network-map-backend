@@ -58,6 +58,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await prisma.building.deleteMany({ where: { id: { in: [B1, B2] } } }) // cascades assignments
+  await prisma.user.deleteMany({ where: { email: { startsWith: 'sales-made-' } } })
   await prisma.systemLog.deleteMany({ where: { userId: { in: USERS.map((u) => u.id) } } })
   await prisma.user.deleteMany({ where: { id: { in: USERS.map((u) => u.id) } } })
 })
@@ -128,5 +129,61 @@ describe('field-sales assignment + scope', () => {
     const se2 = await request(app).get('/api/v1/sales/buildings').set(auth('sales-se2'))
     expect(se2.status).toBe(200)
     expect(buildingIdsOf(se2)).toEqual([]) // se2 holds nothing
+  })
+})
+
+describe('field-sales team picker + hierarchy creation', () => {
+  const idsOf = (res) => res.body.data.map((u) => u.id)
+
+  it('the target picker is scoped to the actor\'s own reports', async () => {
+    const mgr = await request(app).get('/api/v1/sales/team').set(auth('sales-mgr'))
+    expect(mgr.status).toBe(200)
+    expect(idsOf(mgr).sort()).toEqual(['sales-se1', 'sales-se2', 'sales-tl'])
+
+    const tl = await request(app).get('/api/v1/sales/team').set(auth('sales-tl'))
+    expect(idsOf(tl).sort()).toEqual(['sales-se1', 'sales-se2'])
+
+    const admin = await request(app).get('/api/v1/sales/team').set(auth('test-admin'))
+    expect(idsOf(admin)).toEqual(expect.arrayContaining(['sales-mgr', 'sales-tl', 'sales-se1', 'sales-se3']))
+  })
+
+  it('an executive cannot open the team picker (403)', async () => {
+    expect((await request(app).get('/api/v1/sales/team').set(auth('sales-se1'))).status).toBe(403)
+  })
+
+  it('creates a sales executive under a manager + team leader', async () => {
+    const res = await request(app).post('/api/v1/users').set(auth('test-admin')).send({
+      name: 'New Exec',
+      email: 'sales-made-1@vitest.local',
+      password: 'Passw0rd1',
+      role: 'SALES_EXECUTIVE',
+      managerId: 'sales-mgr',
+      teamLeaderId: 'sales-tl',
+    })
+    expect(res.status).toBe(201)
+    expect(res.body.data).toMatchObject({ role: 'SALES_EXECUTIVE', managerId: 'sales-mgr', teamLeaderId: 'sales-tl' })
+  })
+
+  it('rejects a hierarchy that points at the wrong role (400)', async () => {
+    const res = await request(app).post('/api/v1/users').set(auth('test-admin')).send({
+      name: 'Bad Exec',
+      email: 'sales-made-2@vitest.local',
+      password: 'Passw0rd1',
+      role: 'SALES_EXECUTIVE',
+      managerId: 'sales-tl', // a team leader, not a manager
+    })
+    expect(res.status).toBe(400)
+  })
+
+  it('clears the hierarchy for a non-sales role', async () => {
+    const res = await request(app).post('/api/v1/users').set(auth('test-admin')).send({
+      name: 'A Surveyor',
+      email: 'sales-made-3@vitest.local',
+      password: 'Passw0rd1',
+      role: 'SURVEYOR',
+      managerId: 'sales-mgr', // should be ignored / cleared
+    })
+    expect(res.status).toBe(201)
+    expect(res.body.data.managerId).toBeNull()
   })
 })

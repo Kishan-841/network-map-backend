@@ -16,6 +16,8 @@ const ASSIGNER = requireRole('ADMIN', 'SALES_MANAGER', 'TEAM_LEADER')
 
 salesRoutes.get('/buildings', SALES_ANY, salesController.myBuildings)
 
+salesRoutes.get('/team', ASSIGNER, salesController.team)
+
 salesRoutes.get('/assignments', SALES_ANY, validateQuery(historyQuerySchema), salesController.history)
 
 salesRoutes.post(
