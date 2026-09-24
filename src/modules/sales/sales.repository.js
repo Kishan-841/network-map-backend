@@ -32,6 +32,24 @@ export const salesRepository = {
       select: { id: true, name: true, role: true, managerId: true, teamLeaderId: true, isActive: true },
     }),
 
+  // The sales users an actor may assign buildings TO: an admin sees every sales
+  // user; a manager their own reports; a leader their own executives.
+  teamMembers: (actor) => {
+    const where =
+      actor.role === 'ADMIN'
+        ? { role: { in: ['SALES_MANAGER', 'TEAM_LEADER', 'SALES_EXECUTIVE'] }, isActive: true }
+        : actor.role === 'SALES_MANAGER'
+          ? { managerId: actor.id, isActive: true }
+          : actor.role === 'TEAM_LEADER'
+            ? { teamLeaderId: actor.id, isActive: true }
+            : { id: '__none__' }
+    return prisma.user.findMany({
+      where,
+      select: { id: true, name: true, role: true, managerId: true, teamLeaderId: true },
+      orderBy: [{ role: 'asc' }, { name: 'asc' }],
+    })
+  },
+
   idsUnderManager: (managerId) =>
     prisma.user.findMany({ where: { managerId }, select: { id: true } }).then((r) => r.map((u) => u.id)),
 

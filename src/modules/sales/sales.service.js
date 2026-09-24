@@ -25,6 +25,12 @@ export function createSalesService({ repo = salesRepository } = {}) {
   }
 
   return {
+    /** The sales users the actor may assign buildings to (the target picker). */
+    async listTeam(actor) {
+      if (!canAssign(actor.role)) throw ApiError.forbidden()
+      return repo.teamMembers(actor)
+    },
+
     /** The actor's in-scope buildings — the SE "my buildings" list / the pool. */
     async listMyBuildings(actor) {
       const ids = await scopeIdsFor(actor)

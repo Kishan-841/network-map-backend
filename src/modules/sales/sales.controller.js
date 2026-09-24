@@ -1,6 +1,15 @@
 import { salesService } from './sales.service.js'
 
 export const salesController = {
+  async team(req, res, next) {
+    try {
+      const data = await salesService.listTeam(req.user)
+      res.json({ success: true, data })
+    } catch (err) {
+      next(err)
+    }
+  },
+
   async myBuildings(req, res, next) {
     try {
       const data = await salesService.listMyBuildings(req.user)

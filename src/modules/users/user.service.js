@@ -30,6 +30,31 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
     }
   }
 
+  // The field-sales chain, sanitised: a non-sales role (and a SALES_MANAGER, who
+  // reports to the admin) carries no manager/leader; a TEAM_LEADER's manager
+  // must be a SALES_MANAGER; a SALES_EXECUTIVE's manager a SALES_MANAGER and its
+  // leader a TEAM_LEADER. Always returns both keys so a role change clears stale
+  // links.
+  const SALES_ROLES = ['SALES_MANAGER', 'TEAM_LEADER', 'SALES_EXECUTIVE']
+  async function salesHierarchy(role, managerId, teamLeaderId) {
+    if (!SALES_ROLES.includes(role) || role === 'SALES_MANAGER') {
+      return { managerId: null, teamLeaderId: null }
+    }
+    const out = {
+      managerId: managerId ?? null,
+      teamLeaderId: role === 'SALES_EXECUTIVE' ? (teamLeaderId ?? null) : null,
+    }
+    if (out.managerId) {
+      const m = await userRepository.findById(out.managerId)
+      if (!m || m.role !== 'SALES_MANAGER') throw ApiError.badRequest('Manager must be a sales manager')
+    }
+    if (out.teamLeaderId) {
+      const t = await userRepository.findById(out.teamLeaderId)
+      if (!t || t.role !== 'TEAM_LEADER') throw ApiError.badRequest('Team leader must be a team leader')
+    }
+    return out
+  }
+
   // zoneIds -> Prisma relation op, or undefined when not applicable
   // (assignments are stored only for surveyors).
   async function zoneAssignment(zoneIds, role, op) {
@@ -59,7 +84,7 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
   }
 
   return {
-    async createUser({ password, zoneIds, cityId, pincodes, ...data }, actor) {
+    async createUser({ password, zoneIds, cityId, pincodes, managerId, teamLeaderId, ...data }, actor) {
       assertMayManage(actor, data.role)
       const existing = await userRepository.findByEmail(data.email)
       if (existing) throw ApiError.conflict('A user with this email already exists')
@@ -67,8 +92,10 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
       const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS)
       const assignedZones = await zoneAssignment(zoneIds, data.role, 'connect')
       const pin = await pincodeAssignment({ cityId, pincodes, role: data.role })
+      const hierarchy = await salesHierarchy(data.role, managerId, teamLeaderId)
       const user = await userRepository.create({
         ...data,
+        ...hierarchy,
         passwordHash,
         ...(assignedZones && { assignedZones }),
         ...(pin && {
@@ -148,7 +175,7 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
       }
     },
 
-    async updateUser(id, { password, email, zoneIds, cityId, pincodes, ...data }, actor) {
+    async updateUser(id, { password, email, zoneIds, cityId, pincodes, managerId, teamLeaderId, ...data }, actor) {
       // Explicit existence check → 404 instead of a Prisma P2025 leaking as 500.
       const current = await userRepository.findById(id)
       if (!current) throw ApiError.notFound('User not found')
@@ -171,6 +198,20 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
       }
       // Password is stored only as a hash, never plaintext.
       if (password) data.passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS)
+
+      // Sales hierarchy: recompute (and sanitise) when it is sent or the role
+      // changes; otherwise leave it as-is. A move out of the sales roles clears
+      // the links.
+      const roleChanged = data.role && data.role !== current.role
+      if (managerId !== undefined || teamLeaderId !== undefined || roleChanged) {
+        const h = await salesHierarchy(
+          data.role ?? current.role,
+          managerId !== undefined ? managerId : current.managerId,
+          teamLeaderId !== undefined ? teamLeaderId : current.teamLeaderId,
+        )
+        data.managerId = h.managerId
+        data.teamLeaderId = h.teamLeaderId
+      }
 
       // zoneIds replaces the full assignment set; omitting it leaves it unchanged.
       if (zoneIds !== undefined) {
