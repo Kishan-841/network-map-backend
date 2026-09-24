@@ -7,6 +7,9 @@ const roleSchema = z.enum([
   'ACQUISITION_AGENT',
   'ACQUISITION_LEAD',
   'SUPERVISOR',
+  'SALES_MANAGER',
+  'TEAM_LEADER',
+  'SALES_EXECUTIVE',
 ])
 
 // Indian PIN codes: exactly 6 digits, never starting with 0.
