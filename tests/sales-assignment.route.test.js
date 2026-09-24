@@ -187,3 +187,44 @@ describe('field-sales team picker + hierarchy creation', () => {
     expect(res.body.data.managerId).toBeNull()
   })
 })
+
+describe('field-sales visits + inquiries', () => {
+  // By here B1 is held by sales-se1 and B2 by sales-mgr.
+  it('an executive records a visit on a building they hold', async () => {
+    const res = await request(app).post('/api/v1/sales/visits').set(auth('sales-se1')).send({ buildingId: B1, note: 'Met the secretary' })
+    expect(res.status).toBe(201)
+    expect(res.body.data).toMatchObject({ buildingId: B1, userId: 'sales-se1' })
+  })
+
+  it('cannot record a visit on a building not in scope (404)', async () => {
+    expect((await request(app).post('/api/v1/sales/visits').set(auth('sales-se1')).send({ buildingId: B2 })).status).toBe(404)
+    expect((await request(app).post('/api/v1/sales/visits').set(auth('sales-se3')).send({ buildingId: B1 })).status).toBe(404)
+  })
+
+  it('raises an inquiry, snapshotting the building address', async () => {
+    const res = await request(app)
+      .post('/api/v1/sales/inquiries')
+      .set(auth('sales-se1'))
+      .send({ buildingId: B1, customerName: 'Asha', phone: '9876543210' })
+    expect(res.status).toBe(201)
+    expect(res.body.data).toMatchObject({ buildingId: B1, createdById: 'sales-se1', customerName: 'Asha', address: 'sales-b1 road' })
+  })
+
+  it('a wholly invalid inquiry is refused (400)', async () => {
+    expect((await request(app).post('/api/v1/sales/inquiries').set(auth('sales-se1')).send({ buildingId: B1, customerName: '', phone: '1' })).status).toBe(400)
+  })
+
+  it('activity is scoped: the executive and their manager see the visit, other teams do not', async () => {
+    const se = await request(app).get('/api/v1/sales/visits').set(auth('sales-se1'))
+    expect(se.body.data.some((v) => v.buildingId === B1 && v.userId === 'sales-se1')).toBe(true)
+
+    const mgr = await request(app).get('/api/v1/sales/visits').set(auth('sales-mgr'))
+    expect(mgr.body.data.some((v) => v.userId === 'sales-se1')).toBe(true) // team activity
+
+    const other = await request(app).get('/api/v1/sales/visits').set(auth('sales-mgr2'))
+    expect(other.body.data.some((v) => v.userId === 'sales-se1')).toBe(false)
+
+    const inq = await request(app).get('/api/v1/sales/inquiries').set(auth('sales-mgr'))
+    expect(inq.body.data.some((i) => i.customerName === 'Asha')).toBe(true)
+  })
+})
