@@ -46,10 +46,37 @@ export const salesController = {
     }
   },
 
-  async recordVisit(req, res, next) {
+  async openVisit(req, res, next) {
     try {
-      const data = await salesService.recordVisit(req.body, req.user)
+      const data = await salesService.openVisit(req.user)
+      res.json({ success: true, data })
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  async checkIn(req, res, next) {
+    try {
+      const data = await salesService.checkIn(req.body, req.user)
       res.status(201).json({ success: true, data })
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  async addActivity(req, res, next) {
+    try {
+      const data = await salesService.addActivity(req.params.id, req.body, req.user)
+      res.status(201).json({ success: true, data })
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  async checkOut(req, res, next) {
+    try {
+      const data = await salesService.checkOut(req.params.id, req.body, req.user)
+      res.json({ success: true, data })
     } catch (err) {
       next(err)
     }

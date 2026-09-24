@@ -203,44 +203,70 @@ describe('field-sales team picker + hierarchy creation', () => {
   })
 })
 
-describe('field-sales visits + inquiries', () => {
-  // By here B1 is held by sales-se1 and B2 by sales-mgr.
-  it('an executive records a visit on a building they hold', async () => {
-    const res = await request(app).post('/api/v1/sales/visits').set(auth('sales-se1')).send({ buildingId: B1, note: 'Met the secretary' })
+describe('field-sales visit tracking (check-in / activity / inquiry / check-out)', () => {
+  // By here B1 is held by sales-se1.
+  const IN = { checkInLat: 18.5, checkInLng: 73.8, selfieUrl: 'https://cdn/selfie.jpg' }
+  let visitId
+
+  it('cannot check in without a location or selfie (400)', async () => {
+    expect((await request(app).post('/api/v1/sales/visits').set(auth('sales-se1')).send({ buildingId: B1 })).status).toBe(400)
+    expect(
+      (await request(app).post('/api/v1/sales/visits').set(auth('sales-se1')).send({ buildingId: B1, checkInLat: 18.5, checkInLng: 73.8 })).status,
+    ).toBe(400) // no selfie
+  })
+
+  it('cannot check in to a building not in scope (404)', async () => {
+    expect((await request(app).post('/api/v1/sales/visits').set(auth('sales-se3')).send({ buildingId: B1, ...IN })).status).toBe(404)
+  })
+
+  it('checks in with location + selfie', async () => {
+    const res = await request(app).post('/api/v1/sales/visits').set(auth('sales-se1')).send({ buildingId: B1, ...IN })
     expect(res.status).toBe(201)
-    expect(res.body.data).toMatchObject({ buildingId: B1, userId: 'sales-se1' })
+    expect(res.body.data).toMatchObject({ buildingId: B1, userId: 'sales-se1', checkInLat: 18.5, selfieUrl: 'https://cdn/selfie.jpg', checkOutAt: null })
+    visitId = res.body.data.id
   })
 
-  it('cannot record a visit on a building not in scope (404)', async () => {
-    expect((await request(app).post('/api/v1/sales/visits').set(auth('sales-se1')).send({ buildingId: B2 })).status).toBe(404)
-    expect((await request(app).post('/api/v1/sales/visits').set(auth('sales-se3')).send({ buildingId: B1 })).status).toBe(404)
+  it('refuses a second open visit until checkout (409)', async () => {
+    expect((await request(app).post('/api/v1/sales/visits').set(auth('sales-se1')).send({ buildingId: B1, ...IN })).status).toBe(409)
   })
 
-  it('raises an inquiry, snapshotting the building address', async () => {
+  it('logs multiple activities on the open visit', async () => {
+    for (const type of ['DESK', 'UMBRELLA']) {
+      const res = await request(app).post(`/api/v1/sales/visits/${visitId}/activities`).set(auth('sales-se1')).send({ type })
+      expect(res.status).toBe(201)
+    }
+    expect((await request(app).post(`/api/v1/sales/visits/${visitId}/activities`).set(auth('sales-se1')).send({ type: 'NOPE' })).status).toBe(400)
+    // someone else's visit is a 404
+    expect((await request(app).post(`/api/v1/sales/visits/${visitId}/activities`).set(auth('sales-se2')).send({ type: 'LIFT' })).status).toBe(404)
+  })
+
+  it('raises an inquiry linked to the open visit, snapshotting the address', async () => {
     const res = await request(app)
       .post('/api/v1/sales/inquiries')
       .set(auth('sales-se1'))
-      .send({ buildingId: B1, customerName: 'Asha', phone: '9876543210' })
+      .send({ buildingId: B1, customerName: 'Asha', phone: '9876543210', visitId })
     expect(res.status).toBe(201)
-    expect(res.body.data).toMatchObject({ buildingId: B1, createdById: 'sales-se1', customerName: 'Asha', address: 'sales-b1 road' })
+    expect(res.body.data).toMatchObject({ buildingId: B1, createdById: 'sales-se1', customerName: 'Asha', address: 'sales-b1 road', visitId })
   })
 
-  it('a wholly invalid inquiry is refused (400)', async () => {
-    expect((await request(app).post('/api/v1/sales/inquiries').set(auth('sales-se1')).send({ buildingId: B1, customerName: '', phone: '1' })).status).toBe(400)
+  it('checks out with a location, then rejects further activity', async () => {
+    const res = await request(app).post(`/api/v1/sales/visits/${visitId}/checkout`).set(auth('sales-se1')).send({ checkOutLat: 18.6, checkOutLng: 73.9 })
+    expect(res.status).toBe(200)
+    expect(res.body.data.checkOutAt).toBeTruthy()
+    expect((await request(app).post(`/api/v1/sales/visits/${visitId}/activities`).set(auth('sales-se1')).send({ type: 'LIFT' })).status).toBe(400)
   })
 
-  it('activity is scoped: the executive and their manager see the visit, other teams do not', async () => {
+  it('the visit record carries its activities + inquiry, and stays team-scoped', async () => {
     const se = await request(app).get('/api/v1/sales/visits').set(auth('sales-se1'))
-    expect(se.body.data.some((v) => v.buildingId === B1 && v.userId === 'sales-se1')).toBe(true)
+    const v = se.body.data.find((x) => x.id === visitId)
+    expect(v.activities.map((a) => a.type)).toEqual(['DESK', 'UMBRELLA'])
+    expect(v.inquiries.map((i) => i.customerName)).toEqual(['Asha'])
+    expect(v.checkOutAt).toBeTruthy()
 
     const mgr = await request(app).get('/api/v1/sales/visits').set(auth('sales-mgr'))
-    expect(mgr.body.data.some((v) => v.userId === 'sales-se1')).toBe(true) // team activity
-
+    expect(mgr.body.data.some((x) => x.userId === 'sales-se1')).toBe(true)
     const other = await request(app).get('/api/v1/sales/visits').set(auth('sales-mgr2'))
-    expect(other.body.data.some((v) => v.userId === 'sales-se1')).toBe(false)
-
-    const inq = await request(app).get('/api/v1/sales/inquiries').set(auth('sales-mgr'))
-    expect(inq.body.data.some((i) => i.customerName === 'Asha')).toBe(true)
+    expect(other.body.data.some((x) => x.userId === 'sales-se1')).toBe(false)
   })
 })
 

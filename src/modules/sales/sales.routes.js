@@ -6,7 +6,9 @@ import {
   assignBuildingsSchema,
   historyQuerySchema,
   searchBuildingsQuerySchema,
-  recordVisitSchema,
+  checkInSchema,
+  visitActivitySchema,
+  checkOutSchema,
   createInquirySchema,
   activityQuerySchema,
   dashboardQuerySchema,
@@ -51,15 +53,30 @@ salesRoutes.post(
   salesController.assign,
 )
 
-// Field activity — any sales user (or admin) may record a visit / inquiry on a
-// building in their scope; the service enforces the scope (404 otherwise).
+// Field activity — any sales user (or admin) works a building in their scope;
+// the service enforces the scope (404 otherwise).
 salesRoutes.get('/visits', SALES_ANY, validateQuery(activityQuerySchema), salesController.listVisits)
+salesRoutes.get('/visits/open', SALES_ANY, salesController.openVisit)
 salesRoutes.post(
   '/visits',
   SALES_ANY,
-  audit('BuildingVisit', 'RecordVisit', { describe: () => 'Building visit recorded' }),
-  validateBody(recordVisitSchema),
-  salesController.recordVisit,
+  audit('BuildingVisit', 'CheckIn', { describe: () => 'Checked in to a building' }),
+  validateBody(checkInSchema),
+  salesController.checkIn,
+)
+salesRoutes.post(
+  '/visits/:id/activities',
+  SALES_ANY,
+  audit('VisitActivity', 'LogActivity', { describe: (req) => `${req.body?.type ?? 'Activity'} logged` }),
+  validateBody(visitActivitySchema),
+  salesController.addActivity,
+)
+salesRoutes.post(
+  '/visits/:id/checkout',
+  SALES_ANY,
+  audit('BuildingVisit', 'CheckOut', { describe: () => 'Checked out of a building' }),
+  validateBody(checkOutSchema),
+  salesController.checkOut,
 )
 
 salesRoutes.get('/inquiries', SALES_ANY, validateQuery(activityQuerySchema), salesController.listInquiries)

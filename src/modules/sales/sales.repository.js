@@ -103,7 +103,23 @@ export const salesRepository = {
   buildingBasic: (id) =>
     prisma.building.findUnique({ where: { id }, select: { id: true, buildingName: true, formattedAddress: true } }),
 
-  recordVisit: (data) => prisma.buildingVisit.create({ data }),
+  createVisit: (data) => prisma.buildingVisit.create({ data }),
+
+  // The user's current OPEN visit (not yet checked out), if any.
+  openVisitFor: (userId) =>
+    prisma.buildingVisit.findFirst({
+      where: { userId, checkOutAt: null },
+      include: { building: { select: { id: true, buildingName: true, formattedAddress: true } }, activities: true },
+    }),
+
+  // A visit the actor owns — for adding an activity, checking out, or linking an
+  // inquiry. Returns enough to tell whether it is still open.
+  ownedVisit: (id, userId) =>
+    prisma.buildingVisit.findFirst({ where: { id, userId }, select: { id: true, buildingId: true, checkOutAt: true } }),
+
+  addActivity: (data) => prisma.visitActivity.create({ data }),
+
+  checkoutVisit: (id, data) => prisma.buildingVisit.update({ where: { id }, data }),
 
   createInquiry: (data) => prisma.customerInquiry.create({ data }),
 
@@ -114,7 +130,12 @@ export const salesRepository = {
       where,
       orderBy: { visitedAt: 'desc' },
       take: 500,
-      include: { user: holder, building: { select: { id: true, buildingName: true, formattedAddress: true } } },
+      include: {
+        user: holder,
+        building: { select: { id: true, buildingName: true, formattedAddress: true } },
+        activities: { orderBy: { createdAt: 'asc' } },
+        inquiries: { select: { id: true, customerName: true, phone: true, email: true, createdAt: true } },
+      },
     }),
 
   listInquiries: (where) =>

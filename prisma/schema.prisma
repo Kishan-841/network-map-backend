@@ -516,17 +516,47 @@ model BuildingAssignment {
 /// A recorded visit to a building by a sales user. A visit is separate from an
 /// inquiry — someone visits many buildings and raises an inquiry only where a
 /// customer is interested.
+/// A check-in → work → check-out session at a building. `visitedAt` is the
+/// check-in time; the visit is "open" until `checkOutAt` is set. Location is
+/// captured by the browser at both ends (forced by the API), and a selfie is
+/// the proof of presence.
 model BuildingVisit {
-  id         String   @id @default(cuid())
-  buildingId String
-  building   Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
-  userId     String
-  user       User     @relation("VisitBy", fields: [userId], references: [id])
-  visitedAt  DateTime @default(now())
-  note       String?
+  id          String            @id @default(cuid())
+  buildingId  String
+  building    Building          @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User              @relation("VisitBy", fields: [userId], references: [id])
+  visitedAt   DateTime          @default(now())
+  checkInLat  Float?
+  checkInLng  Float?
+  selfieUrl   String?
+  checkOutAt  DateTime?
+  checkOutLat Float?
+  checkOutLng Float?
+  note        String?
+  activities  VisitActivity[]
+  inquiries   CustomerInquiry[] @relation("InquiryVisit")
 
   @@index([userId, visitedAt])
   @@index([buildingId])
+}
+
+/// The kind of field work done during a visit; more may be added later.
+enum ActivityType {
+  DESK
+  UMBRELLA
+  LIFT
+}
+
+/// One piece of field work logged during a visit (many per visit).
+model VisitActivity {
+  id        String        @id @default(cuid())
+  visitId   String
+  visit     BuildingVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  type      ActivityType
+  createdAt DateTime      @default(now())
+
+  @@index([visitId])
 }
 
 /// A lightweight customer inquiry raised in the field, for the calling team to
@@ -542,9 +572,13 @@ model CustomerInquiry {
   email        String?
   address      String
   createdAt    DateTime @default(now())
+  /// Set when the inquiry was raised during a specific check-in session.
+  visitId      String?
+  visit        BuildingVisit? @relation("InquiryVisit", fields: [visitId], references: [id], onDelete: SetNull)
 
   @@index([buildingId])
   @@index([createdById, createdAt])
+  @@index([visitId])
 }
 
 model BuildingDetails {
