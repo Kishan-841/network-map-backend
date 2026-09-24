@@ -91,6 +91,15 @@ export const salesController = {
     }
   },
 
+  async getVisit(req, res, next) {
+    try {
+      const data = await salesService.getVisit(req.params.id, req.user)
+      res.json({ success: true, data })
+    } catch (err) {
+      next(err)
+    }
+  },
+
   async listVisits(req, res, next) {
     try {
       const data = await salesService.listVisits(req.user, req.query)
