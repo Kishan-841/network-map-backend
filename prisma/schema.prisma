@@ -19,6 +19,23 @@ enum Role {
   /// and may add or edit any of them. Not a system administrator — no user,
   /// zone, operator or log management.
   SUPERVISOR
+  /// Field-sales hierarchy (see docs .../2026-09-24-field-sales-design.md).
+  /// Runs team leaders + sales executives; created by an ADMIN.
+  SALES_MANAGER
+  /// Reports to a SALES_MANAGER; runs a set of sales executives.
+  TEAM_LEADER
+  /// The field user: works the buildings assigned to them, records visits and
+  /// raises customer inquiries.
+  SALES_EXECUTIVE
+}
+
+/// The state of a building's assignment to a sales user. Only one row per
+/// building is ACTIVE at a time; a reassignment closes the old row (keeping the
+/// history) and opens a new one.
+enum AssignmentStatus {
+  ACTIVE
+  REASSIGNED
+  UNASSIGNED
 }
 
 enum FeasibleStatus {
@@ -84,7 +101,22 @@ model User {
   splittersCreated Splitter[] @relation("SplitterCreatedBy")
   assignedZones Zone[]    @relation("UserAssignedZones")
   /// City + pincodes an ACQUISITION_AGENT covers; unused for other roles.
-  pincodes     UserPincode[]
+  pincodes      UserPincode[]
+
+  /// Field-sales hierarchy (unused for every non-sales role).
+  /// managerId: the SALES_MANAGER a TEAM_LEADER / SALES_EXECUTIVE reports to.
+  /// teamLeaderId: the TEAM_LEADER a SALES_EXECUTIVE reports to (nullable — a
+  /// manager may hold an executive directly).
+  managerId       String?
+  manager         User?   @relation("SalesManagerReports", fields: [managerId], references: [id])
+  reports         User[]  @relation("SalesManagerReports")
+  teamLeaderId    String?
+  teamLeader      User?   @relation("TeamLeaderReports", fields: [teamLeaderId], references: [id])
+  teamMembers     User[]  @relation("TeamLeaderReports")
+  assignmentsHeld  BuildingAssignment[] @relation("AssignmentHolder")
+  assignmentsMade  BuildingAssignment[] @relation("AssignmentBy")
+  visitsRecorded   BuildingVisit[]      @relation("VisitBy")
+  inquiriesCreated CustomerInquiry[]    @relation("InquiryBy")
 }
 
 /// One row per pincode an acquisition agent covers (within one city).
@@ -453,9 +485,105 @@ model Building {
   fiberPoints      FiberPoint[]
   splitterOutputs  SplitterOutput[]
   closures         Closure[]
+  salesAssignments BuildingAssignment[]
+  salesVisits      BuildingVisit[]
+  salesInquiries   CustomerInquiry[]
 
   @@index([latitude, longitude])
   @@index([source, createdById])
+}
+
+/// A building handed to a sales user. The single ACTIVE row per building is its
+/// current holder (a manager, team leader or executive); ancestors in the
+/// hierarchy still see it. History is preserved — a reassignment closes the old
+/// row rather than editing it. See the field-sales design spec.
+model BuildingAssignment {
+  id           String           @id @default(cuid())
+  buildingId   String
+  building     Building         @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  assignedToId String
+  assignedTo   User             @relation("AssignmentHolder", fields: [assignedToId], references: [id])
+  assignedById String
+  assignedBy   User             @relation("AssignmentBy", fields: [assignedById], references: [id])
+  status       AssignmentStatus @default(ACTIVE)
+  assignedAt   DateTime         @default(now())
+  endedAt      DateTime?
+
+  @@index([buildingId, status])
+  @@index([assignedToId, status])
+}
+
+/// A recorded visit to a building by a sales user. A visit is separate from an
+/// inquiry — someone visits many buildings and raises an inquiry only where a
+/// customer is interested.
+/// A check-in → work → check-out session at a building. `visitedAt` is the
+/// check-in time; the visit is "open" until `checkOutAt` is set. Location is
+/// captured by the browser at both ends (forced by the API), and a selfie is
+/// the proof of presence.
+model BuildingVisit {
+  id          String            @id @default(cuid())
+  buildingId  String
+  building    Building          @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User              @relation("VisitBy", fields: [userId], references: [id])
+  visitedAt   DateTime          @default(now())
+  checkInLat  Float?
+  checkInLng  Float?
+  selfieUrl   String?
+  checkOutAt  DateTime?
+  checkOutLat Float?
+  checkOutLng Float?
+  note        String?
+  activities  VisitActivity[]
+  inquiries   CustomerInquiry[] @relation("InquiryVisit")
+
+  @@index([userId, visitedAt])
+  @@index([buildingId])
+}
+
+/// The kind of field work done during a visit; more may be added later.
+enum ActivityType {
+  DESK
+  UMBRELLA
+  LIFT
+}
+
+/// One piece of field work logged during a visit (many per visit).
+/// A kind of field work done during a visit. At most one row per type per visit
+/// — it records THAT the work was done, not how many times, so the UI is a
+/// no-count multi-select (Desk + Umbrella together is fine; clicking twice does
+/// not stack).
+model VisitActivity {
+  id        String        @id @default(cuid())
+  visitId   String
+  visit     BuildingVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  type      ActivityType
+  createdAt DateTime      @default(now())
+
+  @@unique([visitId, type])
+  @@index([visitId])
+}
+
+/// A lightweight customer inquiry raised in the field, for the calling team to
+/// follow up. The building address is snapshotted so the record stands alone.
+model CustomerInquiry {
+  id           String   @id @default(cuid())
+  buildingId   String
+  building     Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  createdById  String
+  createdBy    User     @relation("InquiryBy", fields: [createdById], references: [id])
+  customerName String
+  phone        String
+  email        String?
+  address      String
+  createdAt    DateTime @default(now())
+  /// Set when the inquiry was raised during a specific check-in session.
+  visitId      String?
+  visit        BuildingVisit? @relation("InquiryVisit", fields: [visitId], references: [id], onDelete: SetNull)
+
+  @@index([buildingId])
+  @@index([createdById, createdAt])
+  @@index([visitId])
 }
 
 model BuildingDetails {

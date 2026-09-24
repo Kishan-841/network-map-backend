@@ -7,6 +7,9 @@ const roleSchema = z.enum([
   'ACQUISITION_AGENT',
   'ACQUISITION_LEAD',
   'SUPERVISOR',
+  'SALES_MANAGER',
+  'TEAM_LEADER',
+  'SALES_EXECUTIVE',
 ])
 
 // Indian PIN codes: exactly 6 digits, never starting with 0.
@@ -29,6 +32,10 @@ export const createUserSchema = z.object({
   // Acquisition agents are mapped to one city + its pincodes.
   cityId: z.string().min(1).nullish(),
   pincodes: z.array(pincodeSchema).max(50).optional(),
+  // Field-sales hierarchy — only meaningful for the sales roles; the service
+  // clears it for everyone else and checks the referenced roles.
+  managerId: z.string().min(1).nullish(),
+  teamLeaderId: z.string().min(1).nullish(),
 })
 
 export const bulkZoneAssignSchema = z.object({
@@ -38,6 +45,26 @@ export const bulkZoneAssignSchema = z.object({
         email: z.string().trim().email(),
         zoneNames: z.array(z.string().trim().min(1)).min(1).max(200),
       }),
+    )
+    .min(1)
+    .max(500),
+})
+
+// Bulk create of the sales hierarchy from a sheet. Kept permissive on purpose:
+// each field is validated per-row in the service so the response can report
+// every bad row (all-or-nothing), instead of zod rejecting the whole payload.
+export const bulkCreateUsersSchema = z.object({
+  users: z
+    .array(
+      z
+        .object({
+          name: z.string().trim().optional().default(''),
+          email: z.string().trim().optional().default(''),
+          password: z.string().optional().default(''),
+          role: z.string().trim().optional().default(''),
+          reportsToEmail: z.string().trim().optional().default(''),
+        })
+        .strip(),
     )
     .min(1)
     .max(500),
@@ -60,6 +87,8 @@ export const updateUserSchema = z
     zoneIds: z.array(z.string().min(1)).max(200),
     cityId: z.string().min(1).nullable(),
     pincodes: z.array(pincodeSchema).max(50),
+    managerId: z.string().min(1).nullable(),
+    teamLeaderId: z.string().min(1).nullable(),
   })
   .partial()
 

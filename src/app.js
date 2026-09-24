@@ -16,6 +16,7 @@ import { operatorRoutes } from './modules/operators/operator.routes.js'
 import { cityRoutes } from './modules/cities/city.routes.js'
 import { fiberRouteRoutes } from './modules/fiber-routes/fiber-route.routes.js'
 import { popRoutes } from './modules/pops/pop.routes.js'
+import { salesRoutes } from './modules/sales/sales.routes.js'
 import { closureRoutes } from './modules/closures/closure.routes.js'
 import { splitterRoutes } from './modules/closures/splitter.routes.js'
 import { fiberRoutes } from './modules/fibers/fiber.routes.js'
@@ -50,6 +51,7 @@ export function createApp() {
   app.use('/api/v1/users', userRoutes)
   app.use('/api/v1/zones', zoneRoutes)
   app.use('/api/v1/buildings', buildingRoutes)
+  app.use('/api/v1/sales', salesRoutes)
   // Uploads are user-supplied: block MIME sniffing and script execution so a
   // crafted file can never run in the app's origin (images still render inline).
   app.use(
