@@ -92,15 +92,57 @@ export function createSalesService({ repo = salesRepository } = {}) {
       return { count: ids.length, assignedToId }
     },
 
-    /** Record a visit to a building the actor holds (or has in their pool). */
-    async recordVisit({ buildingId, note }, actor) {
-      const building = await assertBuildingInScope(buildingId, actor)
-      return repo.recordVisit({ buildingId: building.id, userId: actor.id, note: note ?? null })
+    /** The actor's current open (not yet checked-out) visit, or null. */
+    openVisit(actor) {
+      return repo.openVisitFor(actor.id)
     },
 
-    /** Raise a customer inquiry; the address is snapshotted from the building. */
-    async createInquiry({ buildingId, customerName, phone, email }, actor) {
+    /** Check IN: one open visit at a time; the building must be in scope. */
+    async checkIn({ buildingId, checkInLat, checkInLng, selfieUrl, note }, actor) {
+      if (await repo.openVisitFor(actor.id)) {
+        throw ApiError.conflict('Check out of your current building before checking into another')
+      }
       const building = await assertBuildingInScope(buildingId, actor)
+      return repo.createVisit({
+        buildingId: building.id,
+        userId: actor.id,
+        checkInLat,
+        checkInLng,
+        selfieUrl,
+        note: note ?? null,
+      })
+    },
+
+    /** Log one activity on the actor's own open visit. */
+    async addActivity(visitId, { type }, actor) {
+      const visit = await repo.ownedVisit(visitId, actor.id)
+      if (!visit) throw ApiError.notFound('Visit not found')
+      if (visit.checkOutAt) throw ApiError.badRequest('This visit is already checked out')
+      return repo.addActivity({ visitId, type })
+    },
+
+    /** Check OUT: closes the actor's own open visit, capturing the location. */
+    async checkOut(visitId, { checkOutLat, checkOutLng }, actor) {
+      const visit = await repo.ownedVisit(visitId, actor.id)
+      if (!visit) throw ApiError.notFound('Visit not found')
+      if (visit.checkOutAt) throw ApiError.badRequest('This visit is already checked out')
+      return repo.checkoutVisit(visitId, { checkOutAt: new Date(), checkOutLat, checkOutLng })
+    },
+
+    /**
+     * Raise a customer inquiry; the address is snapshotted from the building. If
+     * `visitId` is given it must be the actor's OPEN visit at this building.
+     */
+    async createInquiry({ buildingId, customerName, phone, email, visitId }, actor) {
+      const building = await assertBuildingInScope(buildingId, actor)
+      let linkedVisitId = null
+      if (visitId) {
+        const visit = await repo.ownedVisit(visitId, actor.id)
+        if (!visit || visit.checkOutAt || visit.buildingId !== building.id) {
+          throw ApiError.badRequest('Link the inquiry to your open visit at this building')
+        }
+        linkedVisitId = visitId
+      }
       return repo.createInquiry({
         buildingId: building.id,
         createdById: actor.id,
@@ -108,6 +150,7 @@ export function createSalesService({ repo = salesRepository } = {}) {
         phone,
         email: email ?? null,
         address: building.formattedAddress,
+        visitId: linkedVisitId,
       })
     },
 
