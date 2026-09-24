@@ -272,6 +272,17 @@ describe('field-sales visit tracking (check-in / activity / inquiry / check-out)
     const other = await request(app).get('/api/v1/sales/visits').set(auth('sales-mgr2'))
     expect(other.body.data.some((x) => x.userId === 'sales-se1')).toBe(false)
   })
+
+  it('a single visit is readable in scope (with full detail) and 404 out of scope', async () => {
+    const mgr = await request(app).get(`/api/v1/sales/visits/${visitId}`).set(auth('sales-mgr'))
+    expect(mgr.status).toBe(200)
+    expect(mgr.body.data.activities.map((a) => a.type)).toEqual(['DESK', 'UMBRELLA'])
+    expect(mgr.body.data.inquiries[0]).toMatchObject({ customerName: 'Asha', phone: '9876543210' })
+    expect(mgr.body.data.checkOutAt).toBeTruthy()
+    // an SE sees their own; another team gets a 404
+    expect((await request(app).get(`/api/v1/sales/visits/${visitId}`).set(auth('sales-se1'))).status).toBe(200)
+    expect((await request(app).get(`/api/v1/sales/visits/${visitId}`).set(auth('sales-mgr2'))).status).toBe(404)
+  })
 })
 
 describe('field-sales dashboard', () => {

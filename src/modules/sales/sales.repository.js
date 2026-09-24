@@ -121,6 +121,18 @@ export const salesRepository = {
   ownedVisit: (id, userId) =>
     prisma.buildingVisit.findFirst({ where: { id, userId }, select: { id: true, buildingId: true, checkOutAt: true } }),
 
+  // One visit in full, scoped by userWhere ({} for admin), for the detail page.
+  getVisit: (id, userWhere) =>
+    prisma.buildingVisit.findFirst({
+      where: { id, ...userWhere },
+      include: {
+        user: holder,
+        building: { select: { id: true, buildingName: true, formattedAddress: true, latitude: true, longitude: true } },
+        activities: { orderBy: { createdAt: 'asc' } },
+        inquiries: { select: { id: true, customerName: true, phone: true, email: true, createdAt: true } },
+      },
+    }),
+
   // Idempotent — the type is a set member, so re-adding it is a no-op.
   addActivity: ({ visitId, type }) =>
     prisma.visitActivity.upsert({ where: { visitId_type: { visitId, type } }, create: { visitId, type }, update: {} }),

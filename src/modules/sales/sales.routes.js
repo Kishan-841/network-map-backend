@@ -57,6 +57,8 @@ salesRoutes.post(
 // the service enforces the scope (404 otherwise).
 salesRoutes.get('/visits', SALES_ANY, validateQuery(activityQuerySchema), salesController.listVisits)
 salesRoutes.get('/visits/open', SALES_ANY, salesController.openVisit)
+// After /visits/open so the literal path wins over :id.
+salesRoutes.get('/visits/:id', SALES_ANY, salesController.getVisit)
 salesRoutes.post(
   '/visits',
   SALES_ANY,

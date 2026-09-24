@@ -168,6 +168,14 @@ export function createSalesService({ repo = salesRepository } = {}) {
       return repo.listVisits(await activityWhere(actor, filters, 'visitedAt'))
     },
 
+    /** One visit in full — scoped, so out of scope is a 404 (the detail page). */
+    async getVisit(id, actor) {
+      const ids = await scopeIdsFor(actor)
+      const visit = await repo.getVisit(id, ids === null ? {} : { userId: { in: ids } })
+      if (!visit) throw ApiError.notFound('Visit not found')
+      return visit
+    },
+
     async listInquiries(actor, filters = {}) {
       return repo.listInquiries(await activityWhere(actor, filters, 'createdAt'))
     },
