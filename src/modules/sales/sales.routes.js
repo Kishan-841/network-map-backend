@@ -71,6 +71,12 @@ salesRoutes.post(
   validateBody(visitActivitySchema),
   salesController.addActivity,
 )
+salesRoutes.delete(
+  '/visits/:id/activities/:type',
+  SALES_ANY,
+  audit('VisitActivity', 'UnlogActivity', { describe: (req) => `${req.params?.type ?? 'Activity'} removed` }),
+  salesController.removeActivity,
+)
 salesRoutes.post(
   '/visits/:id/checkout',
   SALES_ANY,

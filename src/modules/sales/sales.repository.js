@@ -121,7 +121,11 @@ export const salesRepository = {
   ownedVisit: (id, userId) =>
     prisma.buildingVisit.findFirst({ where: { id, userId }, select: { id: true, buildingId: true, checkOutAt: true } }),
 
-  addActivity: (data) => prisma.visitActivity.create({ data }),
+  // Idempotent — the type is a set member, so re-adding it is a no-op.
+  addActivity: ({ visitId, type }) =>
+    prisma.visitActivity.upsert({ where: { visitId_type: { visitId, type } }, create: { visitId, type }, update: {} }),
+
+  removeActivity: (visitId, type) => prisma.visitActivity.deleteMany({ where: { visitId, type } }),
 
   checkoutVisit: (id, data) => prisma.buildingVisit.update({ where: { id }, data }),
 

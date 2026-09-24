@@ -113,12 +113,22 @@ export function createSalesService({ repo = salesRepository } = {}) {
       })
     },
 
-    /** Log one activity on the actor's own open visit. */
+    /** Mark an activity type done on the actor's own open visit (idempotent). */
     async addActivity(visitId, { type }, actor) {
       const visit = await repo.ownedVisit(visitId, actor.id)
       if (!visit) throw ApiError.notFound('Visit not found')
       if (visit.checkOutAt) throw ApiError.badRequest('This visit is already checked out')
       return repo.addActivity({ visitId, type })
+    },
+
+    /** Un-mark an activity type (toggle it off) on the actor's own open visit. */
+    async removeActivity(visitId, type, actor) {
+      if (!['DESK', 'UMBRELLA', 'LIFT'].includes(type)) throw ApiError.badRequest('Unknown activity')
+      const visit = await repo.ownedVisit(visitId, actor.id)
+      if (!visit) throw ApiError.notFound('Visit not found')
+      if (visit.checkOutAt) throw ApiError.badRequest('This visit is already checked out')
+      await repo.removeActivity(visitId, type)
+      return { visitId, type, removed: true }
     },
 
     /** Check OUT: closes the actor's own open visit, capturing the location. */

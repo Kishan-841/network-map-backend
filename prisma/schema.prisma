@@ -549,6 +549,10 @@ enum ActivityType {
 }
 
 /// One piece of field work logged during a visit (many per visit).
+/// A kind of field work done during a visit. At most one row per type per visit
+/// — it records THAT the work was done, not how many times, so the UI is a
+/// no-count multi-select (Desk + Umbrella together is fine; clicking twice does
+/// not stack).
 model VisitActivity {
   id        String        @id @default(cuid())
   visitId   String
@@ -556,6 +560,7 @@ model VisitActivity {
   type      ActivityType
   createdAt DateTime      @default(now())
 
+  @@unique([visitId, type])
   @@index([visitId])
 }
 
