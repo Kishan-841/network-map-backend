@@ -109,7 +109,11 @@ export const salesRepository = {
   openVisitFor: (userId) =>
     prisma.buildingVisit.findFirst({
       where: { userId, checkOutAt: null },
-      include: { building: { select: { id: true, buildingName: true, formattedAddress: true } }, activities: true },
+      include: {
+        building: { select: { id: true, buildingName: true, formattedAddress: true } },
+        activities: { orderBy: { createdAt: 'asc' } },
+        inquiries: { select: { id: true, customerName: true } },
+      },
     }),
 
   // A visit the actor owns — for adding an activity, checking out, or linking an
