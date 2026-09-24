@@ -1,9 +1,21 @@
 import bcrypt from 'bcryptjs'
 import { ApiError } from '../../lib/api-error.js'
+import { prisma } from '../../lib/prisma.js'
 import { toPublicUser } from '../auth/auth.service.js'
 import { BUILDING_EDIT_ROLES, FIBER_ACCESS_ROLES } from '../../middleware/auth.js'
 
 const BCRYPT_ROUNDS = 10
+
+// Accepts the enum values and the friendly sheet labels, case-insensitive.
+const BULK_ROLE_ALIASES = {
+  SALES_MANAGER: 'SALES_MANAGER',
+  'SALES MANAGER': 'SALES_MANAGER',
+  TEAM_LEADER: 'TEAM_LEADER',
+  'TEAM LEADER': 'TEAM_LEADER',
+  SALES_EXECUTIVE: 'SALES_EXECUTIVE',
+  'SALES EXECUTIVE': 'SALES_EXECUTIVE',
+}
+const BULK_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export function createUserService({ userRepository, zoneRepository, cityRepository }) {
   // Acquisition agents cover one city + a set of pincodes. Stored as rows so
@@ -105,6 +117,133 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
         }),
       })
       return toPublicUser(user)
+    },
+
+    /**
+     * Bulk-create the field-sales hierarchy from a sheet. Each row is
+     * {name, email, password, role, reportsToEmail}; a team leader's
+     * reportsToEmail names their sales manager, an executive's names their team
+     * leader (whose manager the executive inherits). References resolve against
+     * rows in the same sheet AND existing users. All-or-nothing: if any row is
+     * invalid, nothing is created and every error is returned; otherwise all are
+     * created in dependency order (managers → leaders → executives) in one
+     * transaction. Returns { created, errors }.
+     */
+    async bulkCreateUsers(rows) {
+      const errors = []
+      const push = (row, email, message) => errors.push({ row, email, message })
+
+      // Normalise every row up front (trim, canonical role, lowercase keys).
+      const norm = rows.map((r, i) => {
+        const email = (r.email ?? '').trim()
+        const reportsTo = (r.reportsToEmail ?? '').trim()
+        return {
+          rowNo: i + 1,
+          name: (r.name ?? '').trim(),
+          email,
+          emailKey: email.toLowerCase(),
+          password: r.password ?? '',
+          roleRaw: (r.role ?? '').trim(),
+          role: BULK_ROLE_ALIASES[(r.role ?? '').trim().toUpperCase()] ?? null,
+          reportsTo,
+          reportsToKey: reportsTo.toLowerCase(),
+        }
+      })
+
+      // Per-row field checks, and an in-sheet index by email.
+      const sheetByEmail = new Map()
+      for (const row of norm) {
+        if (!row.name) push(row.rowNo, row.email, 'Name is required')
+        if (!row.email) push(row.rowNo, row.email, 'Email is required')
+        else if (!BULK_EMAIL_RE.test(row.email)) push(row.rowNo, row.email, 'Email is not valid')
+        if (row.password.length < 8 || !/[a-zA-Z]/.test(row.password) || !/[0-9]/.test(row.password))
+          push(row.rowNo, row.email, 'Password needs at least 8 characters, a letter and a number')
+        if (!row.role)
+          push(row.rowNo, row.email, `Role "${row.roleRaw}" must be Sales manager, Team leader or Sales executive`)
+        if (row.emailKey) {
+          if (sheetByEmail.has(row.emailKey)) push(row.rowNo, row.email, 'This email appears more than once in the file')
+          else sheetByEmail.set(row.emailKey, row)
+        }
+      }
+
+      // Existing accounts (a bulk create never overwrites) and any external
+      // referenced manager/leader — fetched once, case-insensitive.
+      const wantEmails = new Set()
+      for (const row of norm) {
+        if (row.emailKey) wantEmails.add(row.emailKey)
+        if (row.reportsToKey) wantEmails.add(row.reportsToKey)
+      }
+      const foundExisting = await Promise.all(
+        [...wantEmails].map((e) => userRepository.findByEmailInsensitive(e)),
+      )
+      const existingByEmail = new Map()
+      for (const u of foundExisting) if (u) existingByEmail.set(u.email.toLowerCase(), u)
+
+      for (const row of norm) {
+        if (row.emailKey && existingByEmail.has(row.emailKey))
+          push(row.rowNo, row.email, 'A user with this email already exists')
+      }
+
+      // Resolve who each row reports to (sheet first, then an existing user) and
+      // check the referenced role. Managers report to no one.
+      const roleFor = (key) => sheetByEmail.get(key)?.role ?? existingByEmail.get(key)?.role ?? null
+      for (const row of norm) {
+        if (!row.role || row.role === 'SALES_MANAGER') continue
+        const need = row.role === 'TEAM_LEADER' ? 'SALES_MANAGER' : 'TEAM_LEADER'
+        const label = need === 'SALES_MANAGER' ? 'sales manager' : 'team leader'
+        if (!row.reportsTo) {
+          push(row.rowNo, row.email, `Reports to (${label} email) is required`)
+        } else {
+          const refRole = roleFor(row.reportsToKey)
+          if (!refRole) push(row.rowNo, row.email, `Reports-to "${row.reportsTo}" is not in the file or the system`)
+          else if (refRole !== need) push(row.rowNo, row.email, `Reports-to "${row.reportsTo}" must be a ${label}`)
+        }
+      }
+
+      if (errors.length) {
+        errors.sort((a, b) => a.row - b.row)
+        return { created: [], errors }
+      }
+
+      // All valid — hash outside the transaction, then create in dependency
+      // order so a reference is always to an already-created (or existing) user.
+      const hashByEmail = new Map(
+        await Promise.all(norm.map(async (r) => [r.emailKey, await bcrypt.hash(r.password, BCRYPT_ROUNDS)])),
+      )
+      // idByEmail: emailKey -> { id, managerId } for every referenceable user.
+      const idByEmail = new Map()
+      for (const [key, u] of existingByEmail) idByEmail.set(key, { id: u.id, managerId: u.managerId })
+
+      const byRole = (role) => norm.filter((r) => r.role === role)
+      const created = await prisma.$transaction(async (tx) => {
+        const out = []
+        const make = async (row, managerId, teamLeaderId) => {
+          const u = await tx.user.create({
+            data: {
+              name: row.name,
+              email: row.email,
+              passwordHash: hashByEmail.get(row.emailKey),
+              role: row.role,
+              managerId,
+              teamLeaderId,
+            },
+          })
+          idByEmail.set(row.emailKey, { id: u.id, managerId })
+          out.push(u)
+        }
+        for (const row of byRole('SALES_MANAGER')) await make(row, null, null)
+        for (const row of byRole('TEAM_LEADER')) {
+          const mgr = idByEmail.get(row.reportsToKey)
+          await make(row, mgr.id, null)
+        }
+        for (const row of byRole('SALES_EXECUTIVE')) {
+          const leader = idByEmail.get(row.reportsToKey)
+          await make(row, leader.managerId ?? null, leader.id)
+        }
+        return out
+      })
+
+      return { created: created.map(toPublicUser), errors: [] }
     },
 
     async listUsers(actor) {
