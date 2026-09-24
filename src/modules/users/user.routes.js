@@ -6,6 +6,7 @@ import {
   updateUserSchema,
   listUsersQuerySchema,
   bulkZoneAssignSchema,
+  bulkCreateUsersSchema,
   userAccessSchema,
 } from './user.schemas.js'
 import { userController } from './user.controller.js'
@@ -35,6 +36,18 @@ userRoutes.post(
   }),
   validateBody(bulkZoneAssignSchema),
   userController.bulkZones,
+)
+userRoutes.post(
+  '/bulk',
+  requireRole('ADMIN'),
+  audit('User', 'BulkCreate', {
+    describe: (req, old, body) =>
+      body?.data
+        ? `Bulk user create: ${body.data.created.length} created, ${body.data.errors.length} error(s)`
+        : 'Bulk user create',
+  }),
+  validateBody(bulkCreateUsersSchema),
+  userController.bulkCreate,
 )
 userRoutes.get(
   '/',

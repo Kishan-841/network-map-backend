@@ -47,6 +47,26 @@ export const bulkZoneAssignSchema = z.object({
     .max(500),
 })
 
+// Bulk create of the sales hierarchy from a sheet. Kept permissive on purpose:
+// each field is validated per-row in the service so the response can report
+// every bad row (all-or-nothing), instead of zod rejecting the whole payload.
+export const bulkCreateUsersSchema = z.object({
+  users: z
+    .array(
+      z
+        .object({
+          name: z.string().trim().optional().default(''),
+          email: z.string().trim().optional().default(''),
+          password: z.string().optional().default(''),
+          role: z.string().trim().optional().default(''),
+          reportsToEmail: z.string().trim().optional().default(''),
+        })
+        .strip(),
+    )
+    .min(1)
+    .max(500),
+})
+
 export const listUsersQuerySchema = z.object({
   page: z.coerce.number().int().min(1).optional(),
   pageSize: z.coerce.number().int().min(1).max(100).default(50),
