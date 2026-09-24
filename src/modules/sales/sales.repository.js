@@ -61,6 +61,20 @@ export const salesRepository = {
   listBuildings: (scopeWhere) =>
     prisma.building.findMany({ where: scopeWhere, select: buildingCard, orderBy: { buildingName: 'asc' } }),
 
+  // Registry search for assignment — name or address, with the current holder.
+  searchBuildings: (q) =>
+    prisma.building.findMany({
+      where: {
+        OR: [
+          { buildingName: { contains: q, mode: 'insensitive' } },
+          { formattedAddress: { contains: q, mode: 'insensitive' } },
+        ],
+      },
+      select: buildingCard,
+      orderBy: { buildingName: 'asc' },
+      take: 30,
+    }),
+
   countExisting: (ids) => prisma.building.count({ where: { id: { in: ids } } }),
 
   // Of these building ids, the ones whose ACTIVE holder is in the scope set

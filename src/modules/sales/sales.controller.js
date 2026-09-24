@@ -19,6 +19,15 @@ export const salesController = {
     }
   },
 
+  async searchBuildings(req, res, next) {
+    try {
+      const data = await salesService.searchBuildings(req.query.q, req.user)
+      res.json({ success: true, data })
+    } catch (err) {
+      next(err)
+    }
+  },
+
   async history(req, res, next) {
     try {
       const data = await salesService.assignmentHistory(req.query.buildingId, req.user)

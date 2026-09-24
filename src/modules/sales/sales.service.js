@@ -3,6 +3,9 @@ import { salesRepository } from './sales.repository.js'
 import { scopedUserIds, buildingScopeWhere, canAssign } from '../../lib/sales-visibility.js'
 
 const SALES_ROLES = ['SALES_MANAGER', 'TEAM_LEADER', 'SALES_EXECUTIVE']
+// May search the whole building registry and assign any building from it; a
+// TEAM_LEADER, by contrast, only distributes their own pool.
+const REGISTRY_ASSIGNERS = ['ADMIN', 'SALES_MANAGER']
 
 export function createSalesService({ repo = salesRepository } = {}) {
   // The user ids beneath the actor in the hierarchy.
@@ -51,11 +54,19 @@ export function createSalesService({ repo = salesRepository } = {}) {
       return repo.history(buildingId)
     },
 
+    /** Search the whole building registry to assign from (a manager / admin). */
+    async searchBuildings(q, actor) {
+      if (!REGISTRY_ASSIGNERS.includes(actor.role)) throw ApiError.forbidden()
+      const query = (q ?? '').trim()
+      if (query.length < 2) return []
+      return repo.searchBuildings(query)
+    },
+
     /**
      * Assign / distribute buildings to one sales user. The target must be on the
-     * actor's team; the buildings must be assignable by the actor (an ADMIN may
-     * grant any building from the registry; everyone else only what is already
-     * in their pool). Atomic, and it preserves history.
+     * actor's team. An ADMIN or SALES_MANAGER may assign any building from the
+     * registry; a TEAM_LEADER may only distribute what is already in their pool.
+     * Atomic, and it preserves history.
      */
     async assignBuildings({ buildingIds, assignedToId }, actor) {
       if (!canAssign(actor.role)) throw ApiError.forbidden()
@@ -67,9 +78,10 @@ export function createSalesService({ repo = salesRepository } = {}) {
       assertTargetInTeam(actor, target)
 
       const ids = [...new Set(buildingIds)]
-      if (actor.role === 'ADMIN') {
+      if (REGISTRY_ASSIGNERS.includes(actor.role)) {
         if ((await repo.countExisting(ids)) !== ids.length) throw ApiError.badRequest('Some buildings do not exist')
       } else {
+        // A team leader distributes only their own pool.
         const pool = await repo.assignedInScope(ids, await scopeIdsFor(actor))
         if (ids.some((id) => !pool.has(id))) {
           throw ApiError.badRequest('Some buildings are not in your pool to assign')

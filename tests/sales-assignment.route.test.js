@@ -21,6 +21,7 @@ const USERS = [
 ]
 const B1 = 'sales-b1'
 const B2 = 'sales-b2'
+const B3 = 'sales-b3'
 
 const buildingIdsOf = (res) => res.body.data.map((b) => b.id)
 
@@ -40,7 +41,7 @@ beforeAll(async () => {
       },
     })
   }
-  for (const id of [B1, B2]) {
+  for (const id of [B1, B2, B3]) {
     await prisma.building.upsert({
       where: { id },
       update: {},
@@ -57,7 +58,7 @@ beforeAll(async () => {
 })
 
 afterAll(async () => {
-  await prisma.building.deleteMany({ where: { id: { in: [B1, B2] } } }) // cascades assignments
+  await prisma.building.deleteMany({ where: { id: { in: [B1, B2, B3] } } }) // cascades assignments
   await prisma.user.deleteMany({ where: { email: { startsWith: 'sales-made-' } } })
   await prisma.systemLog.deleteMany({ where: { userId: { in: USERS.map((u) => u.id) } } })
   await prisma.user.deleteMany({ where: { id: { in: USERS.map((u) => u.id) } } })
@@ -102,10 +103,24 @@ describe('field-sales assignment + scope', () => {
     expect(res.status).toBe(403)
   })
 
-  it('a manager cannot assign a building outside their pool (400)', async () => {
-    // B2 is unassigned — not in sales-mgr's pool.
+  it('a manager may assign ANY registry building, not just their pool', async () => {
+    // B2 has never been assigned — a manager can still hand it out.
     const res = await request(app).post('/api/v1/sales/assignments').set(auth('sales-mgr')).send({ buildingIds: [B2], assignedToId: 'sales-tl' })
+    expect(res.status).toBe(200)
+  })
+
+  it('a team leader is still limited to their own pool (400 for an unassigned building)', async () => {
+    // B3 is unassigned and not in sales-tl's pool.
+    const res = await request(app).post('/api/v1/sales/assignments').set(auth('sales-tl')).send({ buildingIds: [B3], assignedToId: 'sales-se1' })
     expect(res.status).toBe(400)
+  })
+
+  it('registry search: a manager finds buildings by name; a team leader is refused', async () => {
+    const mgr = await request(app).get('/api/v1/sales/search-buildings?q=SALES-B').set(auth('sales-mgr'))
+    expect(mgr.status).toBe(200)
+    expect(mgr.body.data.map((b) => b.id)).toEqual(expect.arrayContaining([B1, B3]))
+    expect((await request(app).get('/api/v1/sales/search-buildings?q=SALES-B').set(auth('sales-tl'))).status).toBe(403)
+    expect((await request(app).get('/api/v1/sales/search-buildings?q=x').set(auth('sales-mgr'))).status).toBe(400)
   })
 
   it('rejects a non-sales assignee (400)', async () => {
