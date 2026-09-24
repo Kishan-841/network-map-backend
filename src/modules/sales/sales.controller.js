@@ -73,6 +73,15 @@ export const salesController = {
     }
   },
 
+  async removeActivity(req, res, next) {
+    try {
+      const data = await salesService.removeActivity(req.params.id, req.params.type, req.user)
+      res.json({ success: true, data })
+    } catch (err) {
+      next(err)
+    }
+  },
+
   async checkOut(req, res, next) {
     try {
       const data = await salesService.checkOut(req.params.id, req.body, req.user)

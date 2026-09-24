@@ -230,13 +230,17 @@ describe('field-sales visit tracking (check-in / activity / inquiry / check-out)
     expect((await request(app).post('/api/v1/sales/visits').set(auth('sales-se1')).send({ buildingId: B1, ...IN })).status).toBe(409)
   })
 
-  it('logs multiple activities on the open visit', async () => {
+  it('activities are a set — idempotent add, and toggle-off', async () => {
     for (const type of ['DESK', 'UMBRELLA']) {
-      const res = await request(app).post(`/api/v1/sales/visits/${visitId}/activities`).set(auth('sales-se1')).send({ type })
-      expect(res.status).toBe(201)
+      expect((await request(app).post(`/api/v1/sales/visits/${visitId}/activities`).set(auth('sales-se1')).send({ type })).status).toBe(201)
     }
+    // adding DESK again does not stack a second one
+    expect((await request(app).post(`/api/v1/sales/visits/${visitId}/activities`).set(auth('sales-se1')).send({ type: 'DESK' })).status).toBe(201)
+    // toggle UMBRELLA off, then back on
+    expect((await request(app).delete(`/api/v1/sales/visits/${visitId}/activities/UMBRELLA`).set(auth('sales-se1'))).status).toBe(200)
+    expect((await request(app).post(`/api/v1/sales/visits/${visitId}/activities`).set(auth('sales-se1')).send({ type: 'UMBRELLA' })).status).toBe(201)
+    // bad type, and someone else's visit
     expect((await request(app).post(`/api/v1/sales/visits/${visitId}/activities`).set(auth('sales-se1')).send({ type: 'NOPE' })).status).toBe(400)
-    // someone else's visit is a 404
     expect((await request(app).post(`/api/v1/sales/visits/${visitId}/activities`).set(auth('sales-se2')).send({ type: 'LIFT' })).status).toBe(404)
   })
 
