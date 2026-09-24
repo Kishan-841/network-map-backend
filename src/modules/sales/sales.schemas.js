@@ -25,6 +25,13 @@ export const createInquirySchema = z.object({
   email: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.string().trim().email().optional()),
 })
 
+// Filters shared by the activity lists and the dashboard: a date range, and a
+// narrowing to one team member or building. Dates arrive as ISO strings.
 export const activityQuerySchema = z.object({
   buildingId: z.string().min(1).optional(),
+  userId: z.string().min(1).optional(),
+  from: z.coerce.date().optional(),
+  to: z.coerce.date().optional(),
 })
+
+export const dashboardQuerySchema = activityQuerySchema

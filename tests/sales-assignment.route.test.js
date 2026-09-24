@@ -228,3 +228,47 @@ describe('field-sales visits + inquiries', () => {
     expect(inq.body.data.some((i) => i.customerName === 'Asha')).toBe(true)
   })
 })
+
+describe('field-sales dashboard', () => {
+  // By here sales-se1 has exactly 1 visit + 1 inquiry (on B1); nobody else has any.
+  it('a manager sees team totals + per-person activity', async () => {
+    const res = await request(app).get('/api/v1/sales/dashboard').set(auth('sales-mgr'))
+    expect(res.status).toBe(200)
+    expect(res.body.data.totals).toEqual({ visits: 1, inquiries: 1 })
+    expect(res.body.data.team.find((u) => u.id === 'sales-se1')).toMatchObject({ visits: 1, inquiries: 1 })
+    // the whole team is listed, including members with no activity
+    expect(res.body.data.team.map((u) => u.id)).toEqual(expect.arrayContaining(['sales-se1', 'sales-se2', 'sales-tl']))
+    expect(res.body.data.team.find((u) => u.id === 'sales-se2')).toMatchObject({ visits: 0, inquiries: 0 })
+  })
+
+  it('a leader sees only their executives', async () => {
+    const res = await request(app).get('/api/v1/sales/dashboard').set(auth('sales-tl'))
+    expect(res.status).toBe(200)
+    expect(res.body.data.team.map((u) => u.id)).toEqual(expect.arrayContaining(['sales-se1', 'sales-se2']))
+    expect(res.body.data.team.every((u) => u.role === 'SALES_EXECUTIVE')).toBe(true)
+    expect(res.body.data.totals).toEqual({ visits: 1, inquiries: 1 })
+  })
+
+  it('another team sees none of it', async () => {
+    const res = await request(app).get('/api/v1/sales/dashboard').set(auth('sales-mgr2'))
+    expect(res.body.data.totals).toEqual({ visits: 0, inquiries: 0 })
+    expect(res.body.data.team.some((u) => u.id === 'sales-se1')).toBe(false)
+  })
+
+  it('an executive cannot open the dashboard (403)', async () => {
+    expect((await request(app).get('/api/v1/sales/dashboard').set(auth('sales-se1'))).status).toBe(403)
+  })
+
+  it('a future date range shows nothing', async () => {
+    const tomorrow = new Date(Date.now() + 86400000).toISOString()
+    const res = await request(app).get(`/api/v1/sales/dashboard?from=${tomorrow}`).set(auth('sales-mgr'))
+    expect(res.body.data.totals).toEqual({ visits: 0, inquiries: 0 })
+  })
+
+  it('filtering by a specific executive narrows the totals', async () => {
+    const a = await request(app).get('/api/v1/sales/dashboard?userId=sales-se1').set(auth('sales-mgr'))
+    expect(a.body.data.totals).toEqual({ visits: 1, inquiries: 1 })
+    const b = await request(app).get('/api/v1/sales/dashboard?userId=sales-se2').set(auth('sales-mgr'))
+    expect(b.body.data.totals).toEqual({ visits: 0, inquiries: 0 })
+  })
+})
