@@ -100,16 +100,63 @@ export function createSalesService({ repo = salesRepository } = {}) {
     },
 
     async listVisits(actor, filters = {}) {
-      const ids = await scopeIdsFor(actor)
-      if (ids !== null && ids.length === 0) return []
-      return repo.listVisits(ids, filters)
+      return repo.listVisits(await activityWhere(actor, filters, 'visitedAt'))
     },
 
     async listInquiries(actor, filters = {}) {
-      const ids = await scopeIdsFor(actor)
-      if (ids !== null && ids.length === 0) return []
-      return repo.listInquiries(ids, filters)
+      return repo.listInquiries(await activityWhere(actor, filters, 'createdAt'))
     },
+
+    /**
+     * Team activity for a manager / team leader (or admin): totals plus a
+     * per-person breakdown, all within the actor's scope and the given filters.
+     */
+    async dashboard(actor, filters = {}) {
+      if (!canAssign(actor.role)) throw ApiError.forbidden()
+      const [visitWhere, inquiryWhere, team] = await Promise.all([
+        activityWhere(actor, filters, 'visitedAt'),
+        activityWhere(actor, filters, 'createdAt'),
+        repo.teamMembers(actor),
+      ])
+      const [visits, inquiries, byVisit, byInquiry] = await Promise.all([
+        repo.countVisits(visitWhere),
+        repo.countInquiries(inquiryWhere),
+        repo.visitsByUser(visitWhere),
+        repo.inquiriesByUser(inquiryWhere),
+      ])
+      const vm = new Map(byVisit.map((r) => [r.userId, r._count._all]))
+      const im = new Map(byInquiry.map((r) => [r.createdById, r._count._all]))
+      const perUser = team.map((u) => ({
+        id: u.id,
+        name: u.name,
+        role: u.role,
+        visits: vm.get(u.id) ?? 0,
+        inquiries: im.get(u.id) ?? 0,
+      }))
+      return { totals: { visits, inquiries }, team: perUser }
+    },
+  }
+
+  // The scoped `where` for a visit / inquiry query: the actor's team id set
+  // (fail-closed), optionally narrowed to one user (only if they are in scope),
+  // plus optional building and date-range filters. `dateField` is `visitedAt`
+  // for visits or `createdAt` for inquiries; the id field follows from it.
+  async function activityWhere(actor, { userId, buildingId, from, to } = {}, dateField) {
+    const scopeIds = await scopeIdsFor(actor)
+    let ids = scopeIds
+    if (userId) {
+      if (scopeIds === null) ids = [userId]
+      else ids = scopeIds.includes(userId) ? [userId] : ['__none__']
+    }
+    const idField = dateField === 'visitedAt' ? 'userId' : 'createdById'
+    const range = {}
+    if (from) range.gte = from
+    if (to) range.lte = to
+    return {
+      ...(ids === null ? {} : { [idField]: { in: ids } }),
+      ...(buildingId ? { buildingId } : {}),
+      ...(Object.keys(range).length ? { [dateField]: range } : {}),
+    }
   }
 
   // A building the actor may act on: it must be in their sales scope. Anything

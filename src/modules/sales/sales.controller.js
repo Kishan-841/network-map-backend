@@ -72,4 +72,13 @@ export const salesController = {
       next(err)
     }
   },
+
+  async dashboard(req, res, next) {
+    try {
+      const data = await salesService.dashboard(req.user, req.query)
+      res.json({ success: true, data })
+    } catch (err) {
+      next(err)
+    }
+  },
 }

@@ -8,6 +8,7 @@ import {
   recordVisitSchema,
   createInquirySchema,
   activityQuerySchema,
+  dashboardQuerySchema,
 } from './sales.schemas.js'
 import { salesController } from './sales.controller.js'
 
@@ -23,6 +24,9 @@ const ASSIGNER = requireRole('ADMIN', 'SALES_MANAGER', 'TEAM_LEADER')
 salesRoutes.get('/buildings', SALES_ANY, salesController.myBuildings)
 
 salesRoutes.get('/team', ASSIGNER, salesController.team)
+
+// Manager / team-leader dashboard: team totals + per-person activity.
+salesRoutes.get('/dashboard', ASSIGNER, validateQuery(dashboardQuerySchema), salesController.dashboard)
 
 salesRoutes.get('/assignments', SALES_ANY, validateQuery(historyQuerySchema), salesController.history)
 

@@ -93,23 +93,29 @@ export const salesRepository = {
 
   createInquiry: (data) => prisma.customerInquiry.create({ data }),
 
-  // Scoped activity. `scopeIds` null = admin = everything; an array restricts to
-  // that team; [] would match nothing (the service short-circuits before here).
-  listVisits: (scopeIds, { buildingId } = {}) =>
+  // The service builds the scoped `where` (a fail-closed id set + optional
+  // date / building filters); these just run it.
+  listVisits: (where) =>
     prisma.buildingVisit.findMany({
-      where: { ...(scopeIds === null ? {} : { userId: { in: scopeIds } }), ...(buildingId ? { buildingId } : {}) },
+      where,
       orderBy: { visitedAt: 'desc' },
       take: 500,
       include: { user: holder, building: { select: { id: true, buildingName: true, formattedAddress: true } } },
     }),
 
-  listInquiries: (scopeIds, { buildingId } = {}) =>
+  listInquiries: (where) =>
     prisma.customerInquiry.findMany({
-      where: { ...(scopeIds === null ? {} : { createdById: { in: scopeIds } }), ...(buildingId ? { buildingId } : {}) },
+      where,
       orderBy: { createdAt: 'desc' },
       take: 500,
       include: { createdBy: holder, building: { select: { id: true, buildingName: true } } },
     }),
+
+  countVisits: (where) => prisma.buildingVisit.count({ where }),
+  countInquiries: (where) => prisma.customerInquiry.count({ where }),
+  visitsByUser: (where) => prisma.buildingVisit.groupBy({ by: ['userId'], where, _count: { _all: true } }),
+  inquiriesByUser: (where) =>
+    prisma.customerInquiry.groupBy({ by: ['createdById'], where, _count: { _all: true } }),
 
   // Close every ACTIVE assignment for these buildings, then open a fresh one —
   // in one transaction, so history is preserved and a building never has two
