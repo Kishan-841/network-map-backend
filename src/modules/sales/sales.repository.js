@@ -61,6 +61,12 @@ export const salesRepository = {
   listBuildings: (scopeWhere) =>
     prisma.building.findMany({ where: scopeWhere, select: buildingCard, orderBy: { buildingName: 'asc' } }),
 
+  // Every building in the registry, for the sales map a manager / admin sees.
+  // Carries the ACTIVE holder (via buildingCard) so the caller can flag which
+  // ones are assigned within their team.
+  listAllBuildings: () =>
+    prisma.building.findMany({ select: buildingCard, orderBy: { buildingName: 'asc' } }),
+
   // Registry search for assignment — name or address, with the current holder.
   searchBuildings: (q) =>
     prisma.building.findMany({

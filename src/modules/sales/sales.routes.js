@@ -26,6 +26,10 @@ const ASSIGNER = requireRole('ADMIN', 'SALES_MANAGER', 'TEAM_LEADER')
 
 salesRoutes.get('/buildings', SALES_ANY, salesController.myBuildings)
 
+// Buildings for the map: manager/admin see the whole registry (each tagged
+// whether it's assigned within their team); a leader/executive see only theirs.
+salesRoutes.get('/map-buildings', SALES_ANY, salesController.mapBuildings)
+
 salesRoutes.get('/team', ASSIGNER, salesController.team)
 
 // Registry search to assign from — a manager (or admin) only; a team leader
