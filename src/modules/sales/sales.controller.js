@@ -19,6 +19,15 @@ export const salesController = {
     }
   },
 
+  async mapBuildings(req, res, next) {
+    try {
+      const data = await salesService.listMapBuildings(req.user)
+      res.json({ success: true, data })
+    } catch (err) {
+      next(err)
+    }
+  },
+
   async searchBuildings(req, res, next) {
     try {
       const data = await salesService.searchBuildings(req.query.q, req.user)

@@ -41,6 +41,30 @@ export function createSalesService({ repo = salesRepository } = {}) {
       return repo.listBuildings(buildingScopeWhere(ids))
     },
 
+    /**
+     * Buildings for the sales MAP, each tagged `assigned` (is it held by someone
+     * in the actor's scope, so they may check in there):
+     *  - ADMIN / SALES_MANAGER: the WHOLE registry — assigned=true only where the
+     *    ACTIVE holder is in their scope (admin: any active holder).
+     *  - TEAM_LEADER / SALES_EXECUTIVE: only the buildings assigned to their
+     *    scope, all assigned=true.
+     * The map click uses `assigned` to choose check-in vs assign.
+     */
+    async listMapBuildings(actor) {
+      const ids = await scopeIdsFor(actor)
+      const inScope = (b) =>
+        ids === null
+          ? (b.salesAssignments?.length ?? 0) > 0
+          : (b.salesAssignments ?? []).some((a) => ids.includes(a.assignedToId))
+      if (actor.role === 'ADMIN' || actor.role === 'SALES_MANAGER') {
+        const buildings = await repo.listAllBuildings()
+        return buildings.map((b) => ({ ...b, assigned: inScope(b) }))
+      }
+      if (ids !== null && ids.length === 0) return []
+      const buildings = await repo.listBuildings(buildingScopeWhere(ids))
+      return buildings.map((b) => ({ ...b, assigned: true }))
+    },
+
     /** Assignment history for one building the actor can see. */
     async assignmentHistory(buildingId, actor) {
       const ids = await scopeIdsFor(actor)
