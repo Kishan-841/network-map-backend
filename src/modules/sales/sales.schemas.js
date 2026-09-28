@@ -26,6 +26,14 @@ export const createMeetingSchema = z.object({
   note: z.string().trim().max(500).optional(),
 })
 
+// Meetings list: an optional date range (from/to, ISO) + pagination.
+export const meetingsQuerySchema = z.object({
+  from: z.string().optional(),
+  to: z.string().optional(),
+  page: z.coerce.number().int().positive().optional(),
+  pageSize: z.coerce.number().int().positive().max(100).optional(),
+})
+
 // Check IN: location is forced (both coords required) and a selfie is required.
 export const checkInSchema = z.object({
   buildingId: z.string().min(1),

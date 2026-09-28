@@ -194,20 +194,37 @@ export function createSalesService({ repo = salesRepository } = {}) {
 
     /**
      * Log this morning's meeting for the team leader (photo + forced location).
-     * One per calendar day — logging again the same day replaces it.
+     * One per calendar day, and immutable — a second attempt the same day is a
+     * conflict (a TL cannot change a logged meeting's photo or location).
      */
     async createMeeting(actor, { photoUrl, latitude, longitude, note }) {
       const meetingDate = new Date()
       meetingDate.setUTCHours(0, 0, 0, 0) // date-only key
-      return repo.upsertMeeting({ teamLeaderId: actor.id, meetingDate, photoUrl, latitude, longitude, note })
+      const existing = await repo.existingMeeting(actor.id, meetingDate)
+      if (existing) throw ApiError.conflict("You have already logged today's meeting")
+      return repo.createMeeting({ teamLeaderId: actor.id, meetingDate, photoUrl, latitude, longitude, note: note ?? null })
     },
 
-    /** Meetings a team leader / manager may see: own for a TL, the team's for a
-     * manager, all for an admin. */
-    async listMeetings(actor) {
+    /**
+     * Meetings a team leader / manager may see (own for a TL, the team's for a
+     * manager, all for an admin), filtered by an optional date range and
+     * paginated. Returns { items, pagination }.
+     */
+    async listMeetings(actor, { from, to, page = 1, pageSize = 20 } = {}) {
+      const empty = { items: [], pagination: { page: 1, pageSize, total: 0, totalPages: 1 } }
       const ids = await scopeIdsFor(actor)
-      if (ids !== null && ids.length === 0) return []
-      return repo.listMeetings(ids)
+      if (ids !== null && ids.length === 0) return empty
+      const where = {
+        ...(ids === null ? {} : { teamLeaderId: { in: ids } }),
+        ...(from || to
+          ? { createdAt: { ...(from && { gte: new Date(from) }), ...(to && { lte: new Date(to) }) } }
+          : {}),
+      }
+      const [total, items] = await Promise.all([
+        repo.countMeetings(where),
+        repo.listMeetings(where, { skip: (page - 1) * pageSize, take: pageSize }),
+      ])
+      return { items, pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) } }
     },
 
     /** One visit in full — scoped, so out of scope is a 404 (the detail page). */

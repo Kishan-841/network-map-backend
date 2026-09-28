@@ -192,21 +192,23 @@ export const salesRepository = {
       }),
     ]),
 
-  // Daily morning meetings — one per team leader per day (replaced on re-log).
-  upsertMeeting: ({ teamLeaderId, meetingDate, photoUrl, latitude, longitude, note }) =>
-    prisma.teamMeeting.upsert({
+  // Daily morning meetings — immutable once logged; one per team leader per day.
+  existingMeeting: (teamLeaderId, meetingDate) =>
+    prisma.teamMeeting.findUnique({
       where: { teamLeaderId_meetingDate: { teamLeaderId, meetingDate } },
-      create: { teamLeaderId, meetingDate, photoUrl, latitude, longitude, note: note ?? null },
-      update: { photoUrl, latitude, longitude, note: note ?? null },
-      include: { teamLeader: { select: { id: true, name: true } } },
+      select: { id: true },
     }),
+  createMeeting: (data) =>
+    prisma.teamMeeting.create({ data, include: { teamLeader: { select: { id: true, name: true } } } }),
 
-  // Newest first, scoped to a set of team-leader ids (null = every team leader).
-  listMeetings: (teamLeaderIds) =>
+  // Newest first, filtered + paginated by the service-built `where`.
+  listMeetings: (where, { skip = 0, take = 20 } = {}) =>
     prisma.teamMeeting.findMany({
-      where: teamLeaderIds === null ? {} : { teamLeaderId: { in: teamLeaderIds } },
+      where,
       include: { teamLeader: { select: { id: true, name: true } } },
       orderBy: { createdAt: 'desc' },
-      take: 200,
+      skip,
+      take,
     }),
+  countMeetings: (where) => prisma.teamMeeting.count({ where }),
 }
