@@ -17,8 +17,9 @@ operatorRoutes.use(requireAuth)
 operatorRoutes.get(
   '/',
   // SURVEYOR reads it too: a surveyor drawing a fiber picks the operator whose
-  // network it belongs to. The list is names and cities, nothing sensitive.
-  requireRole('ADMIN', 'MANAGER', 'SUPERVISOR', 'SURVEYOR'),
+  // network it belongs to. SALES_MANAGER reads it to filter the registry by
+  // operator when assigning. The list is names and cities, nothing sensitive.
+  requireRole('ADMIN', 'MANAGER', 'SUPERVISOR', 'SURVEYOR', 'SALES_MANAGER'),
   validateQuery(listOperatorsQuerySchema),
   operatorController.list,
 )

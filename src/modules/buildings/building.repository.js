@@ -29,6 +29,13 @@ const listInclude = {
   contact: true,
   // Who logged it — the acquisition list shows this as the "Agent" column.
   createdBy: { select: { id: true, name: true } },
+  // The current ACTIVE sales holder, so the sales manager's registry view can
+  // show "Held by" (and the coverage page's "Assign to sales" knows the state).
+  salesAssignments: {
+    where: { status: 'ACTIVE' },
+    take: 1,
+    select: { assignedTo: { select: { id: true, name: true, role: true } } },
+  },
 }
 
 /**
