@@ -191,4 +191,22 @@ export const salesRepository = {
         data: buildingIds.map((buildingId) => ({ buildingId, assignedToId, assignedById })),
       }),
     ]),
+
+  // Daily morning meetings — one per team leader per day (replaced on re-log).
+  upsertMeeting: ({ teamLeaderId, meetingDate, photoUrl, latitude, longitude, note }) =>
+    prisma.teamMeeting.upsert({
+      where: { teamLeaderId_meetingDate: { teamLeaderId, meetingDate } },
+      create: { teamLeaderId, meetingDate, photoUrl, latitude, longitude, note: note ?? null },
+      update: { photoUrl, latitude, longitude, note: note ?? null },
+      include: { teamLeader: { select: { id: true, name: true } } },
+    }),
+
+  // Newest first, scoped to a set of team-leader ids (null = every team leader).
+  listMeetings: (teamLeaderIds) =>
+    prisma.teamMeeting.findMany({
+      where: teamLeaderIds === null ? {} : { teamLeaderId: { in: teamLeaderIds } },
+      include: { teamLeader: { select: { id: true, name: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    }),
 }

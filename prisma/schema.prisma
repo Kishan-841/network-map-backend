@@ -117,6 +117,7 @@ model User {
   assignmentsMade  BuildingAssignment[] @relation("AssignmentBy")
   visitsRecorded   BuildingVisit[]      @relation("VisitBy")
   inquiriesCreated CustomerInquiry[]    @relation("InquiryBy")
+  teamMeetings     TeamMeeting[]        @relation("TeamMeetingBy")
 }
 
 /// One row per pincode an acquisition agent covers (within one city).
@@ -584,6 +585,25 @@ model CustomerInquiry {
   @@index([buildingId])
   @@index([createdById, createdAt])
   @@index([visitId])
+}
+
+/// A team leader's daily morning meeting — a photo, the location, and the time.
+/// One per team leader per calendar day (logging again the same day replaces
+/// it). Seen by the team leader and their sales manager.
+model TeamMeeting {
+  id           String   @id @default(cuid())
+  teamLeaderId String
+  teamLeader   User     @relation("TeamMeetingBy", fields: [teamLeaderId], references: [id], onDelete: Cascade)
+  /// The calendar day the meeting is for (date-only), so there is one per day.
+  meetingDate  DateTime @db.Date
+  photoUrl     String
+  latitude     Float
+  longitude    Float
+  note         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([teamLeaderId, meetingDate])
 }
 
 model BuildingDetails {
