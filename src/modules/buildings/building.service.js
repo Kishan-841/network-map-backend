@@ -511,13 +511,15 @@ export function createBuildingService({ buildingRepository, storage, userReposit
      * all sit in ONE zone, to an OLT that belongs to that same zone. An ADMIN
      * may cross zones. Whatever the UI sends, this is where it is enforced.
      */
-    async bulkAssignOlt({ ids, oltId, ponPort }, actor) {
+    async bulkAssignOlt({ ids, oltId, ponPorts }, actor) {
       const olt = await buildingRepository.findOltWithZone(oltId)
       if (!olt) throw ApiError.badRequest('That OLT does not exist')
-      if (!Number.isInteger(ponPort) || ponPort < 1 || ponPort > olt.ponPortCount) {
-        throw ApiError.badRequest(`PON port must be between 1 and ${olt.ponPortCount}`)
+      const ports = [...new Set(ponPorts)]
+      if (ports.some((p) => !Number.isInteger(p) || p < 1 || p > olt.ponPortCount)) {
+        throw ApiError.badRequest(`PON ports must be between 1 and ${olt.ponPortCount}`)
       }
-      const oltZoneId = olt.pop?.zoneId ?? null
+      // An OLT now serves several zones (its POP's zones); any of them counts.
+      const oltZoneIds = (olt.pop?.zones ?? []).map((z) => z.id)
 
       // Only the buildings this actor may touch — the same scope the list uses.
       const scope = await buildListWhere({}, actor)
@@ -530,13 +532,13 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         if (zones.size > 1) {
           throw ApiError.badRequest('Select buildings from the same zone to assign an OLT')
         }
-        if (!oltZoneId || oltZoneId !== rows[0].zoneId) {
+        if (!oltZoneIds.includes(rows[0].zoneId)) {
           throw ApiError.badRequest('That OLT is in a different zone from the selected buildings')
         }
       }
 
-      const { count } = await buildingRepository.updateMany(where, { oltId, ponPort })
-      return { count, oltId, ponPort }
+      const { count } = await buildingRepository.updateMany(where, { oltId, ponPorts: ports })
+      return { count, oltId, ponPorts: ports }
     },
 
     async updateStatus(id, { feasibleStatus, surveyStatus, isLive }) {
