@@ -260,4 +260,22 @@ describe('PATCH /buildings/bulk-olt — multiple PON ports & multi-zone OLTs', (
       .send({ ids: [state.b1], oltId: state.oltB, ponPorts: [1] })
     expect(res.status).toBe(400)
   })
+
+  it('records the PON ports in the audit log, not "undefined"', async () => {
+    await request(app)
+      .patch('/api/v1/buildings/bulk-olt')
+      .set(...auth(state.adminId))
+      .send({ ids: [state.b2], oltId: state.oltA, ponPorts: [6, 7, 8] })
+    // audit() writes on res 'finish' — poll for the log carrying these ports.
+    let log = null
+    for (let i = 0; i < 40 && !log; i++) {
+      log = await prisma.systemLog.findFirst({
+        where: { action: 'BulkOltMap', description: { contains: '6, 7, 8' } },
+        orderBy: { createdAt: 'desc' },
+      })
+      if (!log) await new Promise((r) => setTimeout(r, 25))
+    }
+    expect(log).toBeTruthy()
+    expect(log.description).not.toContain('undefined')
+  })
 })
