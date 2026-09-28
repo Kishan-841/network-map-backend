@@ -188,7 +188,7 @@ model Zone {
   createdAt     DateTime   @default(now())
   buildings     Building[]
   fibers        Fiber[]
-  pops          Pop[]
+  pops          Pop[]      @relation("PopZones")
   assignedUsers User[]     @relation("UserAssignedZones")
   /// Groups zones under an operator; null for zones with no operator yet.
   operatorId    String?
@@ -249,11 +249,10 @@ model Pop {
   name      String   @unique
   latitude  Float
   longitude Float
-  /// The zone this site sits in. Required on new POPs — who may see a POP
-  /// follows its zone — but nullable, because the POPs recorded before this
-  /// have none and stay visible to everyone until one is set.
-  zoneId    String?
-  zone      Zone?    @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  /// The zones this site serves. Whoever is assigned to ANY of these sees and
+  /// may use the POP and its OLTs; the maker and ADMINs always do. Empty for
+  /// POPs recorded before zones were kept — those stay maker/ADMIN-only.
+  zones     Zone[]   @relation("PopZones")
   notes     String?
   /// Where the rack stands on site — floor, room, building. The map pin says
   /// where the POP is; this says where to walk once you are there.
@@ -489,12 +488,12 @@ model Building {
   isLive           Boolean          @default(false)
   createdById      String
   createdBy        User             @relation(fields: [createdById], references: [id])
-  /// Which OLT + PON port serves this building (set in bulk from the Buildings
-  /// tab). Nullable: existing buildings are unmapped until someone maps them.
-  /// The OLT's zone is its POP's zone; deleting the OLT clears the mapping.
+  /// Which OLT + PON port(s) serve this building (set in bulk from the Buildings
+  /// tab). Nullable OLT: existing buildings are unmapped until someone maps them.
+  /// A building may use several PON ports; the OLT's zones are its POP's zones.
   oltId            String?
   olt              Olt?             @relation(fields: [oltId], references: [id], onDelete: SetNull)
-  ponPort          Int?
+  ponPorts         Int[]            @default([])
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
   details          BuildingDetails?
