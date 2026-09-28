@@ -3,7 +3,7 @@ import { prisma } from '../../lib/prisma.js'
 const withOlts = {
   olts: { orderBy: { name: 'asc' }, include: { _count: { select: { fibers: true } } } },
   devices: { orderBy: [{ kind: 'asc' }, { createdAt: 'asc' }] },
-  zone: { select: { id: true, name: true } },
+  zones: { select: { id: true, name: true } },
   createdBy: { select: { id: true, name: true } },
   _count: { select: { points: true } },
 }
@@ -48,7 +48,7 @@ export const popRepository = {
   createOlt: (data) => prisma.olt.create({ data }),
   // An OLT is only as visible as the POP it stands in.
   findOltById: (id) =>
-    prisma.olt.findUnique({ where: { id }, include: { pop: { select: { createdById: true, zoneId: true } } } }),
+    prisma.olt.findUnique({ where: { id }, include: { pop: { select: { createdById: true } } } }),
   findOltVisible: (id, popWhere = {}) => prisma.olt.findFirst({ where: { id, pop: popWhere } }),
   findOltByName: (popId, name) => prisma.olt.findFirst({ where: { popId, name } }),
   updateOlt: (id, data) => prisma.olt.update({ where: { id }, data }),
