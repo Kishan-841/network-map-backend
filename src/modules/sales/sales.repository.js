@@ -58,6 +58,12 @@ export const salesRepository = {
       .findMany({ where: { teamLeaderId }, select: { id: true } })
       .then((r) => r.map((u) => u.id)),
 
+  // Of the given ids, the ones that are this team leader's own executives.
+  executivesUnder: (teamLeaderId, ids) =>
+    prisma.user
+      .findMany({ where: { id: { in: ids }, teamLeaderId, role: 'SALES_EXECUTIVE' }, select: { id: true } })
+      .then((r) => r.map((u) => u.id)),
+
   listBuildings: (scopeWhere) =>
     prisma.building.findMany({ where: scopeWhere, select: buildingCard, orderBy: { buildingName: 'asc' } }),
 
@@ -119,6 +125,7 @@ export const salesRepository = {
         building: { select: { id: true, buildingName: true, formattedAddress: true } },
         activities: { orderBy: { createdAt: 'asc' } },
         inquiries: { select: { id: true, customerName: true } },
+        companions: { select: { user: { select: { id: true, name: true } } } },
       },
     }),
 
@@ -136,6 +143,7 @@ export const salesRepository = {
         building: { select: { id: true, buildingName: true, formattedAddress: true, latitude: true, longitude: true } },
         activities: { orderBy: { createdAt: 'asc' } },
         inquiries: { select: { id: true, customerName: true, phone: true, email: true, createdAt: true } },
+        companions: { select: { user: { select: { id: true, name: true } } } },
       },
     }),
 
@@ -161,6 +169,7 @@ export const salesRepository = {
         building: { select: { id: true, buildingName: true, formattedAddress: true } },
         activities: { orderBy: { createdAt: 'asc' } },
         inquiries: { select: { id: true, customerName: true, phone: true, email: true, createdAt: true } },
+        companions: { select: { user: { select: { id: true, name: true } } } },
       },
     }),
 

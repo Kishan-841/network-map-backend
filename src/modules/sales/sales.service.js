@@ -122,11 +122,29 @@ export function createSalesService({ repo = salesRepository } = {}) {
     },
 
     /** Check IN: one open visit at a time; the building must be in scope. */
-    async checkIn({ buildingId, checkInLat, checkInLng, selfieUrl, note }, actor) {
+    async checkIn({ buildingId, checkInLat, checkInLng, selfieUrl, note, companionIds, wentSolo }, actor) {
       if (await repo.openVisitFor(actor.id)) {
         throw ApiError.conflict('Check out of your current building before checking into another')
       }
       const building = await assertBuildingInScope(buildingId, actor)
+
+      // A team leader must record who they went with (their own executives) or
+      // that they went solo — one or the other, required.
+      let solo = false
+      let companions = []
+      if (actor.role === 'TEAM_LEADER') {
+        const ids = [...new Set(companionIds ?? [])]
+        if (wentSolo) {
+          solo = true
+        } else if (ids.length) {
+          const valid = await repo.executivesUnder(actor.id, ids)
+          if (valid.length !== ids.length) throw ApiError.badRequest('Pick sales executives from your own team')
+          companions = ids
+        } else {
+          throw ApiError.badRequest('Pick who you went with, or mark that you went solo')
+        }
+      }
+
       return repo.createVisit({
         buildingId: building.id,
         userId: actor.id,
@@ -134,6 +152,8 @@ export function createSalesService({ repo = salesRepository } = {}) {
         checkInLng,
         selfieUrl,
         note: note ?? null,
+        wentSolo: solo,
+        ...(companions.length ? { companions: { create: companions.map((userId) => ({ userId })) } } : {}),
       })
     },
 
