@@ -122,11 +122,29 @@ export function createSalesService({ repo = salesRepository } = {}) {
     },
 
     /** Check IN: one open visit at a time; the building must be in scope. */
-    async checkIn({ buildingId, checkInLat, checkInLng, selfieUrl, note }, actor) {
+    async checkIn({ buildingId, checkInLat, checkInLng, selfieUrl, note, companionIds, wentSolo }, actor) {
       if (await repo.openVisitFor(actor.id)) {
         throw ApiError.conflict('Check out of your current building before checking into another')
       }
       const building = await assertBuildingInScope(buildingId, actor)
+
+      // A team leader must record who they went with (their own executives) or
+      // that they went solo — one or the other, required.
+      let solo = false
+      let companions = []
+      if (actor.role === 'TEAM_LEADER') {
+        const ids = [...new Set(companionIds ?? [])]
+        if (wentSolo) {
+          solo = true
+        } else if (ids.length) {
+          const valid = await repo.executivesUnder(actor.id, ids)
+          if (valid.length !== ids.length) throw ApiError.badRequest('Pick sales executives from your own team')
+          companions = ids
+        } else {
+          throw ApiError.badRequest('Pick who you went with, or mark that you went solo')
+        }
+      }
+
       return repo.createVisit({
         buildingId: building.id,
         userId: actor.id,
@@ -134,6 +152,8 @@ export function createSalesService({ repo = salesRepository } = {}) {
         checkInLng,
         selfieUrl,
         note: note ?? null,
+        wentSolo: solo,
+        ...(companions.length ? { companions: { create: companions.map((userId) => ({ userId })) } } : {}),
       })
     },
 
@@ -190,6 +210,41 @@ export function createSalesService({ repo = salesRepository } = {}) {
 
     async listVisits(actor, filters = {}) {
       return repo.listVisits(await activityWhere(actor, filters, 'visitedAt'))
+    },
+
+    /**
+     * Log this morning's meeting for the team leader (photo + forced location).
+     * One per calendar day, and immutable — a second attempt the same day is a
+     * conflict (a TL cannot change a logged meeting's photo or location).
+     */
+    async createMeeting(actor, { photoUrl, latitude, longitude, note }) {
+      const meetingDate = new Date()
+      meetingDate.setUTCHours(0, 0, 0, 0) // date-only key
+      const existing = await repo.existingMeeting(actor.id, meetingDate)
+      if (existing) throw ApiError.conflict("You have already logged today's meeting")
+      return repo.createMeeting({ teamLeaderId: actor.id, meetingDate, photoUrl, latitude, longitude, note: note ?? null })
+    },
+
+    /**
+     * Meetings a team leader / manager may see (own for a TL, the team's for a
+     * manager, all for an admin), filtered by an optional date range and
+     * paginated. Returns { items, pagination }.
+     */
+    async listMeetings(actor, { from, to, page = 1, pageSize = 20 } = {}) {
+      const empty = { items: [], pagination: { page: 1, pageSize, total: 0, totalPages: 1 } }
+      const ids = await scopeIdsFor(actor)
+      if (ids !== null && ids.length === 0) return empty
+      const where = {
+        ...(ids === null ? {} : { teamLeaderId: { in: ids } }),
+        ...(from || to
+          ? { createdAt: { ...(from && { gte: new Date(from) }), ...(to && { lte: new Date(to) }) } }
+          : {}),
+      }
+      const [total, items] = await Promise.all([
+        repo.countMeetings(where),
+        repo.listMeetings(where, { skip: (page - 1) * pageSize, take: pageSize }),
+      ])
+      return { items, pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) } }
     },
 
     /** One visit in full — scoped, so out of scope is a 404 (the detail page). */

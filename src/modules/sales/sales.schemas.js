@@ -18,6 +18,22 @@ export const searchBuildingsQuerySchema = z.object({
 const latitude = z.number({ invalid_type_error: 'Location is required' }).min(-90).max(90)
 const longitude = z.number({ invalid_type_error: 'Location is required' }).min(-180).max(180)
 
+// A team leader's daily morning meeting: a photo + the location (forced).
+export const createMeetingSchema = z.object({
+  photoUrl: z.string().trim().min(1, 'A photo is required'),
+  latitude,
+  longitude,
+  note: z.string().trim().max(500).optional(),
+})
+
+// Meetings list: an optional date range (from/to, ISO) + pagination.
+export const meetingsQuerySchema = z.object({
+  from: z.string().optional(),
+  to: z.string().optional(),
+  page: z.coerce.number().int().positive().optional(),
+  pageSize: z.coerce.number().int().positive().max(100).optional(),
+})
+
 // Check IN: location is forced (both coords required) and a selfie is required.
 export const checkInSchema = z.object({
   buildingId: z.string().min(1),
@@ -25,6 +41,9 @@ export const checkInSchema = z.object({
   checkInLng: longitude,
   selfieUrl: z.string().trim().min(1, 'A selfie is required'),
   note: z.string().trim().max(500).optional(),
+  // A team leader records who they went with (their own executives) or solo.
+  companionIds: z.array(z.string().min(1)).max(50).optional(),
+  wentSolo: z.boolean().optional(),
 })
 
 export const visitActivitySchema = z.object({

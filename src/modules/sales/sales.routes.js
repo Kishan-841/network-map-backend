@@ -12,6 +12,8 @@ import {
   createInquirySchema,
   activityQuerySchema,
   dashboardQuerySchema,
+  createMeetingSchema,
+  meetingsQuerySchema,
 } from './sales.schemas.js'
 import { salesController } from './sales.controller.js'
 
@@ -43,6 +45,17 @@ salesRoutes.get(
 
 // Manager / team-leader dashboard: team totals + per-person activity.
 salesRoutes.get('/dashboard', ASSIGNER, validateQuery(dashboardQuerySchema), salesController.dashboard)
+
+// Daily morning meetings. A TEAM_LEADER logs one (photo + forced location);
+// a manager / admin (and the TL) read the scoped list.
+salesRoutes.post(
+  '/meetings',
+  requireRole('TEAM_LEADER'),
+  audit('TeamMeeting', 'RecordMeeting', { describe: () => "Logged the morning meeting" }),
+  validateBody(createMeetingSchema),
+  salesController.createMeeting,
+)
+salesRoutes.get('/meetings', ASSIGNER, validateQuery(meetingsQuerySchema), salesController.listMeetings)
 
 salesRoutes.get('/assignments', SALES_ANY, validateQuery(historyQuerySchema), salesController.history)
 

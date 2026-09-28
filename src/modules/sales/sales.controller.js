@@ -28,6 +28,24 @@ export const salesController = {
     }
   },
 
+  async createMeeting(req, res, next) {
+    try {
+      const data = await salesService.createMeeting(req.user, req.body)
+      res.status(201).json({ success: true, data })
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  async listMeetings(req, res, next) {
+    try {
+      const data = await salesService.listMeetings(req.user, req.validatedQuery ?? {})
+      res.json({ success: true, data })
+    } catch (err) {
+      next(err)
+    }
+  },
+
   async searchBuildings(req, res, next) {
     try {
       const data = await salesService.searchBuildings(req.query.q, req.user)
