@@ -18,7 +18,9 @@ zoneRoutes.use(requireAuth)
 // acquisition team must never receive the coverage network layout.
 zoneRoutes.get(
   '/',
-  requireRole('ADMIN', 'MANAGER', 'SURVEYOR', 'SUPERVISOR'),
+  // SALES_MANAGER reads it to filter the registry by zone when assigning to
+  // their team (read-only; zone writes stay ADMIN/MANAGER).
+  requireRole('ADMIN', 'MANAGER', 'SURVEYOR', 'SUPERVISOR', 'SALES_MANAGER'),
   validateQuery(listZonesQuerySchema),
   zoneController.list,
 )
