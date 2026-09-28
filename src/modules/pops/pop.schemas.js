@@ -70,15 +70,28 @@ const popEquipment = {
   devices: z.array(deviceRow).max(50).optional(),
 }
 
-export const createPopSchema = z.object({
+// zoneIds is required here (≥1) and optional in the partial below. A POP may
+// serve several zones; whoever is assigned to any of them may see it. A legacy
+// singular `zoneId` (old frontend, deploy window) is folded into `zoneIds`.
+const foldLegacyZone = (v) => {
+  if (v && typeof v === 'object' && v.zoneIds === undefined && v.zoneId != null) {
+    const { zoneId, ...rest } = v
+    return { ...rest, zoneIds: [zoneId] }
+  }
+  return v
+}
+
+const popObject = z.object({
   name: z.string().trim().min(1).max(100),
   ...coord,
-  zoneId: z.string().min(1),
+  zoneIds: z.array(z.string().min(1)).min(1),
   notes: z.string().trim().max(500).nullish(),
   ...popSheet,
   ...popEquipment,
 })
-export const updatePopSchema = createPopSchema.partial()
+
+export const createPopSchema = z.preprocess(foldLegacyZone, popObject)
+export const updatePopSchema = z.preprocess(foldLegacyZone, popObject.partial())
 
 export const createOltSchema = z.object({
   name: z.string().trim().min(1).max(100),
