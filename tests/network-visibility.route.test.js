@@ -278,7 +278,8 @@ describe('GET /pops/:id — one POP in full, for the detail drawer', () => {
       expect(await status(`pops/${mine.pop}`, who)).toBe(200)
     }
     const res = await request(app).get(`/api/v1/pops/${mine.pop}`).set(...as(IDS.bob))
-    expect(res.body.data).toMatchObject({ id: mine.pop, zone: { id: zone1 }, createdBy: { id: IDS.alice } })
+    expect(res.body.data).toMatchObject({ id: mine.pop, createdBy: { id: IDS.alice } })
+    expect(res.body.data.zones.map((z) => z.id)).toContain(zone1)
     expect(res.body.data.fibers.map((f) => f.id)).toContain(mine.fiber)
   })
 

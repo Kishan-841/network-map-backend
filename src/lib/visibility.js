@@ -29,6 +29,19 @@ export function zoneScope(actor) {
   return zoneIds.length ? { OR: [mine, { zoneId: { in: zoneIds } }] } : mine
 }
 
+/**
+ * `where` for a POP, which now carries a MANY-to-many `zones` relation rather
+ * than a single `zoneId`. Whoever is assigned to any of the POP's zones sees
+ * it; the maker always does; an ADMIN sees all. Fails closed with no actor.
+ */
+export function popZoneScope(actor) {
+  if (isAdmin(actor)) return {}
+  if (!actor?.id) return NOTHING
+  const zoneIds = zonesOf(actor)
+  const mine = { createdById: actor.id }
+  return zoneIds.length ? { OR: [mine, { zones: { some: { id: { in: zoneIds } } } }] } : mine
+}
+
 /** `where` for a closure: the zone of any fiber running through it. */
 export function closureScope(actor) {
   if (isAdmin(actor)) return {}

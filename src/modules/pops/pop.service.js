@@ -6,7 +6,7 @@ import { zoneRepository } from '../zones/zone.repository.js'
 import { userRepository } from '../users/user.repository.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
 import { prisma } from '../../lib/prisma.js'
-import { canSeeFiber, zoneScope } from '../../lib/visibility.js'
+import { canSeeFiber, popZoneScope } from '../../lib/visibility.js'
 import { deviceHasContent } from './pop.schemas.js'
 
 export function createPopService({
@@ -103,7 +103,7 @@ export function createPopService({
 
   // Out of the reader's zones reads exactly like one that does not exist.
   async function mustFind(id, actor) {
-    const pop = await popRepository.findVisible(id, zoneScope(actor))
+    const pop = await popRepository.findVisible(id, popZoneScope(actor))
     if (!pop) throw ApiError.notFound('POP not found')
     return pop
   }
@@ -117,17 +117,21 @@ export function createPopService({
     return olt
   }
   /**
-   * The zone a POP sits in must exist, and a SURVEYOR may only use the zones
-   * they are assigned to — the same rule that governs where they may log a
-   * building or draw a fiber. Managers and above work every zone.
+   * Every zone a POP is attached to must exist, and a SURVEYOR may only attach
+   * zones they are assigned to — the same rule that governs where they may log
+   * a building or draw a fiber. All-or-nothing: one foreign zone rejects the
+   * lot. Managers and above work every zone.
    */
-  async function assertZone(zoneId, actor) {
-    if (!zoneId) return
-    const zone = await zoneRepository.findById(zoneId)
-    if (!zone) throw ApiError.badRequest('Zone does not exist')
+  async function assertZones(zoneIds, actor) {
+    if (!zoneIds?.length) return
+    const unique = [...new Set(zoneIds)]
+    const zones = await zoneRepository.findManyByIds(unique)
+    if (zones.length !== unique.length) throw ApiError.badRequest('Zone does not exist')
     if (actor?.role === 'SURVEYOR') {
-      const assigned = await userRepository.assignedZoneIds(actor.id)
-      if (!assigned.includes(zoneId)) throw ApiError.forbidden('You are not assigned to this zone')
+      const assigned = new Set(await userRepository.assignedZoneIds(actor.id))
+      if (!unique.every((id) => assigned.has(id))) {
+        throw ApiError.forbidden('You are not assigned to one of these zones')
+      }
     }
   }
 
@@ -141,31 +145,41 @@ export function createPopService({
       return signImages({ ...pop, olts, fibers })
     },
     async listPops(actor) {
-      // The zone decides who sees a POP; your own work stays yours either way.
-      const pops = await popRepository.list(zoneScope(actor))
+      // The zones decide who sees a POP; your own work stays yours either way.
+      const pops = await popRepository.list(popZoneScope(actor))
       return Promise.all(pops.map(signImages))
     },
-    async createPop({ olts, devices, ...data }, actor) {
-      await assertZone(data.zoneId, actor)
+    async createPop({ olts, devices, zoneIds, ...data }, actor) {
+      await assertZones(zoneIds, actor)
       await assertNameFree(data.name)
       assertOwnedImages(data.images)
       const id = await prisma.$transaction(async (tx) => {
-        const pop = await tx.pop.create({ data: { ...canonicalImages(data), createdById: actor.id } })
+        const pop = await tx.pop.create({
+          data: {
+            ...canonicalImages(data),
+            createdById: actor.id,
+            zones: { connect: zoneIds.map((zid) => ({ id: zid })) },
+          },
+        })
         await syncOlts(pop.id, olts, tx)
         await syncDevices(pop.id, devices, tx)
         return pop.id
       })
       return signImages(await popRepository.findById(id))
     },
-    async updatePop(id, { olts, devices, ...data }, actor) {
-      const existing = await mustFind(id, actor)
-      if (data.zoneId !== undefined && data.zoneId !== existing.zoneId) {
-        await assertZone(data.zoneId, actor)
-      }
+    async updatePop(id, { olts, devices, zoneIds, ...data }, actor) {
+      await mustFind(id, actor)
+      if (zoneIds !== undefined) await assertZones(zoneIds, actor)
       if (data.name) await assertNameFree(data.name, id)
       assertOwnedImages(data.images)
       await prisma.$transaction(async (tx) => {
-        await tx.pop.update({ where: { id }, data: canonicalImages(data) })
+        await tx.pop.update({
+          where: { id },
+          data: {
+            ...canonicalImages(data),
+            ...(zoneIds !== undefined && { zones: { set: zoneIds.map((zid) => ({ id: zid })) } }),
+          },
+        })
         await syncOlts(id, olts, tx)
         await syncDevices(id, devices, tx)
       })

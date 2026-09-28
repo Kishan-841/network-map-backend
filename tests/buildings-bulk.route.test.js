@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import request from 'supertest'
 import jwt from 'jsonwebtoken'
 import { createApp } from '../src/app.js'
@@ -148,5 +148,134 @@ describe('PATCH /buildings/bulk-olt', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ ids: ['x'], ponPort: 1 })
     expect(noOlt.status).toBe(400)
+  })
+})
+
+describe('PATCH /buildings/bulk-olt — multiple PON ports & multi-zone OLTs', () => {
+  const app = createApp()
+  const STAMP = Date.now()
+  const SUR = `bmp-sur-${STAMP}`
+  const state = {}
+
+  const auth = (id) => ['Authorization', `Bearer ${jwt.sign({ sub: id, role: 'IGNORED' }, env.jwtSecret, { audience: 'staff', expiresIn: '1h' })}`]
+
+  beforeAll(async () => {
+    const admin = await prisma.user.findFirst({ where: { role: 'ADMIN' } })
+    state.adminId = admin.id
+    const [zoneA, zoneB] = await prisma.zone.findMany({ take: 2 })
+    state.zoneA = zoneA.id
+    state.zoneB = zoneB?.id ?? zoneA.id
+    state.twoZones = state.zoneA !== state.zoneB
+
+    await prisma.user.create({
+      data: {
+        id: SUR, name: 'BMP Surveyor', email: `${SUR}@vitest.local`, passwordHash: 'x',
+        role: 'SURVEYOR', assignedZones: { connect: { id: state.zoneA } },
+      },
+    })
+    // POP in zone A with an 8-port OLT; a second POP in zone B with its own OLT.
+    const popA = await prisma.pop.create({
+      data: { name: `BMP POP-A ${STAMP}`, latitude: 18.5, longitude: 73.8, createdById: state.adminId, zones: { connect: { id: state.zoneA } } },
+    })
+    state.oltA = (await prisma.olt.create({ data: { popId: popA.id, name: `BMP OLT-A ${STAMP}`, ponPortCount: 8 } })).id
+    if (state.twoZones) {
+      const popB = await prisma.pop.create({
+        data: { name: `BMP POP-B ${STAMP}`, latitude: 18.6, longitude: 73.9, createdById: state.adminId, zones: { connect: { id: state.zoneB } } },
+      })
+      state.oltB = (await prisma.olt.create({ data: { popId: popB.id, name: `BMP OLT-B ${STAMP}`, ponPortCount: 8 } })).id
+    }
+    // Two buildings in zone A, made by the surveyor (so they are in their scope).
+    const mk = (n) =>
+      prisma.building.create({
+        data: {
+          buildingName: `BMP-${STAMP}-${n}`, formattedAddress: 'addr', latitude: 18.51, longitude: 73.81,
+          source: 'COVERAGE', zoneId: state.zoneA, createdById: SUR,
+        },
+      })
+    state.b1 = (await mk(1)).id
+    state.b2 = (await mk(2)).id
+  })
+
+  afterAll(async () => {
+    await prisma.building.deleteMany({ where: { buildingName: { startsWith: `BMP-${STAMP}` } } })
+    await prisma.olt.deleteMany({ where: { name: { startsWith: 'BMP OLT' } } })
+    await prisma.pop.deleteMany({ where: { name: { startsWith: 'BMP POP' } } })
+    await prisma.systemLog.deleteMany({ where: { userId: SUR } })
+    await prisma.user.deleteMany({ where: { id: SUR } })
+  })
+
+  it('maps buildings to a list of PON ports', async () => {
+    const res = await request(app)
+      .patch('/api/v1/buildings/bulk-olt')
+      .set(...auth(state.adminId))
+      .send({ ids: [state.b1, state.b2], oltId: state.oltA, ponPorts: [1, 2, 3] })
+    expect(res.status).toBe(200)
+    expect(res.body.data.count).toBe(2)
+    const b = await prisma.building.findUnique({ where: { id: state.b1 }, select: { ponPorts: true } })
+    expect(b.ponPorts).toEqual([1, 2, 3])
+  })
+
+  it('dedupes repeated ports', async () => {
+    const res = await request(app)
+      .patch('/api/v1/buildings/bulk-olt')
+      .set(...auth(state.adminId))
+      .send({ ids: [state.b1], oltId: state.oltA, ponPorts: [2, 2, 1] })
+    expect(res.status).toBe(200)
+    const b = await prisma.building.findUnique({ where: { id: state.b1 }, select: { ponPorts: true } })
+    expect([...b.ponPorts].sort()).toEqual([1, 2])
+  })
+
+  it('rejects a port above the OLT port count', async () => {
+    const res = await request(app)
+      .patch('/api/v1/buildings/bulk-olt')
+      .set(...auth(state.adminId))
+      .send({ ids: [state.b1], oltId: state.oltA, ponPorts: [9] })
+    expect(res.status).toBe(400)
+    expect(res.body.error.message).toContain('1 and 8')
+  })
+
+  it('accepts a legacy singular ponPort (back-compat)', async () => {
+    const res = await request(app)
+      .patch('/api/v1/buildings/bulk-olt')
+      .set(...auth(state.adminId))
+      .send({ ids: [state.b2], oltId: state.oltA, ponPort: 5 })
+    expect(res.status).toBe(200)
+    const b = await prisma.building.findUnique({ where: { id: state.b2 }, select: { ponPorts: true } })
+    expect(b.ponPorts).toEqual([5])
+  })
+
+  it('lets a surveyor map to an OLT whose zones include the selection zone', async () => {
+    const res = await request(app)
+      .patch('/api/v1/buildings/bulk-olt')
+      .set(...auth(SUR))
+      .send({ ids: [state.b1], oltId: state.oltA, ponPorts: [4] })
+    expect(res.status).toBe(200)
+  })
+
+  it('refuses a surveyor an OLT in a different zone from the selection', async () => {
+    if (!state.twoZones) return
+    const res = await request(app)
+      .patch('/api/v1/buildings/bulk-olt')
+      .set(...auth(SUR))
+      .send({ ids: [state.b1], oltId: state.oltB, ponPorts: [1] })
+    expect(res.status).toBe(400)
+  })
+
+  it('records the PON ports in the audit log, not "undefined"', async () => {
+    await request(app)
+      .patch('/api/v1/buildings/bulk-olt')
+      .set(...auth(state.adminId))
+      .send({ ids: [state.b2], oltId: state.oltA, ponPorts: [6, 7, 8] })
+    // audit() writes on res 'finish' — poll for the log carrying these ports.
+    let log = null
+    for (let i = 0; i < 40 && !log; i++) {
+      log = await prisma.systemLog.findFirst({
+        where: { action: 'BulkOltMap', description: { contains: '6, 7, 8' } },
+        orderBy: { createdAt: 'desc' },
+      })
+      if (!log) await new Promise((r) => setTimeout(r, 25))
+    }
+    expect(log).toBeTruthy()
+    expect(log.description).not.toContain('undefined')
   })
 })

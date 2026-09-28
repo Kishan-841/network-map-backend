@@ -13,6 +13,7 @@ export const zoneRepository = {
       include: withOperator,
     }),
   findById: (id) => prisma.zone.findUnique({ where: { id } }),
+  findManyByIds: (ids) => prisma.zone.findMany({ where: { id: { in: ids } }, select: { id: true } }),
   findByName: (name) => prisma.zone.findUnique({ where: { name } }),
   create: (data) => prisma.zone.create({ data }),
   update: (id, data) => prisma.zone.update({ where: { id }, data }),
