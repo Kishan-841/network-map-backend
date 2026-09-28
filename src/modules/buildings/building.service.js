@@ -118,7 +118,10 @@ export function createBuildingService({ buildingRepository, storage, userReposit
     // asked for. SUPERVISOR is deliberately absent: it spans both registries,
     // so it gets no default and sees everything. Settled here, before the city
     // filter reads it — that filter behaves differently per registry.
-    if (!where.source && ['ADMIN', 'MANAGER', 'SURVEYOR'].includes(actor?.role)) {
+    // SALES_MANAGER browses the coverage registry to assign it to their team
+    // (read-only; writes are blocked elsewhere), so they get the same
+    // coverage-only default as the coverage roles.
+    if (!where.source && ['ADMIN', 'MANAGER', 'SURVEYOR', 'SALES_MANAGER'].includes(actor?.role)) {
       where.source = 'COVERAGE'
     }
     const andWhere = []
