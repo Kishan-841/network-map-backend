@@ -39,7 +39,7 @@ export const salesController = {
 
   async listMeetings(req, res, next) {
     try {
-      const data = await salesService.listMeetings(req.user)
+      const data = await salesService.listMeetings(req.user, req.validatedQuery ?? {})
       res.json({ success: true, data })
     } catch (err) {
       next(err)

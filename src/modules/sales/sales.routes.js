@@ -13,6 +13,7 @@ import {
   activityQuerySchema,
   dashboardQuerySchema,
   createMeetingSchema,
+  meetingsQuerySchema,
 } from './sales.schemas.js'
 import { salesController } from './sales.controller.js'
 
@@ -54,7 +55,7 @@ salesRoutes.post(
   validateBody(createMeetingSchema),
   salesController.createMeeting,
 )
-salesRoutes.get('/meetings', ASSIGNER, salesController.listMeetings)
+salesRoutes.get('/meetings', ASSIGNER, validateQuery(meetingsQuerySchema), salesController.listMeetings)
 
 salesRoutes.get('/assignments', SALES_ANY, validateQuery(historyQuerySchema), salesController.history)
 

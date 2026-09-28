@@ -34,20 +34,20 @@ afterAll(async () => {
 const body = { photoUrl: 'https://r2.example/mtg.jpg', latitude: 18.52, longitude: 73.85, note: 'All present' }
 
 describe('team-leader morning meetings', () => {
-  it('a team leader logs a meeting (201), and re-logging the same day replaces it', async () => {
+  it('a team leader logs a meeting (201); a second the same day is rejected (409, immutable)', async () => {
     const first = await request(app).post('/api/v1/sales/meetings').set(auth(TL, 'TEAM_LEADER')).send(body)
     expect(first.status).toBe(201)
+    expect(first.body.data.teamLeader.id).toBe(TL)
     const again = await request(app)
       .post('/api/v1/sales/meetings')
       .set(auth(TL, 'TEAM_LEADER'))
       .send({ ...body, note: 'Updated', photoUrl: 'https://r2.example/mtg2.jpg' })
-    expect(again.status).toBe(201)
-    // Still one row for the day, with the new photo/note.
+    expect(again.status).toBe(409)
+    // Still one row, unchanged (the original photo/note).
     const rows = await meetingIdsFor([TL])
     expect(rows).toHaveLength(1)
-    expect(again.body.data.photoUrl).toBe('https://r2.example/mtg2.jpg')
-    expect(again.body.data.note).toBe('Updated')
-    expect(again.body.data.teamLeader.id).toBe(TL)
+    const row = await prisma.teamMeeting.findFirst({ where: { teamLeaderId: TL } })
+    expect(row.photoUrl).toBe(body.photoUrl)
   })
 
   it('an executive cannot log a meeting (403) and cannot read the list (403)', async () => {
@@ -58,15 +58,15 @@ describe('team-leader morning meetings', () => {
   it('the manager sees their team leader\'s meeting; the TL sees their own', async () => {
     const mgr = await request(app).get('/api/v1/sales/meetings').set(auth(MGR, 'SALES_MANAGER'))
     expect(mgr.status).toBe(200)
-    expect(mgr.body.data.map((m) => m.teamLeader.id)).toContain(TL)
+    expect(mgr.body.data.items.map((m) => m.teamLeader.id)).toContain(TL)
 
     const tl = await request(app).get('/api/v1/sales/meetings').set(auth(TL, 'TEAM_LEADER'))
     expect(tl.status).toBe(200)
-    expect(tl.body.data.every((m) => m.teamLeader.id === TL)).toBe(true)
+    expect(tl.body.data.items.every((m) => m.teamLeader.id === TL)).toBe(true)
   })
 
   it("a different manager does NOT see another team's meeting", async () => {
     const other = await request(app).get('/api/v1/sales/meetings').set(auth(MGR2, 'SALES_MANAGER'))
-    expect(other.body.data.map((m) => m.teamLeader.id)).not.toContain(TL)
+    expect(other.body.data.items.map((m) => m.teamLeader.id)).not.toContain(TL)
   })
 })
