@@ -41,6 +41,9 @@ export const checkInSchema = z.object({
   checkInLng: longitude,
   selfieUrl: z.string().trim().min(1, 'A selfie is required'),
   note: z.string().trim().max(500).optional(),
+  // A team leader records who they went with (their own executives) or solo.
+  companionIds: z.array(z.string().min(1)).max(50).optional(),
+  wentSolo: z.boolean().optional(),
 })
 
 export const visitActivitySchema = z.object({

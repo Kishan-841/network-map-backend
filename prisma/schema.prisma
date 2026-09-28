@@ -118,6 +118,7 @@ model User {
   visitsRecorded   BuildingVisit[]      @relation("VisitBy")
   inquiriesCreated CustomerInquiry[]    @relation("InquiryBy")
   teamMeetings     TeamMeeting[]        @relation("TeamMeetingBy")
+  accompaniedVisits VisitCompanion[]    @relation("VisitCompanionUser")
 }
 
 /// One row per pincode an acquisition agent covers (within one city).
@@ -537,9 +538,25 @@ model BuildingVisit {
   note        String?
   activities  VisitActivity[]
   inquiries   CustomerInquiry[] @relation("InquiryVisit")
+  /// A team leader's field visit records who they went with (their own sales
+  /// executives) or that they went solo.
+  wentSolo    Boolean           @default(false)
+  companions  VisitCompanion[]
 
   @@index([userId, visitedAt])
   @@index([buildingId])
+}
+
+/// A sales executive a team leader took on a field visit.
+model VisitCompanion {
+  id      String        @id @default(cuid())
+  visitId String
+  visit   BuildingVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  userId  String
+  user    User          @relation("VisitCompanionUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([visitId, userId])
+  @@index([userId])
 }
 
 /// The kind of field work done during a visit; more may be added later.
