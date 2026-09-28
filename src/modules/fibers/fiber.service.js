@@ -6,7 +6,7 @@ import { getStorageProvider } from '../../lib/storage/index.js'
 import { nextFiberName, nextClosureCode, nextSplitterCode } from '../../lib/sequences.js'
 import { deriveSegments, carryForward, keyedSegments } from './fiber-geometry.js'
 import { collectDownstream } from './fiber-downstream.js'
-import { canSeeFiber, closureScope, splitterScope, zoneScope } from '../../lib/visibility.js'
+import { canSeeFiber, closureScope, popZoneScope, splitterScope, zoneScope } from '../../lib/visibility.js'
 import { fiberRepository } from './fiber.repository.js'
 import { closureRepository } from '../closures/closure.repository.js'
 import { RATIO_PORTS } from '../closures/closure.schemas.js'
@@ -108,7 +108,7 @@ export function createFiberService(deps) {
               { name: p.newPop.name, latitude: p.latitude, longitude: p.longitude, createdById: owner },
               tx,
             )
-          : await reach(p.popId, popRepository.findById, popRepository.findVisible, zoneScope(actor))
+          : await reach(p.popId, popRepository.findById, popRepository.findVisible, popZoneScope(actor))
         if (!pop) throw ApiError.badRequest('POP does not exist')
         out.push({ type: 'POP', popId: pop.id, latitude: pop.latitude, longitude: pop.longitude })
       } else if (p.type === 'CLOSURE') {
@@ -183,7 +183,7 @@ export function createFiberService(deps) {
     const olt =
       data.oltId === keptOltId
         ? await popRepository.findOltById(data.oltId)
-        : await popRepository.findOltVisible(data.oltId, zoneScope(actor))
+        : await popRepository.findOltVisible(data.oltId, popZoneScope(actor))
     if (!olt) throw ApiError.badRequest('OLT does not exist')
     if (data.ponPort > olt.ponPortCount) throw ApiError.badRequest(`OLT has only ${olt.ponPortCount} PON ports`)
     const taken = await fiberRepository.findUsingPort(data.oltId, data.ponPort)

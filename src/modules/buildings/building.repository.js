@@ -14,7 +14,7 @@ const fullInclude = {
       id: true,
       name: true,
       ponPortCount: true,
-      pop: { select: { id: true, name: true, zone: { select: { id: true, name: true } } } },
+      pop: { select: { id: true, name: true, zones: { select: { id: true, name: true } } } },
     },
   },
 }
@@ -81,7 +81,7 @@ export const buildingRepository = {
   findOltWithZone: (id) =>
     prisma.olt.findUnique({
       where: { id },
-      select: { id: true, name: true, ponPortCount: true, pop: { select: { zoneId: true } } },
+      select: { id: true, name: true, ponPortCount: true, pop: { select: { zones: { select: { id: true } } } } },
     }),
   /**
    * Name/address lookup for the PARTNER portal. Coverage registry only, and a
