@@ -36,8 +36,12 @@ describe('updateBuildingSchema', () => {
     expect(parsed.details).toEqual({ floors: 12 })
   })
 
-  it('rejects location fields', () => {
-    expect(updateBuildingSchema.safeParse({ latitude: 10 }).success).toBe(false)
+  it('accepts location fields — the map pin can be moved from the edit form', () => {
+    const parsed = updateBuildingSchema.parse({ latitude: 18.5, longitude: 73.8 })
+    expect(parsed.latitude).toBe(18.5)
+    expect(parsed.longitude).toBe(73.8)
+    // still range-checked
+    expect(updateBuildingSchema.safeParse({ latitude: 200 }).success).toBe(false)
   })
 })
 
