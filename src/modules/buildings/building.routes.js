@@ -74,7 +74,7 @@ buildingRoutes.patch(
   audit('Building', 'BulkOltMap', {
     describe: (req, old, body) =>
       body?.data
-        ? `${body.data.count} building(s) mapped to an OLT on PON port ${body.data.ponPort}`
+        ? `${body.data.count} building(s) mapped to an OLT on PON port(s) ${body.data.ponPorts?.join(', ')}`
         : 'Bulk OLT mapping',
   }),
   validateBody(bulkOltSchema),
