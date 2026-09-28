@@ -192,6 +192,24 @@ export function createSalesService({ repo = salesRepository } = {}) {
       return repo.listVisits(await activityWhere(actor, filters, 'visitedAt'))
     },
 
+    /**
+     * Log this morning's meeting for the team leader (photo + forced location).
+     * One per calendar day — logging again the same day replaces it.
+     */
+    async createMeeting(actor, { photoUrl, latitude, longitude, note }) {
+      const meetingDate = new Date()
+      meetingDate.setUTCHours(0, 0, 0, 0) // date-only key
+      return repo.upsertMeeting({ teamLeaderId: actor.id, meetingDate, photoUrl, latitude, longitude, note })
+    },
+
+    /** Meetings a team leader / manager may see: own for a TL, the team's for a
+     * manager, all for an admin. */
+    async listMeetings(actor) {
+      const ids = await scopeIdsFor(actor)
+      if (ids !== null && ids.length === 0) return []
+      return repo.listMeetings(ids)
+    },
+
     /** One visit in full — scoped, so out of scope is a 404 (the detail page). */
     async getVisit(id, actor) {
       const ids = await scopeIdsFor(actor)
