@@ -117,6 +117,9 @@ export const updateBuildingSchema = z
     formattedAddress: z.string().trim().min(1).max(500),
     zoneId: z.string().min(1),
     isLive: z.boolean(),
+    // The map pin can be nudged to the correct spot from the edit form.
+    latitude: z.coerce.number().min(-90).max(90),
+    longitude: z.coerce.number().min(-180).max(180),
     details: z
       .object({
         wings: z.number().int().positive().nullable(),
