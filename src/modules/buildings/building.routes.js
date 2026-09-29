@@ -84,7 +84,7 @@ buildingRoutes.get('/', validateQuery(listQuerySchema), buildingController.list)
 // Above /:id, or Express reads 'export' as a building id.
 buildingRoutes.get(
   '/export',
-  requireRole('ADMIN'),
+  requireRole('ADMIN', 'SALES_MANAGER'),
   audit('Building', 'Export', {
     describe: (req) =>
       `Exported the building list${
