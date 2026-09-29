@@ -38,6 +38,16 @@ enum AssignmentStatus {
   UNASSIGNED
 }
 
+// How a sales lead (CustomerInquiry) is progressing. A lead starts NOT_CONTACTED;
+// FOLLOW_UP carries a followUpAt date+time; COMPLETED = signed up / interested;
+// NOT_INTERESTED = the customer declined.
+enum InquiryStatus {
+  NOT_CONTACTED
+  FOLLOW_UP
+  COMPLETED
+  NOT_INTERESTED
+}
+
 enum FeasibleStatus {
   FEASIBLE
   PERMISSION_PENDING
@@ -593,6 +603,10 @@ model CustomerInquiry {
   phone        String
   email        String?
   address      String
+  /// Lead progress. Starts NOT_CONTACTED; the sales person calls, then updates it.
+  status       InquiryStatus @default(NOT_CONTACTED)
+  /// When to follow up — set only while status is FOLLOW_UP.
+  followUpAt   DateTime?
   createdAt    DateTime @default(now())
   /// Set when the inquiry was raised during a specific check-in session.
   visitId      String?

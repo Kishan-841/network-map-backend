@@ -187,7 +187,7 @@ export function createSalesService({ repo = salesRepository } = {}) {
      * Raise a customer inquiry; the address is snapshotted from the building. If
      * `visitId` is given it must be the actor's OPEN visit at this building.
      */
-    async createInquiry({ buildingId, customerName, phone, email, visitId }, actor) {
+    async createInquiry({ buildingId, customerName, phone, email, visitId, status, followUpAt }, actor) {
       const building = await assertBuildingInScope(buildingId, actor)
       let linkedVisitId = null
       if (visitId) {
@@ -205,7 +205,21 @@ export function createSalesService({ repo = salesRepository } = {}) {
         email: email ?? null,
         address: building.formattedAddress,
         visitId: linkedVisitId,
+        status: status ?? 'NOT_CONTACTED',
+        // The follow-up time only makes sense for a FOLLOW_UP lead.
+        followUpAt: status === 'FOLLOW_UP' ? followUpAt : null,
       })
+    },
+
+    /**
+     * Update a lead's progress after calling the customer. Scoped like the list:
+     * the creator, or a team leader / manager above them; out of scope is a 404.
+     */
+    async updateInquiry(id, { status, followUpAt }, actor) {
+      const ids = await scopeIdsFor(actor)
+      const found = await repo.findInquiryInScope(id, ids)
+      if (!found) throw ApiError.notFound('Lead not found')
+      return repo.updateInquiry(id, { status, followUpAt: status === 'FOLLOW_UP' ? followUpAt : null })
     },
 
     async listVisits(actor, filters = {}) {
@@ -256,7 +270,9 @@ export function createSalesService({ repo = salesRepository } = {}) {
     },
 
     async listInquiries(actor, filters = {}) {
-      return repo.listInquiries(await activityWhere(actor, filters, 'createdAt'))
+      const where = await activityWhere(actor, filters, 'createdAt')
+      if (filters.status) where.status = filters.status
+      return repo.listInquiries(where)
     },
 
     /**

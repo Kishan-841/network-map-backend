@@ -154,6 +154,15 @@ export const salesController = {
     }
   },
 
+  async updateInquiry(req, res, next) {
+    try {
+      const data = await salesService.updateInquiry(req.params.id, req.body, req.user)
+      res.json({ success: true, data })
+    } catch (err) {
+      next(err)
+    }
+  },
+
   async dashboard(req, res, next) {
     try {
       const data = await salesService.dashboard(req.user, req.query)

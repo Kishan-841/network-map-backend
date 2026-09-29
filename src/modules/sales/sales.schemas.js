@@ -56,16 +56,39 @@ export const checkOutSchema = z.object({
   checkOutLng: longitude,
 })
 
+export const INQUIRY_STATUSES = ['NOT_CONTACTED', 'FOLLOW_UP', 'COMPLETED', 'NOT_INTERESTED']
+const inquiryStatus = z.enum(INQUIRY_STATUSES)
+
+// A FOLLOW_UP lead must carry a follow-up time; any other status must not — the
+// service also clears it, but rejecting a mismatch keeps the API honest.
+const followUpRule = (data, ctx) => {
+  if (data.status === 'FOLLOW_UP' && data.followUpAt == null) {
+    ctx.addIssue({ code: 'custom', path: ['followUpAt'], message: 'Pick a follow-up date and time' })
+  }
+}
+
 // Kept deliberately simple — the calling team collects the detail later.
-export const createInquirySchema = z.object({
-  buildingId: z.string().min(1),
-  customerName: z.string().trim().min(1, 'Customer name is required').max(120),
-  phone: z.string().trim().min(6, 'Enter a valid phone number').max(20),
-  // Optional: '' from the form becomes undefined, otherwise a real email.
-  email: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.string().trim().email().optional()),
-  // Links the inquiry to the actor's open visit, when raised during one.
-  visitId: z.string().min(1).optional(),
-})
+export const createInquirySchema = z
+  .object({
+    buildingId: z.string().min(1),
+    customerName: z.string().trim().min(1, 'Customer name is required').max(120),
+    phone: z.string().trim().min(6, 'Enter a valid phone number').max(20),
+    // Optional: '' from the form becomes undefined, otherwise a real email.
+    email: z.preprocess((v) => (v === '' || v == null ? undefined : v), z.string().trim().email().optional()),
+    // Links the inquiry to the actor's open visit, when raised during one.
+    visitId: z.string().min(1).optional(),
+    status: inquiryStatus.default('NOT_CONTACTED'),
+    followUpAt: z.coerce.date().optional(),
+  })
+  .superRefine(followUpRule)
+
+// Update a lead's progress after calling the customer.
+export const updateInquirySchema = z
+  .object({
+    status: inquiryStatus,
+    followUpAt: z.coerce.date().optional(),
+  })
+  .superRefine(followUpRule)
 
 // Filters shared by the activity lists and the dashboard: a date range, and a
 // narrowing to one team member or building. Dates arrive as ISO strings.
@@ -74,6 +97,8 @@ export const activityQuerySchema = z.object({
   userId: z.string().min(1).optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
+  // Inquiry list only: narrow to one lead status. Ignored by the visit list.
+  status: inquiryStatus.optional(),
 })
 
 export const dashboardQuerySchema = activityQuerySchema
