@@ -10,6 +10,7 @@ import {
   visitActivitySchema,
   checkOutSchema,
   createInquirySchema,
+  updateInquirySchema,
   activityQuerySchema,
   dashboardQuerySchema,
   createMeetingSchema,
@@ -113,4 +114,13 @@ salesRoutes.post(
   }),
   validateBody(createInquirySchema),
   salesController.createInquiry,
+)
+salesRoutes.patch(
+  '/inquiries/:id',
+  SALES_ANY,
+  audit('CustomerInquiry', 'UpdateInquiry', {
+    describe: (req) => `Lead status → ${req.body?.status ?? 'updated'}`,
+  }),
+  validateBody(updateInquirySchema),
+  salesController.updateInquiry,
 )

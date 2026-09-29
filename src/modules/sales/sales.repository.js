@@ -142,7 +142,7 @@ export const salesRepository = {
         user: holder,
         building: { select: { id: true, buildingName: true, formattedAddress: true, latitude: true, longitude: true } },
         activities: { orderBy: { createdAt: 'asc' } },
-        inquiries: { select: { id: true, customerName: true, phone: true, email: true, createdAt: true } },
+        inquiries: { select: { id: true, customerName: true, phone: true, email: true, status: true, followUpAt: true, createdAt: true } },
         companions: { select: { user: { select: { id: true, name: true } } } },
       },
     }),
@@ -156,6 +156,15 @@ export const salesRepository = {
   checkoutVisit: (id, data) => prisma.buildingVisit.update({ where: { id }, data }),
 
   createInquiry: (data) => prisma.customerInquiry.create({ data }),
+  // One lead the actor may see: their own, or (ids===null) any, for an admin.
+  findInquiryInScope: (id, ids) =>
+    prisma.customerInquiry.findFirst({ where: { id, ...(ids === null ? {} : { createdById: { in: ids } }) } }),
+  updateInquiry: (id, data) =>
+    prisma.customerInquiry.update({
+      where: { id },
+      data,
+      include: { createdBy: holder, building: { select: { id: true, buildingName: true } } },
+    }),
 
   // The service builds the scoped `where` (a fail-closed id set + optional
   // date / building filters); these just run it.
@@ -168,7 +177,7 @@ export const salesRepository = {
         user: holder,
         building: { select: { id: true, buildingName: true, formattedAddress: true } },
         activities: { orderBy: { createdAt: 'asc' } },
-        inquiries: { select: { id: true, customerName: true, phone: true, email: true, createdAt: true } },
+        inquiries: { select: { id: true, customerName: true, phone: true, email: true, status: true, followUpAt: true, createdAt: true } },
         companions: { select: { user: { select: { id: true, name: true } } } },
       },
     }),
