@@ -37,6 +37,15 @@ describe('building service listBuildings filters', () => {
     })
   })
 
+  it('filters by live status when isLive is given', async () => {
+    const repo = captureRepo()
+    await createBuildingService({ buildingRepository: repo }).listBuildings({ isLive: true })
+    expect(repo.calls.find((c) => c.where).where).toEqual({ isLive: true })
+    const repo2 = captureRepo()
+    await createBuildingService({ buildingRepository: repo2 }).listBuildings({ isLive: false })
+    expect(repo2.calls.find((c) => c.where).where).toEqual({ isLive: false })
+  })
+
   it('filters by cityId through the zone operator', async () => {
     const repo = captureRepo()
     await createBuildingService({ buildingRepository: repo }).listBuildings({ cityId: 'c1' })

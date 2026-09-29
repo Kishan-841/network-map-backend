@@ -113,6 +113,12 @@ export const listQuerySchema = z.object({
   dateTo: z.string().date().optional(),
   search: z.string().max(200).optional(),
   tier: tierSchema.optional(),
+  // Live / not-live filter. Query strings are text, so accept 'true'/'false'
+  // (or real booleans, for the service tests) and normalise to a boolean.
+  isLive: z
+    .union([z.boolean(), z.enum(['true', 'false'])])
+    .transform((v) => v === true || v === 'true')
+    .optional(),
   latitude: z.coerce.number().min(-90).max(90).optional(),
   longitude: z.coerce.number().min(-180).max(180).optional(),
   radius: z.coerce.number().int().positive().max(50000).optional(),

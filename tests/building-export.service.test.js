@@ -19,6 +19,7 @@ const rows = [
     pincode: '411045',
     details: { homePass: 250 },
     zone: { name: 'Zone A', operator: { name: 'Fiber Plus Broadband' } },
+    isLive: true,
   },
   {
     id: 'b2',
@@ -27,6 +28,7 @@ const rows = [
     pincode: null,
     details: null,
     zone: null,
+    isLive: false,
   },
   {
     id: 'b3',
@@ -36,6 +38,7 @@ const rows = [
     details: { homePass: 900 },
     // A zone with no operator assigned yet — the schema allows it.
     zone: { name: 'Zone C', operator: null },
+    isLive: true,
   },
 ]
 
@@ -70,10 +73,11 @@ describe('the exported rows', () => {
       'Home pass',
       'Zone',
       'Operator',
+      'Live',
     ])
   })
 
-  it('flattens the nested home pass and zone', async () => {
+  it('flattens the nested home pass and zone, and reads the live status', async () => {
     const { service } = build()
     const { rows: out } = await service.exportBuildings({}, ADMIN)
     expect(out[0]).toEqual([
@@ -83,13 +87,14 @@ describe('the exported rows', () => {
       250,
       'Zone A',
       'Fiber Plus Broadband',
+      'Live',
     ])
   })
 
   it('leaves a missing value blank rather than writing "null" into a cell', async () => {
     const { service } = build()
     const { rows: out } = await service.exportBuildings({}, ADMIN)
-    expect(out[1]).toEqual(['Shanti Residency', '', '', '', '', ''])
+    expect(out[1]).toEqual(['Shanti Residency', '', '', '', '', '', 'Not live'])
   })
 
   it('keeps home pass a number, so the column can be summed', async () => {
@@ -207,10 +212,22 @@ describe('the operator column', () => {
     expect(out[1][5]).toBe('')
   })
 
-  it('sits last, so an existing file keeps its column positions', async () => {
+  it('keeps Zone/Operator in their existing positions, with Live appended', async () => {
     const { service } = build()
     const { columns } = await service.exportBuildings({}, ADMIN)
-    expect(columns.at(-1)).toBe('Operator')
     expect(columns.indexOf('Zone')).toBe(4)
+    expect(columns.indexOf('Operator')).toBe(5)
+    expect(columns.at(-1)).toBe('Live')
+  })
+})
+
+describe('the live filter', () => {
+  it('passes isLive through to the export query', async () => {
+    const { buildingRepository, service } = build()
+    await service.exportBuildings({ isLive: true }, ADMIN)
+    expect(buildingRepository.listForExport.mock.calls[0][0]).toMatchObject({
+      source: 'COVERAGE',
+      isLive: true,
+    })
   })
 })
