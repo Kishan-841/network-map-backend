@@ -49,6 +49,7 @@ const exportSelect = {
   buildingName: true,
   formattedAddress: true,
   pincode: true,
+  isLive: true,
   details: { select: { homePass: true } },
   zone: { select: { name: true, operator: { select: { name: true } } } },
 }

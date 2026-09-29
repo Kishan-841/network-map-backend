@@ -101,8 +101,10 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       dateTo,
       search,
       tier,
+      isLive,
     } = filters
     const where = {}
+    if (isLive !== undefined) where.isLive = isLive
     // --- Acquisition visibility: agents see ONLY their own rows; leads see
     // the whole acquisition registry and never the coverage one.
     if (actor?.role === 'ACQUISITION_AGENT') {
@@ -371,7 +373,7 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       // Operator is appended rather than slotted beside Zone: anyone already
       // working from an exported file keeps their column positions.
       return {
-        columns: ['Building name', 'Address', 'Pincode', 'Home pass', 'Zone', 'Operator'],
+        columns: ['Building name', 'Address', 'Pincode', 'Home pass', 'Zone', 'Operator', 'Live'],
         rows: found.map((b) => [
           // Blank, never the string "null" — a spreadsheet cell with nothing
           // in it reads as nothing; one containing "null" reads as data.
@@ -386,6 +388,8 @@ export function createBuildingService({ buildingRepository, storage, userReposit
           // Reached through the zone — a building has no operator of its own,
           // and a zone may not have one assigned yet.
           b.zone?.operator?.name ?? '',
+          // The status the exporter filtered on, spelled out for the reader.
+          b.isLive ? 'Live' : 'Not live',
         ]),
         truncated: found.length === EXPORT_LIMIT,
       }
