@@ -126,6 +126,12 @@ export function createBuildingService({ buildingRepository, storage, userReposit
     if (!where.source && ['ADMIN', 'MANAGER', 'SURVEYOR', 'SALES_MANAGER'].includes(actor?.role)) {
       where.source = 'COVERAGE'
     }
+    // A Permission Executive works the coverage registry but sees only the
+    // societies they added themselves.
+    if (actor?.role === 'PERMISSION_EXECUTIVE') {
+      where.source = 'COVERAGE'
+      where.createdById = actor.id
+    }
     const andWhere = []
 
     if (pincode) where.pincode = pincode
@@ -297,7 +303,7 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         })
         return signUrls(created)
       }
-      if (contact) {
+      if (contact && actor?.role !== 'PERMISSION_EXECUTIVE') {
         throw ApiError.badRequest('Contact details are only captured by acquisition agents')
       }
       // Everything below this line writes a COVERAGE building. Leads run the
@@ -349,6 +355,9 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         isLive: building.isLive ?? false, // green when live, red when not
         details: details ? { create: details } : undefined,
         permission: permission ? { create: permission } : undefined,
+        // A Permission Executive records the person they met on the society;
+        // every other coverage role is rejected above before reaching here.
+        contact: contact ? { create: contact } : undefined,
         photos: photos?.length ? { create: photos } : undefined,
       })
       return signUrls(created)
