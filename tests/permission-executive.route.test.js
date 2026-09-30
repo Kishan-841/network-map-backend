@@ -69,3 +69,29 @@ describe('a permission executive adds a society', () => {
     expect(names).not.toContain(`${S} THEIRS`)
   })
 })
+
+describe('a permission executive edits their own society', () => {
+  let mineId = null
+  let theirsId = null
+  beforeAll(async () => {
+    mineId = (await request(app).post('/api/v1/buildings').set(...auth(PE, 'PERMISSION_EXECUTIVE')).send(society({ buildingName: `${S} EDIT` }))).body.data.id
+    theirsId = (await request(app).post('/api/v1/buildings').set(...auth(PE2, 'PERMISSION_EXECUTIVE')).send(society({ buildingName: `${S} OTHER` }))).body.data.id
+    made.push(mineId, theirsId)
+  })
+
+  it('updates the permission status on their own society', async () => {
+    const res = await request(app).patch(`/api/v1/buildings/${mineId}`).set(...auth(PE, 'PERMISSION_EXECUTIVE')).send({ permission: { permissionStatus: 'FOLLOW_UP' } })
+    expect(res.status).toBe(200)
+    expect(res.body.data.permission.permissionStatus).toBe('FOLLOW_UP')
+  })
+
+  it('refuses to edit a society another executive added', async () => {
+    const res = await request(app).patch(`/api/v1/buildings/${theirsId}`).set(...auth(PE, 'PERMISSION_EXECUTIVE')).send({ permission: { permissionStatus: 'DENIED' } })
+    expect(res.status).toBe(403)
+  })
+
+  it('may not mark a society live', async () => {
+    const res = await request(app).patch(`/api/v1/buildings/${mineId}`).set(...auth(PE, 'PERMISSION_EXECUTIVE')).send({ isLive: true })
+    expect(res.status).toBe(403)
+  })
+})

@@ -483,6 +483,16 @@ export function createBuildingService({ buildingRepository, storage, userReposit
           }
         }
       }
+      // A Permission Executive edits only their own society; permission is
+      // theirs to change (unlike a surveyor), but they may not mark it live.
+      if (actor?.role === 'PERMISSION_EXECUTIVE') {
+        if (existing.createdById !== actor.id) {
+          throw ApiError.forbidden('You can only edit societies you added')
+        }
+        if (building.isLive !== undefined) {
+          throw ApiError.forbidden('Only admins or managers can mark a building live')
+        }
+      }
       if (building.zoneId && building.zoneId !== existing.zoneId) {
         const zone = await zoneRepository.findById(building.zoneId)
         if (!zone) throw ApiError.badRequest('Zone does not exist')
