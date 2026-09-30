@@ -95,3 +95,30 @@ describe('a permission executive edits their own society', () => {
     expect(res.status).toBe(403)
   })
 })
+
+describe('reading a society (the edit page + the list column)', () => {
+  let mineId = null
+  let theirsId = null
+  beforeAll(async () => {
+    mineId = (await request(app).post('/api/v1/buildings').set(...auth(PE, 'PERMISSION_EXECUTIVE')).send(society({ buildingName: `${S} READ` }))).body.data.id
+    theirsId = (await request(app).post('/api/v1/buildings').set(...auth(PE2, 'PERMISSION_EXECUTIVE')).send(society({ buildingName: `${S} READ2` }))).body.data.id
+    made.push(mineId, theirsId)
+  })
+
+  it('opens the executive’s own society by id, with its permission', async () => {
+    const res = await request(app).get(`/api/v1/buildings/${mineId}`).set(...auth(PE, 'PERMISSION_EXECUTIVE'))
+    expect(res.status).toBe(200)
+    expect(res.body.data.permission.permissionStatus).toBe('ACCEPTED')
+  })
+
+  it('404s on a society another executive added', async () => {
+    const res = await request(app).get(`/api/v1/buildings/${theirsId}`).set(...auth(PE, 'PERMISSION_EXECUTIVE'))
+    expect(res.status).toBe(404)
+  })
+
+  it('carries the permission status in the list rows', async () => {
+    const list = await request(app).get('/api/v1/buildings').set(...auth(PE, 'PERMISSION_EXECUTIVE'))
+    const row = list.body.data.items.find((b) => b.id === mineId)
+    expect(row.permission.permissionStatus).toBe('ACCEPTED')
+  })
+})

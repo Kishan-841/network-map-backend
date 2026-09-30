@@ -27,6 +27,8 @@ const listInclude = {
   city: { select: { id: true, name: true } },
   details: true,
   contact: true,
+  // The Permission Executive's "My societies" list shows the permission status.
+  permission: { select: { permissionStatus: true, societyOffer: true } },
   // Who logged it — the acquisition list shows this as the "Agent" column.
   createdBy: { select: { id: true, name: true } },
   // The current ACTIVE sales holder, so the sales manager's registry view can
