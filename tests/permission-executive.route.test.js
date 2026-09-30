@@ -51,9 +51,11 @@ describe('a permission executive adds a society', () => {
     expect(res.body.data.permission.demoCount).toBe(2)
   })
 
-  it('refuses a society with no zone (coverage needs one)', async () => {
-    const res = await request(app).post('/api/v1/buildings').set(...auth(PE, 'PERMISSION_EXECUTIVE')).send(society({ zoneId: undefined }))
-    expect(res.status).toBe(400)
+  it('adds a society without a zone (zone is not asked of this role)', async () => {
+    const res = await request(app).post('/api/v1/buildings').set(...auth(PE, 'PERMISSION_EXECUTIVE')).send(society({ zoneId: undefined, buildingName: `${S} NOZONE` }))
+    expect(res.status).toBe(201)
+    made.push(res.body.data.id)
+    expect(res.body.data.zoneId).toBeNull()
   })
 
   it('lists only the societies the executive added, not another executive’s', async () => {

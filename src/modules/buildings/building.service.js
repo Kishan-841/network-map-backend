@@ -316,7 +316,11 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       if (actor?.role === 'ACQUISITION_LEAD') {
         throw ApiError.forbidden('Acquisition leads cannot add coverage buildings')
       }
-      if (!building.zoneId) throw ApiError.badRequest('Zone is required')
+      // Coverage buildings normally belong to a zone; a Permission Executive
+      // captures societies without one (user's choice — no zone is asked of them).
+      if (!building.zoneId && actor?.role !== 'PERMISSION_EXECUTIVE') {
+        throw ApiError.badRequest('Zone is required')
+      }
 
       // The same building may exist under more than one zone — two operators
       // can serve it — so the clash we care about is one per PLACE PER ZONE.
