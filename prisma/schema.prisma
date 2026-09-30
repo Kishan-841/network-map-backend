@@ -27,6 +27,9 @@ enum Role {
   /// The field user: works the buildings assigned to them, records visits and
   /// raises customer inquiries.
   SALES_EXECUTIVE
+  /// Visits societies to get fibre-laying permission; adds coverage buildings
+  /// with the society-permission sheet and manages only their own.
+  PERMISSION_EXECUTIVE
 }
 
 /// The state of a building's assignment to a sales user. Only one row per
@@ -658,6 +661,12 @@ model Permission {
   ownerName        String?
   ownerMobile      String?
   documentUrl      String?
+  /// Society-permission capture (Permission Executive). 'PAYMENT' | 'DEMO'.
+  societyOffer     String?
+  /// 'ONE_TIME' | 'RECURRING' (when societyOffer is PAYMENT).
+  paymentType      String?
+  /// Demo connections offered (when societyOffer is DEMO).
+  demoCount        Int?
 }
 
 /// The decision-maker an acquisition agent met at the building.

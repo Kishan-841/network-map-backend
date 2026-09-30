@@ -64,7 +64,7 @@ export const requireFiberWrite = (req, res, next) => {
  * in the building service, next to the row it is about.
  */
 export const BUILDING_EDIT_ROLES = ['SURVEYOR']
-const ALWAYS_EDIT_BUILDINGS = ['ADMIN', 'MANAGER', 'SUPERVISOR']
+const ALWAYS_EDIT_BUILDINGS = ['ADMIN', 'MANAGER', 'SUPERVISOR', 'PERMISSION_EXECUTIVE']
 
 export const mayEditBuildings = (actor) =>
   ALWAYS_EDIT_BUILDINGS.includes(actor?.role) ||

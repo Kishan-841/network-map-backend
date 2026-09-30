@@ -25,6 +25,12 @@ export const PHOTO_TYPES = [
   'CONTACT_PERSON',
 ]
 
+// Society-permission capture (Permission Executive). Values validated here, no
+// DB enums (a new value is a code edit, like closure kinds / fiber types).
+export const PERMISSION_STATUSES = ['ACCEPTED', 'FOLLOW_UP', 'DENIED']
+export const SOCIETY_OFFERS = ['PAYMENT', 'DEMO']
+export const PAYMENT_TYPES = ['ONE_TIME', 'RECURRING']
+
 export const addPhotoSchema = z.object({
   type: z.enum(PHOTO_TYPES),
   url: z.string().min(1).max(500),
@@ -154,6 +160,9 @@ export const updateBuildingSchema = z
         renewalDate: z.string().date().nullable(),
         ownerName: z.string().max(100).nullable(),
         ownerMobile: z.string().max(20).nullable(),
+        societyOffer: z.enum(SOCIETY_OFFERS).nullable(),
+        paymentType: z.enum(PAYMENT_TYPES).nullable(),
+        demoCount: z.number().int().nonnegative().nullable(),
       })
       .partial(),
   })
@@ -219,6 +228,10 @@ export const createBuildingSchema = z.object({
     .object({
       amountPaid: z.number().nonnegative().optional(),
       documentUrl: z.string().max(500).optional(),
+      permissionStatus: z.enum(PERMISSION_STATUSES).optional(),
+      societyOffer: z.enum(SOCIETY_OFFERS).optional(),
+      paymentType: z.enum(PAYMENT_TYPES).optional(),
+      demoCount: z.number().int().nonnegative().optional(),
     })
     .optional(),
   photos: z
