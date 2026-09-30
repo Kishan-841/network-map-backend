@@ -209,6 +209,10 @@ export function createBuildingService({ buildingRepository, storage, userReposit
           return building.createdById === actor.id
         case 'ACQUISITION_LEAD':
           return building.source === 'ACQUISITION'
+        case 'PERMISSION_EXECUTIVE':
+          // A permission executive reads only the societies they added — the
+          // same scope their list uses, so the edit page can open its own row.
+          return building.createdById === actor.id
         default:
           return false
       }
