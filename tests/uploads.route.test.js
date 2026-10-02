@@ -49,5 +49,7 @@ describe('POST /api/v1/uploads', () => {
     expect(res.body.data.url).toMatch(
       new RegExp(`^${env.appUrl.replace(/[.]/g, '\\.')}/uploads/.+\\.jpg$`),
     )
+    // Local disk has nothing to sign: the preview IS the url.
+    expect(res.body.data.previewUrl).toBe(res.body.data.url)
   })
 })
