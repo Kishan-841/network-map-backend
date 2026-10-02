@@ -68,10 +68,10 @@ export const buildingController = {
     }
   },
 
-  async bulkStatus(req, res, next) {
+  async markers(req, res, next) {
     try {
-      const result = await buildingService.bulkSetLive(req.body, req.user)
-      res.json({ success: true, data: result })
+      const markers = await buildingService.listMarkers(req.validatedQuery ?? {}, req.user)
+      res.json({ success: true, data: markers })
     } catch (err) {
       next(err)
     }
@@ -95,14 +95,16 @@ export const buildingController = {
     }
   },
 
-  async markers(req, res, next) {
+  async bulkStatus(req, res, next) {
     try {
-      const markers = await buildingService.listMarkers(req.user)
-      res.json({ success: true, data: markers })
+      const result = await buildingService.bulkSetLive(req.body, req.user)
+      res.json({ success: true, data: result })
     } catch (err) {
       next(err)
     }
   },
+
+
 
   async nearby(req, res, next) {
     try {

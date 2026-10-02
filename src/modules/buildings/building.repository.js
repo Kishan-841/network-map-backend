@@ -56,6 +56,40 @@ const exportSelect = {
   zone: { select: { name: true, operator: { select: { name: true } } } },
 }
 
+/**
+ * The map's payload: enough to place a pin, colour it, and fill the selected
+ * building card — and nothing else. No photos, contacts or permission rows,
+ * because the map draws every building the actor can see in one response and
+ * anything extra is multiplied by the whole registry.
+ */
+const markerSelect = {
+  id: true,
+  buildingName: true,
+  formattedAddress: true,
+  latitude: true,
+  longitude: true,
+  isLive: true,
+  feasibleStatus: true,
+  source: true,
+  createdById: true,
+  createdAt: true,
+  zone: { select: { id: true, name: true, operatorId: true } },
+  cityId: true,
+  pincode: true,
+  details: { select: { homePass: true, floors: true, wings: true } },
+  // The acquisition map's card shows the city and the contact person.
+  city: { select: { id: true, name: true } },
+  contact: {
+    select: {
+      contactName: true,
+      contactPhone: true,
+      contactEmail: true,
+      designation: true,
+      designationOther: true,
+    },
+  },
+}
+
 export const buildingRepository = {
   /** One row per Place per zone — the clash the create path refuses. */
   findByPlaceIdInZone: (placeId, zoneId) =>
@@ -76,8 +110,6 @@ export const buildingRepository = {
       skip,
       take,
     }),
-  count: (where = {}) => prisma.building.count({ where }),
-  updateMany: (where, data) => prisma.building.updateMany({ where, data }),
   // Just id + zone, for the bulk OLT map's same-zone check.
   findManyScoped: (where) => prisma.building.findMany({ where, select: { id: true, zoneId: true } }),
   // An OLT with its POP's zone and its port count — for the bulk OLT map.
@@ -86,6 +118,19 @@ export const buildingRepository = {
       where: { id },
       select: { id: true, name: true, ponPortCount: true, pop: { select: { zones: { select: { id: true } } } } },
     }),
+  /**
+   * Every matching building, lean. Deliberately unpaginated: the map is not a
+   * page of results, it is the whole picture — a `take` here is exactly the
+   * bug that capped it at 500.
+   */
+  listMarkers: (where = {}) =>
+    prisma.building.findMany({
+      where,
+      select: markerSelect,
+      orderBy: { buildingName: 'asc' },
+    }),
+  count: (where = {}) => prisma.building.count({ where }),
+  updateMany: (where, data) => prisma.building.updateMany({ where, data }),
   /**
    * Name/address lookup for the PARTNER portal. Coverage registry only, and a
    * deliberately narrow select — partner rows must never carry survey data.
@@ -109,16 +154,6 @@ export const buildingRepository = {
   findById: (id) => prisma.building.findUnique({ where: { id }, include: fullInclude }),
   update: (id, data) => prisma.building.update({ where: { id }, data, include: fullInclude }),
   delete: (id) => prisma.building.delete({ where: { id } }),
-  /**
-   * Lightweight map markers: exactly the fields a pin needs, no pagination,
-   * no zone/photo joins — the map can hold thousands of these at once.
-   */
-  listMarkers: (where = {}) =>
-    prisma.building.findMany({
-      where,
-      select: { id: true, buildingName: true, latitude: true, longitude: true, isLive: true },
-      orderBy: { buildingName: 'asc' },
-    }),
   /**
    * Fiber names still touching this building via a FiberPoint — the delete
    * guard's evidence. Deduplicated + sorted so the 409 message is stable

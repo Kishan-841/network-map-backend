@@ -412,6 +412,20 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       }
     },
 
+    /**
+     * Every building the actor may see, as map pins.
+     *
+     * Same `buildListWhere` as the list, so the map and the list never
+     * disagree about which buildings exist — a surveyor sees the same rows in
+     * both. `page`/`pageSize` are accepted (the list query schema is shared)
+     * and ignored: the map has no pages, and paginating it is what hid 655 of
+     * 1155 buildings.
+     */
+    async listMarkers(filters = {}, actor) {
+      const where = await buildListWhere(filters, actor)
+      return buildingRepository.listMarkers(where)
+    },
+
     async listBuildings(filters = {}, actor) {
       const { latitude, longitude, radius, page = 1, pageSize = 20 } = filters
       const where = await buildListWhere(filters, actor)
@@ -446,17 +460,6 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         buildingRepository.list(where, { skip: (page - 1) * pageSize, take: pageSize }),
       ])
       return { items: items.map(withTier), pagination: paginate(total) }
-    },
-
-    /**
-     * Map pins: id/name/lat/lon/isLive only, no pagination. Scoped through
-     * `buildListWhere` with no filters — the same rule the list screen uses,
-     * so a role that only sees coverage buildings (or a subset of them) never
-     * gets a marker for something it could not otherwise open.
-     */
-    async listMarkers(actor) {
-      const where = await buildListWhere({}, actor)
-      return buildingRepository.listMarkers(where)
     },
 
     async getBuilding(id, actor) {
