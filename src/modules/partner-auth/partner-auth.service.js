@@ -31,6 +31,7 @@ export function createPartnerAuthService({
   partnerRepository,
   otpRepository,
   mailer,
+  sms,
   inviteService,
   partnerReferralService,
   // Injected so tests can drive the compare; production uses bcrypt.
@@ -60,18 +61,27 @@ export function createPartnerAuthService({
       if (last && Date.now() - new Date(last).getTime() < env.otp.resendCooldownSeconds * 1000) {
         // Silently succeed rather than explain — a resend timer is one more
         // thing to understand, and the previous code still works.
-        return { sent: true, registered: Boolean(partner) }
+        return { sent: true, registered: Boolean(partner), cooldown: true }
       }
 
       const code = generateOtp()
-      await otpRepository.create({
+      const challenge = await otpRepository.create({
         identifier: mobile,
         channel: 'MOBILE',
         codeHash: await hashOtp(code),
         expiresAt: new Date(Date.now() + env.otp.ttlMinutes * 60 * 1000),
       })
 
-      // Email is a courtesy while there is no SMS; it is never the only path.
+      try {
+        await sms.sendOtp({ mobile, code })
+      } catch (err) {
+        // A code nobody received must not sit there holding the cooldown.
+        await otpRepository.remove(challenge.id).catch(() => {})
+        console.error('[partner-auth] SMS send failed:', err.message)
+        throw ApiError.serviceUnavailable('We could not send the code. Please try again.')
+      }
+
+      // Email is a courtesy copy; the SMS is the path that matters.
       if (partner?.email && mailer) {
         await mailer
           .send({

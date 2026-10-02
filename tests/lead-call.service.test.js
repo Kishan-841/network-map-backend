@@ -74,7 +74,10 @@ describe('what each outcome does to the lead', () => {
   })
 
   it('call later leaves them Contacted and remembers when', async () => {
-    const when = '2026-09-05T11:30:00.000Z'
+    // Relative, never a fixed date: the service rightly refuses a callback in
+    // the past, so a hard-coded '2026-09-05' passed until that day came and
+    // then failed forever.
+    const when = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
     const patch = await statusAfter('CALL_LATER', { callbackAt: when })
     expect(patch.status).toBe('CONTACTED')
     expect(patch.nextCallAt.toISOString()).toBe(when)
@@ -156,5 +159,33 @@ describe('the real repository exposes what the service calls', () => {
   it('can create a call', async () => {
     const { leadCallRepository } = await import('../src/modules/leads/lead-call.repository.js')
     expect(typeof leadCallRepository.create).toBe('function')
+  })
+})
+
+describe('lead milestones from a call (push)', () => {
+  it('reports a call that moved the lead to INTERESTED', async () => {
+    const lead = { id: 'l1', status: 'CONTACTED', partnerId: 'p1', customerName: 'Ravi' }
+    const notifyLeadMilestone = vi.fn()
+    const svc = createLeadCallService({
+      leadRepository: { findById: vi.fn(async () => lead), update: vi.fn(async () => {}), recordEvent: vi.fn(async () => {}) },
+      callRepository: { create: vi.fn(async (d) => ({ id: 'c1', ...d })) },
+      notifyLeadMilestone,
+    })
+    const now = Date.now()
+    await svc.logCall('l1', { outcome: 'INTERESTED', startedAt: new Date(now - 60_000).toISOString(), endedAt: new Date(now).toISOString() }, { role: 'ADMIN' })
+    expect(notifyLeadMilestone).toHaveBeenCalledWith({ lead, fromStatus: 'CONTACTED', toStatus: 'INTERESTED' })
+  })
+
+  it('says nothing when the call did not move the lead', async () => {
+    const lead = { id: 'l1', status: 'INTERESTED', partnerId: 'p1', customerName: 'Ravi' }
+    const notifyLeadMilestone = vi.fn()
+    const svc = createLeadCallService({
+      leadRepository: { findById: vi.fn(async () => lead), update: vi.fn(async () => {}), recordEvent: vi.fn(async () => {}) },
+      callRepository: { create: vi.fn(async (d) => ({ id: 'c1', ...d })) },
+      notifyLeadMilestone,
+    })
+    const now = Date.now()
+    await svc.logCall('l1', { outcome: 'INTERESTED', startedAt: new Date(now - 60_000).toISOString(), endedAt: new Date(now).toISOString() }, { role: 'ADMIN' })
+    expect(notifyLeadMilestone).not.toHaveBeenCalled()
   })
 })

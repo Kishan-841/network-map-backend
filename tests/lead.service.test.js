@@ -86,3 +86,43 @@ describe('staff moving a lead along', () => {
     ).rejects.toMatchObject({ status: 400 })
   })
 })
+
+describe('lead milestones (push)', () => {
+  const lead = { id: 'l1', status: 'CONTACTED', partnerId: 'p1', customerName: 'Ravi' }
+  const withHook = (overrides = {}) => {
+    const notifyLeadMilestone = vi.fn()
+    const leadRepository = {
+      findById: vi.fn(async () => lead),
+      update: vi.fn(async (id, d) => ({ ...lead, ...d })),
+      recordEvent: vi.fn(async () => {}),
+    }
+    const earningService = {
+      findForLead: vi.fn(async () => null),
+      recordConversion: vi.fn(async () => ({ amount: 750 })),
+      revokeConversion: vi.fn(async () => {}),
+    }
+    return { notifyLeadMilestone, leadRepository, earningService, ...overrides }
+  }
+
+  it('reports the move, with the new earning, after it is saved', async () => {
+    const d = withHook()
+    await createLeadService(d).changeStatus('l1', 'CONVERTED', { role: 'ADMIN' }, null, { speedMbps: 100, billingPeriod: 'HALF_YEARLY' })
+    expect(d.leadRepository.update).toHaveBeenCalled()
+    expect(d.notifyLeadMilestone).toHaveBeenCalledWith({ lead, fromStatus: 'CONTACTED', toStatus: 'CONVERTED', earning: { amount: 750 } })
+  })
+
+  it('passes the existing earning when a conversion is re-picked', async () => {
+    const d = withHook()
+    d.earningService.findForLead = vi.fn(async () => ({ amount: 500 }))
+    await createLeadService(d).changeStatus('l1', 'CONVERTED', { role: 'ADMIN' })
+    expect(d.notifyLeadMilestone.mock.calls[0][0].earning).toEqual({ amount: 500 })
+  })
+
+  it('still saves the status if the notifier throws', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const d = withHook({ notifyLeadMilestone: vi.fn(() => { throw new Error('push down') }) })
+    await expect(createLeadService(d).changeStatus('l1', 'INTERESTED', { role: 'ADMIN' })).resolves.toBeTruthy()
+    expect(d.leadRepository.recordEvent).toHaveBeenCalled()
+    err.mockRestore()
+  })
+})

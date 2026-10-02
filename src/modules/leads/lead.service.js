@@ -4,7 +4,7 @@ export const LEAD_STATUSES = [
   'NEW', 'CONTACTED', 'INTERESTED', 'CONVERTED', 'NOT_INTERESTED', 'UNREACHABLE', 'DUPLICATE',
 ]
 
-export function createLeadService({ leadRepository, earningService }) {
+export function createLeadService({ leadRepository, earningService, notifyLeadMilestone = () => {} }) {
   return {
     async createLead(input, partner) {
       // The gate again, on the server. A partner who is not approved has no
@@ -63,6 +63,7 @@ export function createLeadService({ leadRepository, earningService }) {
       if (!lead) throw missing()
       if (actor?.role === 'PARTNER_MANAGER' && lead.employeeId !== actor.id) throw missing()
 
+      let earning = null
       if (earningService) {
         if (toStatus === 'CONVERTED') {
           // Keyed on whether the EARNING exists, not on whether the status is
@@ -75,7 +76,9 @@ export function createLeadService({ leadRepository, earningService }) {
             if (!plan?.speedMbps || !plan?.billingPeriod) {
               throw ApiError.badRequest('Record which plan the customer took before converting')
             }
-            await earningService.recordConversion(lead, plan)
+            earning = await earningService.recordConversion(lead, plan)
+          } else {
+            earning = existing
           }
         } else if (lead.status === 'CONVERTED') {
           await earningService.revokeConversion(leadId)
@@ -90,6 +93,14 @@ export function createLeadService({ leadRepository, earningService }) {
         byUserId: actor?.id ?? null,
         note: note ?? null,
       })
+
+      // After the change is saved. Wrapped: a notification must never turn a
+      // saved status change into an error for the manager.
+      try {
+        notifyLeadMilestone({ lead, fromStatus: lead.status, toStatus, earning })
+      } catch (err) {
+        console.error('[push] could not queue the lead notification:', err?.message)
+      }
       return updated
     },
   }

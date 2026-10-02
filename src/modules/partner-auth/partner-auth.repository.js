@@ -23,4 +23,6 @@ export const otpRepository = {
   consume: (id) => prisma.otpChallenge.update({ where: { id }, data: { consumedAt: new Date() } }),
   bumpAttempts: (id) =>
     prisma.otpChallenge.update({ where: { id }, data: { attempts: { increment: 1 } } }),
+  /** A code whose SMS never went out — gone, so it cannot hold the cooldown. */
+  remove: (id) => prisma.otpChallenge.delete({ where: { id } }),
 }

@@ -18,6 +18,8 @@ import { leadCallRepository } from './lead-call.repository.js'
 import { createEarningService } from '../earnings/earning.service.js'
 import { earningRepository } from '../earnings/earning.repository.js'
 import { rateCardRepository } from '../rate-card/rate-card.repository.js'
+import { notifier } from '../../lib/push/notifier.js'
+import { createLeadMilestones } from './lead-notify.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
 
 const earningService = createEarningService({
@@ -25,8 +27,14 @@ const earningService = createEarningService({
   rateCardRepository,
   leadRepository,
 })
-const leadService = createLeadService({ leadRepository, earningService })
-const leadCalls = createLeadCallService({ leadRepository, callRepository: leadCallRepository })
+// Partner push notifications for lead milestones — shared by both status paths.
+const notifyLeadMilestone = createLeadMilestones({ notifyPartner: notifier.notifyPartner })
+const leadService = createLeadService({ leadRepository, earningService, notifyLeadMilestone })
+const leadCalls = createLeadCallService({
+  leadRepository,
+  callRepository: leadCallRepository,
+  notifyLeadMilestone,
+})
 const capture = createLeadCaptureService({ buildingRepository, leadRepository })
 const buildingSearch = createBuildingSearchService({ buildingRepository })
 const partners = createPartnerService({ partnerRepository, storage: getStorageProvider() })
@@ -40,8 +48,13 @@ const placeSchema = z.object({
 
 /**
  * What the partner fills in. Deliberately short — every field we remove is a
- * partner who finishes (partner-network.md §0). No email, and no buildingId:
- * the server decides which building this is, not the browser.
+ * partner who finishes (partner-network.md §0). No email.
+ *
+ * `buildingId` is the building the partner picked from OUR search (the app
+ * searches the registry, not Google — PRD §6.1). It says WHICH building; it
+ * never says whether we serve it. The capture service re-fetches it with the
+ * search's own scope and reads that from our row, and anything the client
+ * claims about the match itself is never read at all.
  */
 const leadSchema = z.object({
   customerName: z.string().trim().min(1).max(120),
@@ -60,6 +73,7 @@ const leadSchema = z.object({
       .refine((n) => [100, 200, 300, 400].includes(n), { message: 'Pick a speed we sell' })
       .optional(),
   ),
+  buildingId: z.string().trim().min(1).max(64).optional(),
   placeId: z.string().trim().max(200).optional(),
   placeName: z.string().trim().max(200).optional(),
   address: z.string().trim().max(300).optional(),

@@ -12,8 +12,20 @@ export function createLeadCaptureService({ buildingRepository, leadRepository })
    * link the lead with; the route never puts it in a response. A partner
    * gets a colour, not a record.
    */
-  async function matchPlace({ placeId, latitude, longitude }) {
-    let match = placeId ? await buildingRepository.findByPlaceId(placeId) : null
+  async function matchPlace({ buildingId, placeId, latitude, longitude }) {
+    let match = null
+
+    // A building the partner PICKED from our own search — the mobile app
+    // searches our registry, not Google (PRD §6.1). The id is a pointer, not a
+    // verdict: it is fetched again through the very method the search uses,
+    // so an id for a building partners cannot see links nothing, and whether
+    // we serve it is read from our row, never from anything the client sent.
+    if (buildingId) {
+      const [picked] = await buildingRepository.searchForPartner(null, 1, buildingId)
+      match = picked ?? null
+    }
+
+    if (!match && placeId) match = await buildingRepository.findByPlaceId(placeId)
 
     if (!match && latitude != null && longitude != null) {
       const box = boundingBox(latitude, longitude, MATCH_RADIUS_METERS)

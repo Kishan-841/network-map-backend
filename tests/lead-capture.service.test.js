@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createLeadCaptureService } from '../src/modules/leads/lead-capture.service.js'
+import { buildingRepository as realBuildingRepository } from '../src/modules/buildings/building.repository.js'
 
 const live = {
   id: 'b1', placeId: 'place-live', buildingName: 'Sunrise Heights',
@@ -9,13 +10,31 @@ const live = {
 }
 const surveyed = { ...live, id: 'b2', placeId: 'place-soon', isLive: false, buildingName: 'Pending Towers' }
 
-const svc = (buildings) =>
-  createLeadCaptureService({
-    buildingRepository: {
-      findByPlaceId: vi.fn(async (id) => buildings.find((b) => b.placeId === id) ?? null),
-      findWithinBounds: vi.fn(async () => buildings),
-    },
-  })
+/**
+ * Mirrors the real repository's contract, including searchForPartner's `id`
+ * branch — which in the real one is scoped to the coverage registry. A
+ * building not in `buildings` stands in for one partners cannot see.
+ */
+const fakeBuildings = (buildings) => ({
+  findByPlaceId: vi.fn(async (id) => buildings.find((b) => b.placeId === id) ?? null),
+  findWithinBounds: vi.fn(async () => buildings),
+  searchForPartner: vi.fn(async (_query, _take, id) => buildings.filter((b) => b.id === id)),
+})
+
+const svc = (buildings) => createLeadCaptureService({ buildingRepository: fakeBuildings(buildings) })
+
+const capture = (buildings, existing = null) => {
+  const leadRepository = {
+    create: vi.fn(async (d) => ({ id: 'l1', status: 'NEW', ...d })),
+    findOpenByMobile: vi.fn(async () => existing),
+    recordEvent: vi.fn(async () => {}),
+  }
+  const buildingRepository = fakeBuildings(buildings)
+  const service = createLeadCaptureService({ buildingRepository, leadRepository })
+  return { leadRepository, buildingRepository, service }
+}
+
+const partner = { id: 'p1', status: 'APPROVED', onboardedById: 'e1' }
 
 const at = (b) => ({ placeId: b.placeId, latitude: b.latitude, longitude: b.longitude })
 
@@ -54,27 +73,10 @@ describe('the building signal', () => {
 })
 
 describe('capturing the lead', () => {
-  const partner = { id: 'p1', status: 'APPROVED', onboardedById: 'e1' }
   const base = {
     customerName: 'Ravi', customerMobile: '9812345678', requirementMbps: 200,
     placeId: 'place-live', placeName: 'Sunrise Heights', address: '12 Baner Road',
     latitude: 18.52, longitude: 73.85,
-  }
-
-  const capture = (buildings, existing = null) => {
-    const leadRepository = {
-      create: vi.fn(async (d) => ({ id: 'l1', status: 'NEW', ...d })),
-      findOpenByMobile: vi.fn(async () => existing),
-      recordEvent: vi.fn(async () => {}),
-    }
-    const service = createLeadCaptureService({
-      buildingRepository: {
-        findByPlaceId: vi.fn(async (id) => buildings.find((b) => b.placeId === id) ?? null),
-        findWithinBounds: vi.fn(async () => buildings),
-      },
-      leadRepository,
-    })
-    return { leadRepository, service }
   }
 
   it('links the building when we know it', async () => {
@@ -115,6 +117,8 @@ describe('capturing the lead', () => {
   })
 
   it('does NOT trust a match the client claims', async () => {
+    // Now that buildingId IS accepted, this is the case it must survive: an id
+    // the server cannot find links nothing, and the claimed verdict is ignored.
     const { leadRepository, service } = capture([])
     await service.capture({ ...base, buildingMatch: 'LIVE', buildingId: 'b1' }, partner)
     const saved = leadRepository.create.mock.calls[0][0]
@@ -127,5 +131,57 @@ describe('capturing the lead', () => {
     const out = await service.capture(base, partner)
     expect(out.status).toBe('DUPLICATE')
     expect(JSON.stringify(out)).not.toContain('rival-partner')
+  })
+})
+
+describe('a building picked from our own search (PRD §6.1)', () => {
+  // What the app sends: the pick, and no coordinates at all.
+  const pick = (buildingId) => ({ customerName: 'Ravi', customerMobile: '9812345678', buildingId })
+
+  it('links the lead to the building the partner picked', async () => {
+    const { leadRepository, service } = capture([live])
+    await service.capture(pick('b1'), partner)
+    const saved = leadRepository.create.mock.calls[0][0]
+    expect(saved.buildingId).toBe('b1')
+    expect(saved.buildingMatch).toBe('LIVE')
+  })
+
+  it('says coming soon for a picked building we have not lit yet', async () => {
+    const { leadRepository, service } = capture([surveyed])
+    await service.capture(pick('b2'), partner)
+    expect(leadRepository.create.mock.calls[0][0].buildingMatch).toBe('IN_REGISTRY')
+  })
+
+  it('looks the pick up through the same scoped method partner search uses', async () => {
+    // searchForPartner's id branch is restricted to the coverage registry, so
+    // guessing the id of an acquisition-side building links nothing.
+    const { buildingRepository, service } = capture([live])
+    await service.capture(pick('b1'), partner)
+    expect(buildingRepository.searchForPartner).toHaveBeenCalledWith(null, 1, 'b1')
+  })
+
+  it('links nothing for an id partners cannot see — and still keeps the lead', async () => {
+    const { leadRepository, service } = capture([live])
+    const out = await service.capture(pick('acquisition-only-building'), partner)
+    expect(out.id).toBe('l1')
+    const saved = leadRepository.create.mock.calls[0][0]
+    expect(saved.buildingId).toBeNull()
+    expect(saved.buildingMatch).toBe('NOT_FOUND')
+  })
+
+  it('trusts the explicit pick over coordinate guessing', async () => {
+    // The partner named the building. A LIVE neighbour found by proximity must
+    // not overrule what they actually chose.
+    const { leadRepository, service } = capture([surveyed, live])
+    await service.capture({ ...pick('b2'), latitude: live.latitude, longitude: live.longitude }, partner)
+    const saved = leadRepository.create.mock.calls[0][0]
+    expect(saved.buildingId).toBe('b2')
+    expect(saved.buildingMatch).toBe('IN_REGISTRY')
+  })
+
+  it('relies on a method the REAL repository actually has', () => {
+    // Fakes that satisfied a contract the real repository did not have have
+    // shipped 500s three times in this project. This one checks the real one.
+    expect(typeof realBuildingRepository.searchForPartner).toBe('function')
   })
 })

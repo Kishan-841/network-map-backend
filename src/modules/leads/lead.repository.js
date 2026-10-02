@@ -1,8 +1,10 @@
 import { prisma } from '../../lib/prisma.js'
 
+// What a partner may see of their own lead: what THEY entered, plus where it
+// has got to. No attribution, no call log, no earning amounts.
 const partnerView = {
   id: true, customerName: true, customerMobile: true, customerEmail: true,
-  address: true, status: true, note: true, createdAt: true,
+  address: true, status: true, note: true, requirementMbps: true, createdAt: true,
   building: { select: { id: true, buildingName: true } },
 }
 

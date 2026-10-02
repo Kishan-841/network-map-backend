@@ -22,7 +22,7 @@ export const OUTCOME_STATUS = {
 /** A lead that has already converted is finished; a call must not undo that. */
 const TERMINAL = ['CONVERTED']
 
-export function createLeadCallService({ leadRepository, callRepository }) {
+export function createLeadCallService({ leadRepository, callRepository, notifyLeadMilestone = () => {} }) {
   return {
     /**
      * Record a finished call.
@@ -86,6 +86,14 @@ export function createLeadCallService({ leadRepository, callRepository }) {
           byUserId: actor?.id ?? null,
           note: input.note?.trim() || null,
         })
+
+        // The call moved the lead (e.g. to INTERESTED): tell the partner if
+        // it is a moment they hear about. Never lets push break call logging.
+        try {
+          notifyLeadMilestone({ lead, fromStatus: lead.status, toStatus: nextStatus })
+        } catch (err) {
+          console.error('[push] could not queue the lead notification:', err?.message)
+        }
       }
 
       return call

@@ -8,11 +8,17 @@ import { createPartnerService } from './partner.service.js'
 import { partnerRepository } from './partner.repository.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
 import { env } from '../../config/env.js'
+import { notifier } from '../../lib/push/notifier.js'
 import { createApprovalBypassService } from './approval-bypass.service.js'
 import { createDirectPartnerService } from './direct-add.service.js'
 import { partnerAuthRepository } from '../partner-auth/partner-auth.repository.js'
 
-const service = createPartnerService({ partnerRepository, storage: getStorageProvider() })
+const service = createPartnerService({
+  partnerRepository,
+  storage: getStorageProvider(),
+  // Tells the partner when an admin approves or rejects their documents.
+  notifyPartner: notifier.notifyPartner,
+})
 const directPartners = createDirectPartnerService({ partnerAuthRepository })
 const approvalBypass = createApprovalBypassService({
   partnerAuthRepository,

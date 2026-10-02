@@ -99,3 +99,38 @@ describe('admin decisions', () => {
     })
   })
 })
+
+describe('telling the partner the decision (push)', () => {
+  const pending = { id: 'p1', status: 'PENDING_APPROVAL' }
+  const withNotify = (partner, notifyPartner = vi.fn(async () => ({ sent: 1 }))) => ({ ...deps(partner), notifyPartner })
+  const flush = () => new Promise((r) => setTimeout(r, 0))
+
+  it('notifies on approval', async () => {
+    const d = withNotify(pending)
+    await createPartnerService(d).approve('p1', 'admin1')
+    await flush()
+    expect(d.notifyPartner).toHaveBeenCalledWith('p1', 'partner.approved', {})
+  })
+
+  it('notifies on rejection', async () => {
+    const d = withNotify(pending)
+    await createPartnerService(d).reject('p1', 'Photo is blurred', 'admin1')
+    await flush()
+    expect(d.notifyPartner).toHaveBeenCalledWith('p1', 'partner.rejected', {})
+  })
+
+  it('does not notify when the approval itself is refused', async () => {
+    const d = withNotify({ id: 'p1', status: 'REGISTERED' })
+    await expect(createPartnerService(d).approve('p1', 'admin1')).rejects.toMatchObject({ status: 400 })
+    await flush()
+    expect(d.notifyPartner).not.toHaveBeenCalled()
+  })
+
+  it('still approves when the notification fails', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const d = withNotify(pending, vi.fn(async () => { throw new Error('push down') }))
+    await expect(createPartnerService(d).approve('p1', 'admin1')).resolves.toMatchObject({ status: 'APPROVED' })
+    await flush()
+    err.mockRestore()
+  })
+})

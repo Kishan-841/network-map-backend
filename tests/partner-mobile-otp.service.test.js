@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createPartnerAuthService } from '../src/modules/partner-auth/partner-auth.service.js'
+import { otpRepository as realOtpRepository } from '../src/modules/partner-auth/partner-auth.repository.js'
 
 /**
  * v2 login: the mobile number is the identity and there is no password at all.
@@ -24,9 +25,11 @@ const deps = (over = {}) => ({
     lastIssuedAt: vi.fn(async () => null),
     consume: vi.fn(async () => {}),
     bumpAttempts: vi.fn(async () => {}),
+    remove: vi.fn(async () => {}),
     ...(over.otpRepository ?? {}),
   },
   mailer: over.mailer ?? { send: vi.fn(async () => {}) },
+  sms: over.sms ?? { sendOtp: vi.fn(async () => {}) },
   showOtp: over.showOtp ?? false,
 })
 
@@ -53,6 +56,67 @@ describe('asking for a code', () => {
     const svc = createPartnerAuthService(deps())
     for (const bad of ['123', '1234567890', 'abcdefghij', '98220112345']) {
       await expect(svc.requestOtp({ mobile: bad })).rejects.toMatchObject({ status: 400 })
+    }
+  })
+})
+
+describe('delivering the code by SMS', () => {
+  it('texts the partner the same code that was stored', async () => {
+    const d = deps({ showOtp: true })
+    const out = await createPartnerAuthService(d).requestOtp({ mobile: partner.mobile })
+    expect(d.sms.sendOtp).toHaveBeenCalledWith({ mobile: partner.mobile, code: out.devCode })
+  })
+
+  it('texts a NEW number too, so signup can verify it', async () => {
+    const d = deps()
+    await createPartnerAuthService(d).requestOtp({ mobile: '9000000000' })
+    expect(d.sms.sendOtp.mock.calls[0][0].mobile).toBe('9000000000')
+  })
+
+  it('answers 503 and forgets the code when the SMS cannot be sent', async () => {
+    // Keeping the code would lock the partner behind the resend cooldown
+    // for a message that never arrived.
+    const d = deps({ sms: { sendOtp: vi.fn(async () => { throw new Error('MSG91 down') }) } })
+    await expect(
+      createPartnerAuthService(d).requestOtp({ mobile: partner.mobile }),
+    ).rejects.toMatchObject({ status: 503 })
+    expect(d.otpRepository.remove).toHaveBeenCalledWith('o1')
+  })
+
+  it('never puts the provider error in front of the partner', async () => {
+    const d = deps({ sms: { sendOtp: vi.fn(async () => { throw new Error('authkey abc123 invalid') }) } })
+    const err = await createPartnerAuthService(d)
+      .requestOtp({ mobile: partner.mobile })
+      .catch((e) => e)
+    expect(err.message).not.toMatch(/authkey|abc123/)
+  })
+})
+
+describe('the resend cooldown', () => {
+  const recent = () => deps({ otpRepository: { lastIssuedAt: vi.fn(async () => new Date()) } })
+
+  it('says so explicitly, so a client can tell it apart from a fresh send', async () => {
+    const out = await createPartnerAuthService(recent()).requestOtp({ mobile: partner.mobile })
+    expect(out.cooldown).toBe(true)
+  })
+
+  it('sends no SMS and stores no code', async () => {
+    const d = recent()
+    await createPartnerAuthService(d).requestOtp({ mobile: partner.mobile })
+    expect(d.sms.sendOtp).not.toHaveBeenCalled()
+    expect(d.otpRepository.create).not.toHaveBeenCalled()
+  })
+
+  it('is not reported on a normal send', async () => {
+    const out = await createPartnerAuthService(deps()).requestOtp({ mobile: partner.mobile })
+    expect(out.cooldown).toBeUndefined()
+  })
+})
+
+describe('the test fakes', () => {
+  it('only use repository methods the real one has', () => {
+    for (const name of Object.keys(deps().otpRepository)) {
+      expect(typeof realOtpRepository[name], name).toBe('function')
     }
   })
 })

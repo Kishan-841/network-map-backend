@@ -6,7 +6,14 @@ const DOC_LABEL = { AADHAAR: 'Aadhaar card', PAN: 'PAN card' }
  *  does not finish (partner-network.md §0). */
 export const requiredDocuments = () => ['AADHAAR', 'PAN']
 
-export function createPartnerService({ partnerRepository, storage }) {
+// Fire-and-forget: the admin's approve/reject must never wait for, or fail
+// because of, the partner's notification.
+const tell = (notifyPartner, partnerId, kind) =>
+  Promise.resolve()
+    .then(() => notifyPartner(partnerId, kind, {}))
+    .catch((err) => console.error(`[push] ${kind} failed:`, err?.message))
+
+export function createPartnerService({ partnerRepository, storage, notifyPartner = async () => {} }) {
   return {
     requiredDocuments,
 
@@ -57,23 +64,28 @@ export function createPartnerService({ partnerRepository, storage }) {
       if (partner.status !== 'PENDING_APPROVAL') {
         throw ApiError.badRequest('This partner has not submitted their documents yet')
       }
-      return partnerRepository.update(partnerId, {
+      const updated = await partnerRepository.update(partnerId, {
         status: 'APPROVED',
         approvedById: adminId,
         approvedAt: new Date(),
         rejectionReason: null,
       })
+      tell(notifyPartner, partnerId, 'partner.approved')
+      return updated
     },
 
     async reject(partnerId, reason, adminId) {
       const partner = await partnerRepository.findById(partnerId)
       if (!partner) throw ApiError.notFound('Partner not found')
-      return partnerRepository.update(partnerId, {
+      const updated = await partnerRepository.update(partnerId, {
         status: 'REJECTED',
         rejectionReason: reason,
         approvedById: adminId,
         approvedAt: null,
       })
+      // Their next step is theirs — upload again — so they should hear now.
+      tell(notifyPartner, partnerId, 'partner.rejected')
+      return updated
     },
 
     /** Documents leave signed, exactly like building photos. */

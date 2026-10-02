@@ -1,6 +1,7 @@
 import { createPartnerAuthService } from './partner-auth.service.js'
 import { partnerAuthRepository, otpRepository } from './partner-auth.repository.js'
 import { getMailer } from '../../lib/mailer/index.js'
+import { getSms } from '../../lib/sms/index.js'
 import { inviteService } from '../partner-invites/invite.service.js'
 import { createPartnerReferralService } from '../partner-referrals/partner-referral.service.js'
 import { partnerReferralRepository } from '../partner-referrals/partner-referral.repository.js'
@@ -15,6 +16,7 @@ const service = createPartnerAuthService({
   partnerRepository: partnerAuthRepository,
   otpRepository,
   mailer: getMailer(),
+  sms: getSms(),
   inviteService,
   partnerReferralService,
 })

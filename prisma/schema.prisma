@@ -806,12 +806,29 @@ model Partner {
   introductionsMade PartnerReferral[] @relation("PartnerReferralBy")
   introducedAs      PartnerReferral?  @relation("PartnerReferralJoined")
   coverageRequests  CoverageRequest[]
+  pushTokens        PartnerPushToken[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([status])
   @@index([onboardedById])
+}
+
+/// A phone that can receive this partner's push notifications. One partner
+/// may have several; a token re-registered by another partner moves to them.
+model PartnerPushToken {
+  id         String   @id @default(cuid())
+  partnerId  String
+  partner    Partner  @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  /// "ExponentPushToken[...]"
+  token      String   @unique
+  /// android | ios
+  platform   String
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  @@index([partnerId])
 }
 
 model PartnerDocument {

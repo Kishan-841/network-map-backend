@@ -19,6 +19,21 @@ export const env = {
   // OTP flow is fully testable without a provider account.
   mailDriver: process.env.MAIL_DRIVER ?? 'console',
   mailFrom: process.env.MAIL_FROM ?? 'no-reply@ispcoverage.local',
+  // Partner sign-in codes. `console` prints the SMS; `msg91` sends it for
+  // real (and spends credit). Flipping this one variable is the whole switch.
+  smsDriver: process.env.SMS_DRIVER ?? 'console',
+  msg91: {
+    authKey: process.env.MSG91_AUTH_KEY,
+    // The MSG91 template id of the DLT-approved sign-in message.
+    otpTemplateId: process.env.MSG91_OTP_TEMPLATE_ID,
+    // The variable name used in that template for the code (case-sensitive).
+    otpVar: process.env.MSG91_OTP_VAR || 'otp',
+  },
+  // Partner app notifications. `console` prints them; `expo` sends them
+  // through Expo's push service (which uses Firebase for Android).
+  pushDriver: process.env.PUSH_DRIVER ?? 'console',
+  // Only needed if "enhanced push security" is turned on in the Expo project.
+  expoAccessToken: process.env.EXPO_ACCESS_TOKEN || undefined,
   otp: {
     ttlMinutes: Number(process.env.OTP_TTL_MINUTES ?? 5),
     maxAttempts: Number(process.env.OTP_MAX_ATTEMPTS ?? 5),
@@ -90,6 +105,21 @@ if (env.storageDriver === 'r2') {
         .map((key) => `R2_${key.replace(/[A-Z]/g, (c) => `_${c}`).toUpperCase()}`)
         .join(', ')}`,
     )
+  }
+}
+
+if (!['console', 'expo'].includes(env.pushDriver)) {
+  throw new Error(`Unknown PUSH_DRIVER "${env.pushDriver}". Supported: console, expo.`)
+}
+
+// Fail fast when real SMS is switched on but cannot actually send.
+if (env.smsDriver === 'msg91') {
+  const missing = [
+    ['MSG91_AUTH_KEY', env.msg91.authKey],
+    ['MSG91_OTP_TEMPLATE_ID', env.msg91.otpTemplateId],
+  ].filter(([, value]) => !value)
+  if (missing.length) {
+    throw new Error(`SMS_DRIVER=msg91 requires: ${missing.map(([name]) => name).join(', ')}`)
   }
 }
 
