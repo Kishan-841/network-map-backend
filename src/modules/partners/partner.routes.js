@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { z } from 'zod'
+import { ApiError } from '../../lib/api-error.js'
 import { requireAuth, requireRole } from '../../middleware/auth.js'
 import { requirePartner } from '../../middleware/partner-auth.js'
 import { validateBody } from '../../middleware/validate.js'
@@ -193,6 +194,50 @@ partnerAdminRoutes.get('/:id/documents', requireRole('ADMIN'), async (req, res, 
     next(err)
   }
 })
+
+// Bank details: ADMIN only — the person approving, and the one person who may
+// change them once locked. Partner managers never see them.
+partnerAdminRoutes.get('/:id/bank-account', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json({ success: true, data: await bank.getFull(req.params.id) })
+  } catch (err) {
+    next(err)
+  }
+})
+
+partnerAdminRoutes.put(
+  '/:id/bank-account',
+  requireRole('ADMIN'),
+  audit('PartnerBankAccount', 'AdminUpdate', {
+    describe: (req) => `Bank details of partner ${req.params.id} changed by an admin`,
+    newValue: (req) => redactBankBody(req.body),
+  }),
+  validateBody(bankAccountSchema),
+  async (req, res, next) => {
+    try {
+      res.json({ success: true, data: await bank.saveByAdmin(req.params.id, req.body, req.user) })
+    } catch (err) {
+      next(err)
+    }
+  },
+)
+
+// An admin replacing a partner's photo (in practice the cheque, when the bank
+// changes after approval). Same provenance rule as the partner's own upload.
+partnerAdminRoutes.post(
+  '/:id/documents',
+  requireRole('ADMIN'),
+  audit('Partner', 'DocumentReplace', { describe: (req) => `Partner ${req.params.id}: ${req.body?.type} replaced by an admin` }),
+  validateBody(documentSchema),
+  async (req, res, next) => {
+    try {
+      if (!(await partnerRepository.findById(req.params.id))) throw ApiError.notFound('Partner not found')
+      res.status(201).json({ success: true, data: await service.saveDocument(req.params.id, req.body) })
+    } catch (err) {
+      next(err)
+    }
+  },
+)
 
 // Approval is ADMIN-only: the employee who recruited a partner should not be
 // the one clearing their paperwork, especially once commission is attached.
