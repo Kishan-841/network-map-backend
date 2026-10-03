@@ -44,6 +44,13 @@ describe('notifyPartner', () => {
     expect(d.log.error).toHaveBeenCalled()
   })
 
+  it('sends in the partner\'s language', async () => {
+    const d = deps()
+    d.tokenRepository.listForPartner = vi.fn(async () => [{ token: 'ExponentPushToken[a]', partner: { preferredLanguage: 'HI' } }])
+    await createNotifier(d).notifyPartner('p1', 'partner.approved', {})
+    expect(d.push.send.mock.calls[0][0][0].title).toMatch(/[\u0900-\u097F]/)
+  })
+
   it('never throws on an unknown kind either', async () => {
     const d = deps()
     await expect(createNotifier(d).notifyPartner('p1', 'nope', {})).resolves.toEqual({ sent: 0 })

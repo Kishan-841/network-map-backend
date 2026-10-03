@@ -44,4 +44,11 @@ export const partnerAuthController = {
     const { passwordHash, ...partner } = req.partner
     return partner
   }),
+
+  updateMe: handle(async (req) => {
+    const { passwordHash, ...partner } = await partnerAuthRepository.update(req.partner.id, {
+      preferredLanguage: req.body.preferredLanguage,
+    })
+    return partner
+  }),
 }
