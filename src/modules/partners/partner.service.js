@@ -1,10 +1,12 @@
 import { ApiError } from '../../lib/api-error.js'
 
-const DOC_LABEL = { AADHAAR: 'Aadhaar card', PAN: 'PAN card' }
+const DOC_LABEL = { AADHAAR: 'Aadhaar card', PAN: 'PAN card', CANCELLED_CHEQUE: 'Cancelled cheque' }
 
-/** Aadhaar and PAN. Nothing else — every extra document is a partner who
- *  does not finish (partner-network.md §0). */
-export const requiredDocuments = () => ['AADHAAR', 'PAN']
+/** Aadhaar, PAN and a cancelled cheque — plus the bank details form (checked
+ *  separately, it is not a photo). Every extra item is a partner who does not
+ *  finish (partner-network.md §0), so nothing else. */
+export const PARTNER_DOCUMENT_TYPES = ['AADHAAR', 'PAN', 'CANCELLED_CHEQUE']
+export const requiredDocuments = () => [...PARTNER_DOCUMENT_TYPES]
 
 // Fire-and-forget: the admin's approve/reject must never wait for, or fail
 // because of, the partner's notification.
@@ -13,7 +15,7 @@ const tell = (notifyPartner, partnerId, kind) =>
     .then(() => notifyPartner(partnerId, kind, {}))
     .catch((err) => console.error(`[push] ${kind} failed:`, err?.message))
 
-export function createPartnerService({ partnerRepository, storage, notifyPartner = async () => {} }) {
+export function createPartnerService({ partnerRepository, storage, notifyPartner = async () => {}, bankAccountRepository = null }) {
   return {
     requiredDocuments,
 
@@ -45,14 +47,17 @@ export function createPartnerService({ partnerRepository, storage, notifyPartner
     async submitDocuments(partnerId) {
       const partner = await partnerRepository.findById(partnerId)
       if (!partner) throw ApiError.notFound('Partner not found')
+      // Only from the two states where documents are theirs to send. An
+      // approved partner submitting again would drop themselves back to
+      // "waiting" and lose the right to send leads.
+      if (partner.status !== 'REGISTERED' && partner.status !== 'REJECTED') {
+        throw ApiError.conflict('Your documents have already been submitted')
+      }
 
       const have = new Set((await partnerRepository.listDocuments(partnerId)).map((d) => d.type))
-      const missing = requiredDocuments().filter((t) => !have.has(t))
-      if (missing.length) {
-        throw ApiError.badRequest(
-          `Still needed: ${missing.map((t) => DOC_LABEL[t]).join(', ')}`,
-        )
-      }
+      const missing = requiredDocuments().filter((t) => !have.has(t)).map((t) => DOC_LABEL[t])
+      if (!(await bankAccountRepository?.findByPartnerId(partnerId))) missing.push('Bank account details')
+      if (missing.length) throw ApiError.badRequest(`Still needed: ${missing.join(', ')}`)
       return partnerRepository.update(partnerId, { status: 'PENDING_APPROVAL' })
     },
 

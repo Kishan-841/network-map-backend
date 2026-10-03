@@ -4,7 +4,11 @@ import { requireAuth, requireRole } from '../../middleware/auth.js'
 import { requirePartner } from '../../middleware/partner-auth.js'
 import { validateBody } from '../../middleware/validate.js'
 import { audit } from '../system-logs/audit.js'
-import { createPartnerService } from './partner.service.js'
+import { createPartnerService, PARTNER_DOCUMENT_TYPES } from './partner.service.js'
+import { bankAccountRepository } from './bank-account.repository.js'
+import { createBankAccountService } from './bank-account.service.js'
+import { bankAccountSchema, redactBankBody } from './bank-account.schemas.js'
+import { bankCipher } from '../../lib/bank-cipher.js'
 import { partnerRepository } from './partner.repository.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
 import { env } from '../../config/env.js'
@@ -18,7 +22,10 @@ const service = createPartnerService({
   storage: getStorageProvider(),
   // Tells the partner when an admin approves or rejects their documents.
   notifyPartner: notifier.notifyPartner,
+  bankAccountRepository,
 })
+const bank = createBankAccountService({ bankAccountRepository, partnerRepository, cipher: bankCipher })
+export const bankAccountService = bank
 const directPartners = createDirectPartnerService({ partnerAuthRepository })
 const approvalBypass = createApprovalBypassService({
   partnerAuthRepository,
@@ -26,7 +33,7 @@ const approvalBypass = createApprovalBypassService({
 })
 
 const documentSchema = z.object({
-  type: z.enum(['AADHAAR', 'PAN']),
+  type: z.enum(PARTNER_DOCUMENT_TYPES),
   url: z.string().url(),
 })
 const rejectSchema = z.object({ reason: z.string().trim().min(3).max(500) })
@@ -50,6 +57,7 @@ partnerSelfRoutes.use(requirePartner)
 partnerSelfRoutes.get('/onboarding', async (req, res, next) => {
   try {
     const documents = await service.listDocuments(req.partner.id)
+    const bankAccount = await bank.getMasked(req.partner.id)
     res.json({
       success: true,
       data: {
@@ -57,6 +65,9 @@ partnerSelfRoutes.get('/onboarding', async (req, res, next) => {
         rejectionReason: req.partner.rejectionReason,
         required: service.requiredDocuments(),
         documents,
+        bankAccount,
+        // The lock rule lives in the service; the clients only read it.
+        bankEditable: bank.isEditableByPartner(req.partner.status, Boolean(bankAccount)),
         // The browser cannot be trusted to know whether the shortcut is on,
         // so the server says. False in production, always.
         bypassAvailable: env.allowApprovalBypass === true,
@@ -74,6 +85,24 @@ partnerSelfRoutes.post('/documents', validateBody(documentSchema), async (req, r
     next(err)
   }
 })
+
+partnerSelfRoutes.put(
+  '/bank-account',
+  audit('PartnerBankAccount', 'Update', {
+    recordId: (req) => req.partner?.id,
+    describe: (req) => `Partner ${req.partner?.id} saved bank details`,
+    // Never the account number — only its last 4.
+    newValue: (req) => redactBankBody(req.body),
+  }),
+  validateBody(bankAccountSchema),
+  async (req, res, next) => {
+    try {
+      res.json({ success: true, data: await bank.saveByPartner(req.partner, req.body) })
+    } catch (err) {
+      next(err)
+    }
+  },
+)
 
 /**
  * TESTING ONLY — approve yourself and skip the upload entirely. 404s unless
