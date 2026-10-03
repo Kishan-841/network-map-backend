@@ -10,7 +10,10 @@ export async function requireAuth(req, res, next) {
 
   let payload
   try {
-    payload = jwt.verify(token, env.jwtSecret)
+    // audience:'staff' — a PARTNER token fails here at signature
+    // verification rather than at a role check further in. The two token
+    // families are structurally incompatible, not merely policed.
+    payload = jwt.verify(token, env.jwtSecret, { audience: 'staff' })
   } catch {
     return next(ApiError.unauthorized('Invalid or expired token'))
   }
@@ -43,7 +46,7 @@ export const requireRole = (...roles) => (req, res, next) => {
 
 // Drawing fiber is a per-user grant, not a role privilege: an ADMIN ticks the
 // users who may do it (Users → Assign accesses). The role list still applies
-// to a ticked user, so a flag left behind on someone moved to another team — or
+// to a ticked user, so a flag left behind on someone moved to ACCOUNTS — or
 // set by hand in the database — opens nothing.
 export const FIBER_ACCESS_ROLES = ['MANAGER', 'SURVEYOR', 'SUPERVISOR']
 

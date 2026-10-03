@@ -5,7 +5,7 @@ import { createApp } from '../src/app.js'
 import { env } from '../src/config/env.js'
 
 const tokenFor = (role) =>
-  jwt.sign({ sub: `test-${role.toLowerCase()}`, role }, env.jwtSecret, { expiresIn: '1h' })
+  jwt.sign({ sub: `test-${role.toLowerCase()}`, role }, env.jwtSecret, { audience: 'staff', expiresIn: '1h' })
 
 describe('GET /api/v1/stats/dashboard', () => {
   it('returns the enriched payload for ADMIN (charts included, raw SQL runs)', async () => {

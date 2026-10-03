@@ -6,7 +6,7 @@ import { env } from '../src/config/env.js'
 import { prisma } from '../src/lib/prisma.js'
 
 const tokenFor = (role) =>
-  jwt.sign({ sub: `test-${role.toLowerCase()}`, role }, env.jwtSecret, { expiresIn: '1h' })
+  jwt.sign({ sub: `test-${role.toLowerCase()}`, role }, env.jwtSecret, { audience: 'staff', expiresIn: '1h' })
 
 describe('POST /api/v1/users/bulk-zones', () => {
   it('requires authentication', async () => {

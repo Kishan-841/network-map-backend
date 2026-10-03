@@ -6,7 +6,7 @@ import { env } from '../src/config/env.js'
 import { prisma } from '../src/lib/prisma.js'
 
 const tokenFor = (user) =>
-  jwt.sign({ sub: user.id, role: user.role }, env.jwtSecret, { expiresIn: '1h' })
+  jwt.sign({ sub: user.id, role: user.role }, env.jwtSecret, { audience: 'staff', expiresIn: '1h' })
 
 // Exactly what the map is promised — no more (photos/contacts/permission would
 // ride along on every one of ~1200 rows) and no less (the selected-building

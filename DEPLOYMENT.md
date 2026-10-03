@@ -23,6 +23,89 @@ failure. Health: `GET /api/v1/health`.
 If you add more services later, check free ports with `docker ps` and set
 `API_PUBLISH` accordingly.
 
+## A second company on the same VM
+
+Each compose stack already brings its own Postgres, its own volumes and its own
+`.env`, so a second customer is a second stack — no code changes. What follows
+is only the things that must NOT be shared.
+
+### 1. Give the stack its own compose project name
+
+**This is the one that loses data.** Compose derives the project name from the
+directory, and volumes are named `<project>_db-data`. Two checkouts in
+identically-named directories share a project — the second stack attaches to the
+FIRST company's database.
+
+```bash
+git clone <repo> acme-backend     # a distinct directory name, or:
+echo 'COMPOSE_PROJECT_NAME=acme' >> .env
+docker compose ls                 # confirm two separate projects before starting
+```
+
+### 2. A fresh `JWT_SECRET` — not a copy
+
+Most tokens carry a cuid `sub` that would not resolve in the other database, so
+they fail harmlessly. **The partner signup token does not.** It carries only
+`{ mobile }` (`partner-auth.service.js`), and `register` accepts it if that
+mobile matches. With a shared secret, a signup token minted by company A is
+valid on company B: verify an OTP on A, then create a partner account on B
+having never proved the number there.
+
+```bash
+openssl rand -hex 32
+```
+
+### 3. Its own R2 bucket
+
+Object keys are `dir/<uuid>.<ext>` with no per-customer prefix, so one bucket
+means both companies' identity documents share a namespace — and the bucket is
+public until you close it. Create a second bucket, a second R2 API token scoped
+to it, and set `R2_BUCKET` / `R2_PUBLIC_URL` / the access keys accordingly. Two
+buckets also means you can revoke or lock one without touching the other.
+
+### 4. Its own Google Maps key
+
+`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is compiled into the browser bundle, so it is
+public by design and only HTTP-referrer restrictions protect it.
+
+- Restrict each key to that customer's domain, and to the two APIs actually
+  used: Maps JavaScript API and Places API (New).
+- Prefer a key per customer, ideally in its own GCP project. Sharing one key
+  shares the quota and the bill — Places autocomplete is billed per session, and
+  on a shared key you cannot tell whose spend is whose, or stop one customer
+  exhausting the other's budget.
+
+### 5. Everything else that is per-customer
+
+| Variable | Why it cannot be copied |
+| --- | --- |
+| `API_PUBLISH` | Host port must be unique. In use on this VM: 5001–5004, 5432, 5500 |
+| `POSTGRES_PASSWORD` | Defaults to `isp`; set a real one per stack |
+| `CORS_ORIGIN`, `WEB_URL`, `APP_URL` | `WEB_URL` falls back to the first CORS origin, and partner **invite links are built from it** — copy these and company B emails links pointing at company A's site |
+| `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | Set both, then `RUN_SEED=true` on the first deploy only |
+| `NODE_ENV=production` | The image sets it; do not override it in `.env`. It is what makes the server refuse to boot with `SHOW_OTP_IN_RESPONSE` or `ALLOW_APPROVAL_BYPASS` on |
+
+Leave `SHOW_OTP_IN_RESPONSE` and `ALLOW_APPROVAL_BYPASS` unset entirely.
+
+### 6. After it is up
+
+- `docker compose ls` — two projects, two `db-data` volumes.
+- Back up **both** volumes; a backup script written for one stack silently
+  covers only that one.
+- Two Postgres and two Node processes now share the VM's memory — check
+  `free -m` under load before promising uptime.
+- Every future release has to be deployed twice. Tag the image so both stacks
+  can be moved to the same version deliberately rather than by rebuilding each
+  from whatever `main` happens to be.
+
+### Frontend
+
+A separate Vercel project with its own `NEXT_PUBLIC_API_URL` and
+`NEXT_PUBLIC_GOOGLE_MAPS_API_KEY`. `NEXT_PUBLIC_*` values are baked in at build
+time — changing one needs a redeploy, not a restart.
+
+---
+
 ## Deploying the image elsewhere (managed Postgres, ECS/Fly/Render/K8s)
 
 ```bash

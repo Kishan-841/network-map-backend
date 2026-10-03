@@ -22,6 +22,7 @@ export function createAuthService({ userRepository }) {
       }
 
       const token = jwt.sign({ sub: user.id, role: user.role }, env.jwtSecret, {
+        audience: 'staff',
         expiresIn: env.jwtExpiresIn,
       })
       return { token, user: toPublicUser(user) }

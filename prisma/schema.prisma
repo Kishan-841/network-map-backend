@@ -19,6 +19,13 @@ enum Role {
   /// and may add or edit any of them. Not a system administrator — no user,
   /// zone, operator or log management.
   SUPERVISOR
+  /// Recruits and supports external referral partners. No building, zone or
+  /// operator access at all — see partner-network.md §2.1.
+  PARTNER_MANAGER
+  /// Finance. Records that a partner has been paid what they earned
+  /// (partner-network.md §6.2) and nothing else: no registry, no map, and
+  /// none of the customers' personal details behind those earnings.
+  ACCOUNTS
   /// Field-sales hierarchy (see docs .../2026-09-24-field-sales-design.md).
   /// Runs team leaders + sales executives; created by an ADMIN.
   SALES_MANAGER
@@ -91,28 +98,28 @@ enum ContactDesignation {
 }
 
 model User {
-  id           String     @id @default(cuid())
-  name         String
-  email        String     @unique
-  passwordHash String
-  role         Role       @default(SURVEYOR)
-  isActive     Boolean    @default(true)
+  id            String        @id @default(cuid())
+  name          String
+  email         String        @unique
+  passwordHash  String
+  role          Role          @default(SURVEYOR)
+  isActive      Boolean       @default(true)
   /// Granted by an ADMIN on Users → Assign accesses. Lets a MANAGER, SURVEYOR
   /// or SUPERVISOR draw fiber and closures; ADMIN never needs it.
-  canManageFiber Boolean  @default(false)
+  canManageFiber Boolean      @default(false)
   /// Granted by an ADMIN on Users → Assign accesses. Lets a SURVEYOR edit the
   /// buildings THEY logged — never anyone else's, and never the permission
   /// record or the live flag. The other roles edit buildings by role already.
-  canEditBuildings Boolean @default(false)
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  buildings    Building[]
+  canEditBuildings Boolean    @default(false)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  buildings     Building[]
   /// Zones a SURVEYOR may work in; unused for other roles.
   fibersCreated    Fiber[]    @relation("FiberCreatedBy")
   closuresCreated  Closure[]  @relation("ClosureCreatedBy")
   popsCreated      Pop[]      @relation("PopCreatedBy")
   splittersCreated Splitter[] @relation("SplitterCreatedBy")
-  assignedZones Zone[]    @relation("UserAssignedZones")
+  assignedZones Zone[]        @relation("UserAssignedZones")
   /// City + pincodes an ACQUISITION_AGENT covers; unused for other roles.
   pincodes      UserPincode[]
 
@@ -132,6 +139,16 @@ model User {
   inquiriesCreated CustomerInquiry[]    @relation("InquiryBy")
   teamMeetings     TeamMeeting[]        @relation("TeamMeetingBy")
   accompaniedVisits VisitCompanion[]    @relation("VisitCompanionUser")
+
+  /// Partner network — see partner-network.md
+  partnersOnboarded  Partner[]         @relation("PartnerOnboardedBy")
+  partnerInvites     PartnerInvite[]   @relation("PartnerInvitesIssued")
+  leadsAttributed    Lead[]            @relation("LeadEmployee")
+  earningsAttributed PartnerEarning[]  @relation("EarningEmployee")
+  partnerReferrals   PartnerReferral[] @relation("PartnerReferralEmployee")
+  leadCalls          LeadCall[]        @relation("LeadCallBy")
+  earningsMarkedPaid PartnerEarning[]  @relation("EarningPaidBy")
+  paymentsRecorded   PartnerPayment[]  @relation("PaymentRecordedBy")
 }
 
 /// One row per pincode an acquisition agent covers (within one city).
@@ -154,10 +171,10 @@ model BuildingType {
 }
 
 model City {
-  id        String     @id @default(cuid())
-  name      String     @unique
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
+  id        String        @id @default(cuid())
+  name      String        @unique
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
   operators Operator[]
   buildings Building[]
   agents    UserPincode[]
@@ -171,45 +188,45 @@ model Operator {
   fiberRoutes FiberRoute[]
   fibers      Fiber[]
   /// Groups operators under a city; null for operators with no city yet.
-  cityId    String?
-  city      City?    @relation(fields: [cityId], references: [id], onDelete: SetNull)
+  cityId      String?
+  city        City?        @relation(fields: [cityId], references: [id], onDelete: SetNull)
 }
 
 model Zone {
-  id        String     @id @default(cuid())
-  name      String     @unique
-  city      String
+  id            String     @id @default(cuid())
+  name          String     @unique
+  city          String
   /// Ordered polygon vertices [{ latitude, longitude }, ...], min 3 when set
-  boundary  Json?
-  createdAt DateTime   @default(now())
-  buildings Building[]
-  fibers    Fiber[]
-  pops      Pop[]      @relation("PopZones")
-  assignedUsers User[] @relation("UserAssignedZones")
+  boundary      Json?
+  createdAt     DateTime   @default(now())
+  buildings     Building[]
+  fibers        Fiber[]
+  pops          Pop[]      @relation("PopZones")
+  assignedUsers User[]     @relation("UserAssignedZones")
   /// Groups zones under an operator; null for zones with no operator yet.
-  operatorId String?
-  operator   Operator? @relation(fields: [operatorId], references: [id], onDelete: SetNull)
+  operatorId    String?
+  operator      Operator?  @relation(fields: [operatorId], references: [id], onDelete: SetNull)
 }
 
 model FiberRoute {
-  id        String   @id @default(cuid())
-  name      String   @unique
+  id         String    @id @default(cuid())
+  name       String    @unique
   /// Typed polylines: [ { fiberType, points: [ {latitude, longitude}, ... ] }, ... ].
   /// fiberType: '2 core' … '48 core' (render color derives from it). A branch
   /// is a segment whose first point sits on another segment's vertex.
-  segments  Json
+  segments   Json
   /// Field/asset identifier printed on the cable or duct.
-  fiberId   String?
+  fiberId    String?
   /// 'IN' | 'OUT'.
-  placement String?
+  placement  String?
   /// Owning operator; null for shared/unassigned routes.
   operatorId String?
   operator   Operator? @relation(fields: [operatorId], references: [id], onDelete: SetNull)
-  remark    String?
+  remark     String?
   /// Upload URLs from our uploads API (photos of the laid fiber).
-  images    Json?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  images     Json?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 }
 
 enum FiberPointType {
@@ -496,6 +513,7 @@ model Building {
   permission       Permission?
   contact          BuildingContact?
   photos           Photo[]
+  leads            Lead[]
   fiberPoints      FiberPoint[]
   splitterOutputs  SplitterOutput[]
   closures         Closure[]
@@ -722,4 +740,470 @@ model SystemLog {
   @@index([createdAt])
   @@index([userId])
   @@index([module, action])
+}
+
+// ---------------------------------------------------------------------------
+// Partner network — external referral partners recruited by our employees.
+// Deliberately separate from User: different identity, different auth,
+// different lifecycle, commercial terms later. See partner-network.md §2.2.
+// ---------------------------------------------------------------------------
+
+enum PartnerType {
+  AGENT
+  SOCIETY_REPRESENTATIVE
+  RETAIL_SHOP
+  DSA
+}
+
+enum PartnerStatus {
+  /// Account created, documents not uploaded yet.
+  REGISTERED
+  /// Documents in, waiting on an admin.
+  PENDING_APPROVAL
+  /// Cleared — the only state that may create leads.
+  APPROVED
+  /// Turned away with a reason; may re-upload.
+  REJECTED
+  /// Switched off by an admin; cannot even sign in.
+  SUSPENDED
+}
+
+enum PartnerDocumentType {
+  AADHAAR
+  PAN
+}
+
+model Partner {
+  id                String        @id @default(cuid())
+  name              String
+  type              PartnerType
+  /// Company / society / shop / firm name, depending on the type.
+  companyName       String?
+  /// THE identity. The one thing this audience always knows and never
+  /// forgets — see partner-network.md §0.
+  mobile            String        @unique
+  /// Optional: many partners have no email at all.
+  email             String?       @unique
+  status            PartnerStatus @default(REGISTERED)
+  /// EN | HI | MR — the portal speaks their language.
+  preferredLanguage String        @default("EN")
+
+  /// The employee who recruited them. Commission will depend on this, so it
+  /// is recorded whether it came from an invite link or an admin mapping.
+  onboardedById String?
+  onboardedBy   User?    @relation("PartnerOnboardedBy", fields: [onboardedById], references: [id], onDelete: SetNull)
+  onboardedAt   DateTime @default(now())
+
+  approvedById    String?
+  approvedAt      DateTime?
+  rejectionReason String?
+
+  documents         PartnerDocument[]
+  invite            PartnerInvite?
+  leads             Lead[]
+  earnings          PartnerEarning[]
+  payments          PartnerPayment[]
+  introductionsMade PartnerReferral[] @relation("PartnerReferralBy")
+  introducedAs      PartnerReferral?  @relation("PartnerReferralJoined")
+  coverageRequests  CoverageRequest[]
+  pushTokens        PartnerPushToken[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([onboardedById])
+}
+
+/// A phone that can receive this partner's push notifications. One partner
+/// may have several; a token re-registered by another partner moves to them.
+model PartnerPushToken {
+  id         String   @id @default(cuid())
+  partnerId  String
+  partner    Partner  @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  /// "ExponentPushToken[...]"
+  token      String   @unique
+  /// android | ios
+  platform   String
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+
+  @@index([partnerId])
+}
+
+model PartnerDocument {
+  id         String              @id @default(cuid())
+  partnerId  String
+  partner    Partner             @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  type       PartnerDocumentType
+  url        String
+  uploadedAt DateTime            @default(now())
+
+  /// One current document of each type per partner; re-upload replaces it.
+  @@unique([partnerId, type])
+}
+
+/// A one-use invite link. The token is stored HASHED — a leaked database
+/// dump must not hand anyone a working invite.
+model PartnerInvite {
+  id        String @id @default(cuid())
+  tokenHash String @unique
+
+  /// The introduction this link was raised for, when it came from one.
+  /// Not unique: a link that expires is replaced by a new one, and the old
+  /// row stays as history. The live invite is the newest unrevoked one.
+  referralId String?
+  referral   PartnerReferral? @relation(fields: [referralId], references: [id], onDelete: SetNull)
+
+  employeeId String
+  employee   User      @relation("PartnerInvitesIssued", fields: [employeeId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  usedAt     DateTime?
+  usedById   String?   @unique
+  usedBy     Partner?  @relation(fields: [usedById], references: [id], onDelete: SetNull)
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([employeeId])
+  @@index([referralId])
+}
+
+/// A pending one-time code: hashed, short-lived, attempt-capped.
+model OtpChallenge {
+  id         String    @id @default(cuid())
+  identifier String
+  channel    String
+  codeHash   String
+  expiresAt  DateTime
+  attempts   Int       @default(0)
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([identifier, createdAt])
+}
+
+/// How the searched building lined up with our registry, at the moment the
+/// lead was captured. Green, amber, red.
+enum BuildingMatch {
+  /// We serve it today.
+  LIVE
+  /// Surveyed and viable, not lit yet — "coming soon".
+  IN_REGISTRY
+  /// We hold nothing there. The lead is still worth having.
+  NOT_FOUND
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  INTERESTED
+  CONVERTED
+  NOT_INTERESTED
+  UNREACHABLE
+  /// Someone else referred this customer first; the original keeps the claim.
+  DUPLICATE
+}
+
+/// A potential customer referred by a partner.
+model Lead {
+  id String @id @default(cuid())
+
+  partnerId String
+  partner   Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  /// SNAPSHOT of the partner's employee at the moment of referral. Not a
+  /// live lookup: re-assigning a partner later must never rewrite who
+  /// earned the leads they already sent.
+  employeeId String?
+  employee   User?   @relation("LeadEmployee", fields: [employeeId], references: [id], onDelete: SetNull)
+
+  /// The building we matched, when we hold one.
+  buildingId String?
+  building   Building? @relation(fields: [buildingId], references: [id], onDelete: SetNull)
+
+  customerName    String
+  customerMobile  String
+  customerEmail   String?
+  address         String?
+  note            String?
+  /// What speed they asked for: 100 / 200 / 300 / 400.
+  requirementMbps Int?
+
+  /// What the partner actually searched for. Kept even when we matched
+  /// nothing, so an unknown building can be reconciled later rather than lost.
+  searchedPlaceId   String?
+  searchedPlaceName String?
+  buildingMatch     BuildingMatch?
+
+  status        LeadStatus @default(NEW)
+  duplicateOfId String?
+  duplicateOf   Lead?      @relation("LeadDuplicate", fields: [duplicateOfId], references: [id], onDelete: SetNull)
+  duplicates    Lead[]     @relation("LeadDuplicate")
+
+  events     LeadStatusEvent[]
+  calls      LeadCall[]
+  /// When this lead asked to be called back. Kept on the lead, not derived
+  /// from the last call, so "who is due today" is one indexed query.
+  nextCallAt DateTime?
+  earning    PartnerEarning?
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  @@index([partnerId])
+  @@index([employeeId])
+  @@index([status])
+  @@index([customerMobile])
+  @@index([nextCallAt])
+}
+
+/// Every status change, with who and when. Commission may one day depend on
+/// CONVERTED, and that history cannot be reconstructed after the fact.
+model LeadStatusEvent {
+  id         String      @id @default(cuid())
+  leadId     String
+  lead       Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  fromStatus LeadStatus?
+  toStatus   LeadStatus
+  byUserId   String?
+  note       String?
+  createdAt  DateTime    @default(now())
+
+  @@index([leadId])
+}
+
+/// A building a partner asked about that we could not serve. Not a lead —
+/// a demand signal for network planning.
+model CoverageRequest {
+  id                String   @id @default(cuid())
+  partnerId         String?
+  partner           Partner? @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+  placeId           String?
+  name              String?
+  latitude          Float
+  longitude         Float
+  matchedBuildingId String?
+  createdAt         DateTime @default(now())
+
+  @@index([placeId])
+  @@index([createdAt])
+}
+
+enum BillingPeriod {
+  QUARTERLY
+  HALF_YEARLY
+  YEARLY
+}
+
+/// What a partner earns for one connection, by speed and billing period.
+/// A table rather than constants: prices change, and a hardcoded number
+/// becomes a bug the day they do (partner-network.md §3.2).
+model RateCard {
+  id            String        @id @default(cuid())
+  speedMbps     Int
+  billingPeriod BillingPeriod
+  /// Rupees, per customer.
+  amount        Int
+  effectiveFrom DateTime      @default(now())
+  createdAt     DateTime      @default(now())
+
+  @@unique([speedMbps, billingPeriod, effectiveFrom])
+  @@index([effectiveFrom])
+}
+
+/// What a partner is owed for one converted lead.
+///
+/// One row per converted lead, and the lead id is unique: converting the same
+/// customer twice must never pay twice. Every figure is a SNAPSHOT taken at
+/// conversion - the speed and period the customer actually bought, and the
+/// rate in force that day - so a later price change cannot rewrite what was
+/// already earned, and the employee attribution survives re-assignment.
+model PartnerEarning {
+  id String @id @default(cuid())
+
+  partnerId String
+  partner   Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  /// One earning per lead. The whole no-double-pay rule is this constraint.
+  leadId String @unique
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  /// Snapshot of the partner's employee, mirroring Lead.employeeId.
+  employeeId String?
+  employee   User?   @relation("EarningEmployee", fields: [employeeId], references: [id], onDelete: SetNull)
+
+  /// What the customer ACTUALLY took, which is not always what they asked for.
+  speedMbps     Int
+  billingPeriod BillingPeriod
+  /// Rupees, snapshotted from the rate card at conversion.
+  amount        Int
+
+  /// The month this counts towards. Set from the conversion, not from a live
+  /// clock, so a backdated correction lands in the month it belongs to.
+  earnedAt DateTime @default(now())
+
+  status    EarningStatus   @default(AWAITING_PAYMENT)
+  /// The payment that settled this, when one was recorded.
+  paymentId String?
+  payment   PartnerPayment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  paidAt    DateTime?
+  paidById  String?
+  paidBy    User?           @relation("EarningPaidBy", fields: [paidById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([partnerId, earnedAt])
+  @@index([employeeId])
+  @@index([status])
+}
+
+enum EarningStatus {
+  AWAITING_PAYMENT
+  PAID
+}
+
+/// Someone a partner has introduced who could also send us customers
+/// (partner-network.md §7).
+///
+/// Deliberately NOT a Partner row: these people have agreed to nothing yet,
+/// and half of them never will. Turning an introduction into an account is a
+/// separate act with its own consent.
+///
+/// §7.1 leaves who follows up, whether the referrer earns anything, and
+/// whether chains exist all open. None of that blocks capture — losing the
+/// introduction is worse than not yet paying for it — so the record carries
+/// what a later commission rule would need (`joinedPartnerId`) and decides
+/// nothing.
+model PartnerReferral {
+  id String @id @default(cuid())
+
+  /// Who made the introduction.
+  referredById String
+  referredBy   Partner @relation("PartnerReferralBy", fields: [referredById], references: [id], onDelete: Cascade)
+
+  /// SNAPSHOT of the referring partner's employee at the moment of
+  /// introduction — the §7.1 proposal is that follow-up lands with them, and
+  /// re-assigning the partner later must not move work already queued.
+  employeeId String?
+  employee   User?   @relation("PartnerReferralEmployee", fields: [employeeId], references: [id], onDelete: SetNull)
+
+  name   String
+  type   PartnerType
+  mobile String
+  email  String?
+  note   String?
+
+  status PartnerReferralStatus @default(NEW)
+
+  /// Set when this introduction actually became a partner. Kept so a future
+  /// referral reward has the link it needs without re-deriving it from a
+  /// mobile number.
+  joinedPartnerId String?  @unique
+  joinedPartner   Partner? @relation("PartnerReferralJoined", fields: [joinedPartnerId], references: [id], onDelete: SetNull)
+
+  /// Invite links raised for this person, newest last.
+  invites PartnerInvite[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([referredById])
+  @@index([employeeId])
+  @@index([status])
+  @@index([mobile])
+}
+
+enum PartnerReferralStatus {
+  NEW
+  CONTACTED
+  JOINED
+  DECLINED
+}
+
+/// One payment to a partner for one month.
+///
+/// The entry accounts actually make: how much moved, by what route, and the
+/// reference the partner can check against their bank. Marking a month "paid"
+/// without those is a claim nobody can verify.
+model PartnerPayment {
+  id String @id @default(cuid())
+
+  partnerId String
+  partner   Partner @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  /// The month being settled, as YYYY-MM.
+  month String
+
+  /// What that month came to when this was recorded — a SNAPSHOT. If an
+  /// earning is added or corrected later, the payment must still show what
+  /// was owed at the time rather than silently disagreeing with itself.
+  amountOwed Int
+  /// What actually left the account. Usually the same; kept separate so a
+  /// part payment or a rounding difference is visible instead of lost.
+  amountPaid Int
+
+  method    PaymentMethod
+  /// UTR, transaction id or cheque number. Optional only for cash.
+  reference String?
+  note      String?
+
+  /// When the money moved — not when the entry was typed, which is createdAt.
+  paidOn DateTime
+
+  recordedById String?
+  recordedBy   User?   @relation("PaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+
+  /// The earnings this payment settled.
+  earnings PartnerEarning[]
+
+  createdAt DateTime @default(now())
+
+  @@index([partnerId, month])
+  @@index([paidOn])
+}
+
+enum PaymentMethod {
+  BANK_TRANSFER
+  UPI
+  CASH
+  CHEQUE
+  OTHER
+}
+
+/// One phone call to a lead.
+///
+/// The record is written when the call ENDS, with the outcome — a call with
+/// no outcome tells the next person nothing, and a row created at "start"
+/// would dangle forever whenever a browser tab closes mid-call.
+model LeadCall {
+  id String @id @default(cuid())
+
+  leadId String
+  lead   Lead   @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  byUserId String?
+  by       User?   @relation("LeadCallBy", fields: [byUserId], references: [id], onDelete: SetNull)
+
+  startedAt       DateTime
+  endedAt         DateTime
+  /// Seconds, stored rather than recomputed so a clock change cannot rewrite
+  /// how long a past call took.
+  durationSeconds Int
+
+  outcome    CallOutcome
+  /// Set only for CALL_LATER — when they asked to be called back.
+  callbackAt DateTime?
+  note       String?
+
+  createdAt DateTime @default(now())
+
+  @@index([leadId])
+  @@index([byUserId])
+}
+
+enum CallOutcome {
+  INTERESTED
+  CALL_LATER
+  NOT_REACHABLE
+  WRONG_NUMBER
 }

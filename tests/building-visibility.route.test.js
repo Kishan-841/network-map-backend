@@ -6,7 +6,7 @@ import { env } from '../src/config/env.js'
 import { prisma } from '../src/lib/prisma.js'
 
 const tokenFor = (user) =>
-  jwt.sign({ sub: user.id, role: user.role }, env.jwtSecret, { expiresIn: '1h' })
+  jwt.sign({ sub: user.id, role: user.role }, env.jwtSecret, { audience: 'staff', expiresIn: '1h' })
 
 // The reported bug: admin adds a building in Wakad; the surveyor assigned to
 // Wakad can't see it and adds a duplicate.

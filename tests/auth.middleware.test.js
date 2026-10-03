@@ -20,7 +20,7 @@ function testApp() {
 const SURV_ID = `mw-surv-${Date.now()}`
 const ADMIN_ID = `mw-admin-${Date.now()}`
 // Token role is deliberately bogus — requireAuth must read role from the DB.
-const tokenFor = (id) => jwt.sign({ sub: id, role: 'IGNORED' }, env.jwtSecret, { expiresIn: '1h' })
+const tokenFor = (id) => jwt.sign({ sub: id, role: 'IGNORED' }, env.jwtSecret, { audience: 'staff', expiresIn: '1h' })
 
 beforeAll(async () => {
   await prisma.user.create({

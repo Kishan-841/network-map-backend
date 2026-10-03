@@ -131,6 +131,26 @@ export const buildingRepository = {
     }),
   count: (where = {}) => prisma.building.count({ where }),
   updateMany: (where, data) => prisma.building.updateMany({ where, data }),
+  /**
+   * Name/address lookup for the PARTNER portal. Coverage registry only, and a
+   * deliberately narrow select — partner rows must never carry survey data.
+   * `id` fetches one exact building for the server-side serviceability check.
+   */
+  searchForPartner: (query, take = 10, id = null) =>
+    prisma.building.findMany({
+      where: id
+        ? { id, source: 'COVERAGE' }
+        : {
+            source: 'COVERAGE',
+            OR: [
+              { buildingName: { contains: query, mode: 'insensitive' } },
+              { formattedAddress: { contains: query, mode: 'insensitive' } },
+            ],
+          },
+      select: { id: true, buildingName: true, formattedAddress: true, isLive: true },
+      orderBy: [{ isLive: 'desc' }, { buildingName: 'asc' }],
+      take,
+    }),
   findById: (id) => prisma.building.findUnique({ where: { id }, include: fullInclude }),
   update: (id, data) => prisma.building.update({ where: { id }, data, include: fullInclude }),
   delete: (id) => prisma.building.delete({ where: { id } }),

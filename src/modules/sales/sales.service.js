@@ -1,5 +1,6 @@
 import { ApiError } from '../../lib/api-error.js'
 import { salesRepository } from './sales.repository.js'
+import { getStorageProvider } from '../../lib/storage/index.js'
 import { scopedUserIds, buildingScopeWhere, canAssign } from '../../lib/sales-visibility.js'
 
 const SALES_ROLES = ['SALES_MANAGER', 'TEAM_LEADER', 'SALES_EXECUTIVE']
@@ -7,7 +8,16 @@ const SALES_ROLES = ['SALES_MANAGER', 'TEAM_LEADER', 'SALES_EXECUTIVE']
 // TEAM_LEADER, by contrast, only distributes their own pool.
 const REGISTRY_ASSIGNERS = ['ADMIN', 'SALES_MANAGER']
 
-export function createSalesService({ repo = salesRepository } = {}) {
+export function createSalesService({ repo = salesRepository, storage = getStorageProvider() } = {}) {
+  // Selfies and meeting photos leave as short-lived signed links (the row keeps
+  // the permanent one) — the same rule as building photos and partner
+  // documents, so they still show once the bucket is private.
+  const sign = async (url) => (url && storage?.readUrl ? storage.readUrl(url) : url)
+  const signVisit = async (v) => (v ? { ...v, selfieUrl: await sign(v.selfieUrl) } : v)
+  const signMeeting = async (m) => (m ? { ...m, photoUrl: await sign(m.photoUrl) } : m)
+  // …and are stored in their permanent form: if a page posts back the signed
+  // preview link, saving it would leave a link that stops working in an hour.
+  const permanent = (url) => (url && storage?.canonicalUrl ? storage.canonicalUrl(url) : url)
   // The user ids beneath the actor in the hierarchy.
   async function teamUnder(actor) {
     if (actor.role === 'SALES_MANAGER') return repo.idsUnderManager(actor.id)
@@ -117,8 +127,8 @@ export function createSalesService({ repo = salesRepository } = {}) {
     },
 
     /** The actor's current open (not yet checked-out) visit, or null. */
-    openVisit(actor) {
-      return repo.openVisitFor(actor.id)
+    async openVisit(actor) {
+      return signVisit(await repo.openVisitFor(actor.id))
     },
 
     /** Check IN: one open visit at a time; the building must be in scope. */
@@ -145,16 +155,16 @@ export function createSalesService({ repo = salesRepository } = {}) {
         }
       }
 
-      return repo.createVisit({
+      return signVisit(await repo.createVisit({
         buildingId: building.id,
         userId: actor.id,
         checkInLat,
         checkInLng,
-        selfieUrl,
+        selfieUrl: permanent(selfieUrl),
         note: note ?? null,
         wentSolo: solo,
         ...(companions.length ? { companions: { create: companions.map((userId) => ({ userId })) } } : {}),
-      })
+      }))
     },
 
     /** Mark an activity type done on the actor's own open visit (idempotent). */
@@ -180,7 +190,7 @@ export function createSalesService({ repo = salesRepository } = {}) {
       const visit = await repo.ownedVisit(visitId, actor.id)
       if (!visit) throw ApiError.notFound('Visit not found')
       if (visit.checkOutAt) throw ApiError.badRequest('This visit is already checked out')
-      return repo.checkoutVisit(visitId, { checkOutAt: new Date(), checkOutLat, checkOutLng })
+      return signVisit(await repo.checkoutVisit(visitId, { checkOutAt: new Date(), checkOutLat, checkOutLng }))
     },
 
     /**
@@ -223,7 +233,8 @@ export function createSalesService({ repo = salesRepository } = {}) {
     },
 
     async listVisits(actor, filters = {}) {
-      return repo.listVisits(await activityWhere(actor, filters, 'visitedAt'))
+      const rows = await repo.listVisits(await activityWhere(actor, filters, 'visitedAt'))
+      return Promise.all(rows.map(signVisit))
     },
 
     /**
@@ -236,7 +247,16 @@ export function createSalesService({ repo = salesRepository } = {}) {
       meetingDate.setUTCHours(0, 0, 0, 0) // date-only key
       const existing = await repo.existingMeeting(actor.id, meetingDate)
       if (existing) throw ApiError.conflict("You have already logged today's meeting")
-      return repo.createMeeting({ teamLeaderId: actor.id, meetingDate, photoUrl, latitude, longitude, note: note ?? null })
+      return signMeeting(
+        await repo.createMeeting({
+          teamLeaderId: actor.id,
+          meetingDate,
+          photoUrl: permanent(photoUrl),
+          latitude,
+          longitude,
+          note: note ?? null,
+        }),
+      )
     },
 
     /**
@@ -258,7 +278,10 @@ export function createSalesService({ repo = salesRepository } = {}) {
         repo.countMeetings(where),
         repo.listMeetings(where, { skip: (page - 1) * pageSize, take: pageSize }),
       ])
-      return { items, pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) } }
+      return {
+        items: await Promise.all(items.map(signMeeting)),
+        pagination: { page, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) },
+      }
     },
 
     /** One visit in full — scoped, so out of scope is a 404 (the detail page). */
@@ -266,7 +289,7 @@ export function createSalesService({ repo = salesRepository } = {}) {
       const ids = await scopeIdsFor(actor)
       const visit = await repo.getVisit(id, ids === null ? {} : { userId: { in: ids } })
       if (!visit) throw ApiError.notFound('Visit not found')
-      return visit
+      return signVisit(visit)
     },
 
     async listInquiries(actor, filters = {}) {

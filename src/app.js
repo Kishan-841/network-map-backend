@@ -20,6 +20,18 @@ import { salesRoutes } from './modules/sales/sales.routes.js'
 import { closureRoutes } from './modules/closures/closure.routes.js'
 import { splitterRoutes } from './modules/closures/splitter.routes.js'
 import { fiberRoutes } from './modules/fibers/fiber.routes.js'
+import { partnerAuthRoutes } from './modules/partner-auth/partner-auth.routes.js'
+import { inviteRoutes } from './modules/partner-invites/invite.routes.js'
+import { partnerSelfRoutes, partnerAdminRoutes } from './modules/partners/partner.routes.js'
+import { partnerPushTokenRoutes } from './modules/partners/push-token.routes.js'
+import { partnerLeadRoutes, staffLeadRoutes } from './modules/leads/lead.routes.js'
+import { partnerRateCardRoutes, staffRateCardRoutes } from './modules/rate-card/rate-card.routes.js'
+import {
+  partnerReferralRoutes,
+  staffPartnerReferralRoutes,
+} from './modules/partner-referrals/partner-referral.routes.js'
+import { payoutRoutes } from './modules/earnings/payout.routes.js'
+import { partnerDashboardRoutes } from './modules/partner-dashboard/dashboard.routes.js'
 
 export function createApp() {
   const app = express()
@@ -48,6 +60,20 @@ export function createApp() {
   })
 
   app.use('/api/v1/auth', authRoutes)
+  // External partners — a separate auth surface with its own token audience.
+  app.use('/api/v1/partner-auth', partnerAuthRoutes)
+  app.use('/api/v1/partner-invites', inviteRoutes)
+  app.use('/api/v1/partner', partnerSelfRoutes)
+  app.use('/api/v1/partner', partnerPushTokenRoutes)
+  app.use('/api/v1/partners', partnerAdminRoutes)
+  app.use('/api/v1/partner', partnerLeadRoutes)
+  app.use('/api/v1/leads', staffLeadRoutes)
+  app.use('/api/v1/partner', partnerRateCardRoutes)
+  app.use('/api/v1/rate-card', staffRateCardRoutes)
+  app.use('/api/v1/partner', partnerReferralRoutes)
+  app.use('/api/v1/partner-referrals', staffPartnerReferralRoutes)
+  app.use('/api/v1/payouts', payoutRoutes)
+  app.use('/api/v1/partner-dashboard', partnerDashboardRoutes)
   app.use('/api/v1/users', userRoutes)
   app.use('/api/v1/zones', zoneRoutes)
   app.use('/api/v1/buildings', buildingRoutes)

@@ -104,6 +104,8 @@ export const buildingController = {
     }
   },
 
+
+
   async nearby(req, res, next) {
     try {
       const { latitude, longitude, radius, name, placeId } = req.validatedQuery

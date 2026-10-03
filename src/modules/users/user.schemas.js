@@ -1,17 +1,15 @@
 import { z } from 'zod'
+import { Role } from '@prisma/client'
 
-const roleSchema = z.enum([
-  'ADMIN',
-  'MANAGER',
-  'SURVEYOR',
-  'ACQUISITION_AGENT',
-  'ACQUISITION_LEAD',
-  'SUPERVISOR',
-  'SALES_MANAGER',
-  'TEAM_LEADER',
-  'SALES_EXECUTIVE',
-  'PERMISSION_EXECUTIVE',
-])
+/**
+ * Derived from the schema, never re-typed.
+ *
+ * This was a hand-kept copy and it drifted the first time a role was added:
+ * ACCOUNTS existed in the database and in the UI, and creating one failed
+ * validation with a list that had not been updated. A generated enum cannot
+ * fall behind the migration that defines it.
+ */
+const roleSchema = z.enum(Object.values(Role))
 
 // Indian PIN codes: exactly 6 digits, never starting with 0.
 const pincodeSchema = z.string().trim().regex(/^[1-9][0-9]{5}$/, 'Must be a 6-digit PIN code')
