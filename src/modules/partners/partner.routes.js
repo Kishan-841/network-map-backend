@@ -187,6 +187,16 @@ partnerAdminRoutes.post(
   },
 )
 
+// IFSC lookup for the admin's bank form — the same cached lookup the partner
+// route uses. Registered before '/:id/…' routes; ADMIN only like the form.
+partnerAdminRoutes.get('/ifsc/:code', requireRole('ADMIN'), ifscLimiter, async (req, res, next) => {
+  try {
+    res.json({ success: true, data: await lookupIfsc(req.params.code) })
+  } catch (err) {
+    next(err)
+  }
+})
+
 partnerAdminRoutes.get('/:id/documents', requireRole('ADMIN'), async (req, res, next) => {
   try {
     res.json({ success: true, data: await service.listDocuments(req.params.id) })

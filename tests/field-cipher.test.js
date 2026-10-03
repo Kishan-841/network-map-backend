@@ -38,4 +38,13 @@ describe('field cipher', () => {
     expect(() => c.decrypt([v, iv, tag, flipped.toString('base64')].join(':'))).toThrow()
     expect(() => c.decrypt('garbage')).toThrow(/Unreadable/)
   })
+
+  it('refuses a truncated auth tag or a wrong-length IV', () => {
+    const c = createFieldCipher(key())
+    const [v, iv, tag, data] = c.encrypt('123456789012').split(':')
+    const shortTag = Buffer.from(tag, 'base64').subarray(0, 4).toString('base64')
+    expect(() => c.decrypt([v, iv, shortTag, data].join(':'))).toThrow(/Unreadable/)
+    const shortIv = Buffer.from(iv, 'base64').subarray(0, 8).toString('base64')
+    expect(() => c.decrypt([v, shortIv, tag, data].join(':'))).toThrow(/Unreadable/)
+  })
 })

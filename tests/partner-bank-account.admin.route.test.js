@@ -63,4 +63,10 @@ describe('admin bank details', () => {
     expect(res.status).toBe(400)
     expect((await request(app).post(`/api/v1/partners/${P}/documents`).set(as.manager).send({ type: 'CANCELLED_CHEQUE', url: 'https://x/uploads/c.jpg' })).status).toBe(403)
   })
+
+  it('gives an ADMIN the IFSC lookup (a bad code is a 400, no network) and refuses a partner manager', async () => {
+    const bad = await request(app).get('/api/v1/partners/ifsc/HDFC1').set(as.admin)
+    expect(bad.status).toBe(400)
+    expect((await request(app).get('/api/v1/partners/ifsc/HDFC0001234').set(as.manager)).status).toBe(403)
+  })
 })

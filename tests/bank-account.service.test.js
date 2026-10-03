@@ -81,4 +81,22 @@ describe('bank account service', () => {
     const map = await svc.payeesFor(['p1'])
     expect(map.get('p1')).toMatchObject({ accountNumber: '001234567890', ifsc: 'HDFC0001234' })
   })
+
+  it('marks an undecryptable row unreadable instead of failing the whole list', async () => {
+    const good = { partnerId: 'p1', accountHolderName: 'Asha Patil', accountNumberEnc: cipher.encrypt('001234567890'), ifsc: 'HDFC0001234', bankName: 'HDFC Bank', branchName: 'Cidco' }
+    const bad = { partnerId: 'p2', accountHolderName: 'Ravi', accountNumberEnc: 'v1:broken', ifsc: 'SBIN0000001', bankName: null, branchName: 'Town' }
+    const svc = createBankAccountService({
+      bankAccountRepository: { findManyByPartnerIds: vi.fn(async () => [good, bad]) },
+      partnerRepository: {},
+      cipher,
+    })
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const map = await svc.payeesFor(['p1', 'p2'])
+    expect(map.get('p1')).toMatchObject({ accountNumber: '001234567890' })
+    expect(map.get('p1').unreadable).toBeUndefined()
+    expect(map.get('p2')).toEqual({ accountHolderName: 'Ravi', accountNumber: null, ifsc: 'SBIN0000001', bankName: null, branchName: 'Town', unreadable: true })
+    expect(err).toHaveBeenCalledWith('[bank] unreadable account for partner', 'p2')
+    expect(JSON.stringify(err.mock.calls)).not.toContain('v1:broken')
+    err.mockRestore()
+  })
 })

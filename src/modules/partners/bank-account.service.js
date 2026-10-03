@@ -66,18 +66,23 @@ export function createBankAccountService({ bankAccountRepository, partnerReposit
 
     async payeesFor(partnerIds) {
       const rows = await bankAccountRepository.findManyByPartnerIds([...new Set(partnerIds)])
-      return new Map(
-        rows.map((r) => [
-          r.partnerId,
-          {
-            accountHolderName: r.accountHolderName,
-            accountNumber: cipher.decrypt(r.accountNumberEnc),
-            ifsc: r.ifsc,
-            bankName: r.bankName,
-            branchName: r.branchName,
-          },
-        ]),
-      )
+      const payee = (r) => {
+        const base = {
+          accountHolderName: r.accountHolderName,
+          ifsc: r.ifsc,
+          bankName: r.bankName,
+          branchName: r.branchName,
+        }
+        try {
+          return { ...base, accountNumber: cipher.decrypt(r.accountNumberEnc) }
+        } catch {
+          // One unreadable row (wrong key, damaged value) must not take the
+          // whole payouts list down. Log the partner, never the value.
+          console.error('[bank] unreadable account for partner', r.partnerId)
+          return { ...base, accountNumber: null, unreadable: true }
+        }
+      }
+      return new Map(rows.map((r) => [r.partnerId, payee(r)]))
     },
   }
 }
