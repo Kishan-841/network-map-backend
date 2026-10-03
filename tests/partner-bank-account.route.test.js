@@ -100,4 +100,9 @@ describe('partner bank details', () => {
     expect(res.status).toBe(409)
     expect((await prisma.partner.findUnique({ where: { id: ids.appr } })).status).toBe('APPROVED')
   })
+
+  it('IFSC route rejects a bad code without calling out', async () => {
+    const res = await request(app).get('/api/v1/partner/ifsc/HDFC1').set(tok(ids.reg))
+    expect(res.status).toBe(400)
+  })
 })

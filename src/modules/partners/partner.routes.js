@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { requireAuth, requireRole } from '../../middleware/auth.js'
 import { requirePartner } from '../../middleware/partner-auth.js'
 import { validateBody } from '../../middleware/validate.js'
+import { ifscLimiter } from '../../middleware/rate-limit.js'
 import { audit } from '../system-logs/audit.js'
 import { createPartnerService, PARTNER_DOCUMENT_TYPES } from './partner.service.js'
 import { bankAccountRepository } from './bank-account.repository.js'
@@ -16,6 +17,7 @@ import { notifier } from '../../lib/push/notifier.js'
 import { createApprovalBypassService } from './approval-bypass.service.js'
 import { createDirectPartnerService } from './direct-add.service.js'
 import { partnerAuthRepository } from '../partner-auth/partner-auth.repository.js'
+import { createIfscLookup } from '../../lib/ifsc.js'
 
 const service = createPartnerService({
   partnerRepository,
@@ -31,6 +33,7 @@ const approvalBypass = createApprovalBypassService({
   partnerAuthRepository,
   allowed: env.allowApprovalBypass,
 })
+const lookupIfsc = createIfscLookup()
 
 const documentSchema = z.object({
   type: z.enum(PARTNER_DOCUMENT_TYPES),
@@ -128,6 +131,14 @@ partnerSelfRoutes.post('/documents/submit', async (req, res, next) => {
   try {
     const updated = await service.submitDocuments(req.partner.id)
     res.json({ success: true, data: { status: updated.status } })
+  } catch (err) {
+    next(err)
+  }
+})
+
+partnerSelfRoutes.get('/ifsc/:code', ifscLimiter, async (req, res, next) => {
+  try {
+    res.json({ success: true, data: await lookupIfsc(req.params.code) })
   } catch (err) {
     next(err)
   }
