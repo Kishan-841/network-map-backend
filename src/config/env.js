@@ -11,6 +11,10 @@ export const env = {
   databaseUrl: required('DATABASE_URL'),
   jwtSecret: required('JWT_SECRET'),
   jwtExpiresIn: process.env.JWT_EXPIRES_IN ?? '7d',
+  // Encrypts partner bank account numbers at rest (lib/bank-cipher.js).
+  // Required everywhere: a deploy without it must fail at boot, not at the
+  // first partner who saves their bank details.
+  bankDetailsKey: required('BANK_DETAILS_KEY'),
   nodeEnv: process.env.NODE_ENV ?? 'development',
   appUrl: process.env.APP_URL ?? 'http://localhost:4000',
   uploadsDir: process.env.UPLOADS_DIR ?? 'uploads',
@@ -138,4 +142,8 @@ if (env.allowApprovalBypass && env.nodeEnv === 'production') {
       'any partner approve themselves and start creating leads without ever ' +
       'showing us a document. Unset it and redeploy.',
   )
+}
+
+if (Buffer.from(env.bankDetailsKey, 'base64').length !== 32) {
+  throw new Error('BANK_DETAILS_KEY must be 32 random bytes, base64-encoded (node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'base64\'))")')
 }
