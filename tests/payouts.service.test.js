@@ -43,6 +43,20 @@ describe('what is owed', () => {
     expect(await service.outstanding()).toMatchObject({ owed: [], total: 0 })
   })
 })
+describe('outstanding carries where to pay', () => {
+  it("attaches each partner's bank details, or null", async () => {
+    const earningRepository = {
+      owedByPartnerMonth: async () => [
+        { partnerId: 'p1', month: '2026-09', partnerName: 'A', amount: 750, count: 1 },
+        { partnerId: 'p2', month: '2026-09', partnerName: 'B', amount: 900, count: 1 },
+      ],
+    }
+    const payees = { payeesFor: async () => new Map([['p1', { accountNumber: '001234567890', ifsc: 'HDFC0001234' }]]) }
+    const { owed } = await createPayoutService({ earningRepository, payees }).outstanding()
+    expect(owed.find((r) => r.partnerId === 'p1').bankAccount.accountNumber).toBe('001234567890')
+    expect(owed.find((r) => r.partnerId === 'p2').bankAccount).toBeNull()
+  })
+})
 describe('the month is still validated before anything is recorded', () => {
   const ACC = { id: 'acc1', role: 'ACCOUNTS' }
   const entry = { partnerId: 'p1', amountPaid: 100, method: 'CASH' }

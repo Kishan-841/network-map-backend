@@ -12,7 +12,7 @@ export const PAYMENT_METHODS = ['BANK_TRANSFER', 'UPI', 'CASH', 'CHEQUE', 'OTHER
  */
 const NEEDS_REFERENCE = ['BANK_TRANSFER', 'UPI', 'CHEQUE']
 
-export function createPayoutService({ earningRepository }) {
+export function createPayoutService({ earningRepository, payees = null }) {
   return {
     /**
      * What is owed, one row per partner per month.
@@ -28,9 +28,13 @@ export function createPayoutService({ earningRepository }) {
         (a, b) =>
           b.month.localeCompare(a.month) || (a.partnerName ?? '').localeCompare(b.partnerName ?? ''),
       )
+      // Where each partner is paid — Accounts needs it on the same screen as
+      // the amount. Decrypted in the bank service, for these partners only.
+      const bankBy = payees ? await payees.payeesFor(owed.map((r) => r.partnerId)) : new Map()
+      const withBank = owed.map((r) => ({ ...r, bankAccount: bankBy.get(r.partnerId) ?? null }))
       return {
-        owed,
-        total: owed.reduce((sum, row) => sum + row.amount, 0),
+        owed: withBank,
+        total: withBank.reduce((sum, row) => sum + row.amount, 0),
       }
     },
 

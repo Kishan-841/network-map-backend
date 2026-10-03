@@ -5,8 +5,9 @@ import { validateBody } from '../../middleware/validate.js'
 import { audit } from '../system-logs/audit.js'
 import { createPayoutService, PAYMENT_METHODS } from './payout.service.js'
 import { earningRepository } from './earning.repository.js'
+import { bankAccountService } from '../partners/partner.routes.js'
 
-const service = createPayoutService({ earningRepository })
+const service = createPayoutService({ earningRepository, payees: bankAccountService })
 
 const markPaidSchema = z.object({
   partnerId: z.string().trim().min(1),
