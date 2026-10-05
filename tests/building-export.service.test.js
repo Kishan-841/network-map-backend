@@ -20,6 +20,8 @@ const rows = [
     details: { homePass: 250 },
     zone: { name: 'Zone A', operator: { name: 'Fiber Plus Broadband' } },
     isLive: true,
+    latitude: 18.52,
+    longitude: 73.85,
   },
   {
     id: 'b2',
@@ -29,6 +31,8 @@ const rows = [
     details: null,
     zone: null,
     isLive: false,
+    latitude: 18.5,
+    longitude: 73.8,
   },
   {
     id: 'b3',
@@ -39,6 +43,8 @@ const rows = [
     // A zone with no operator assigned yet — the schema allows it.
     zone: { name: 'Zone C', operator: null },
     isLive: true,
+    latitude: 18.6,
+    longitude: 73.78,
   },
 ]
 
@@ -74,6 +80,8 @@ describe('the exported rows', () => {
       'Zone',
       'Operator',
       'Live',
+      'Latitude',
+      'Longitude',
     ])
   })
 
@@ -88,13 +96,15 @@ describe('the exported rows', () => {
       'Zone A',
       'Fiber Plus Broadband',
       'Live',
+      18.52,
+      73.85,
     ])
   })
 
   it('leaves a missing value blank rather than writing "null" into a cell', async () => {
     const { service } = build()
     const { rows: out } = await service.exportBuildings({}, ADMIN)
-    expect(out[1]).toEqual(['Shanti Residency', '', '', '', '', '', 'Not live'])
+    expect(out[1]).toEqual(['Shanti Residency', '', '', '', '', '', 'Not live', 18.5, 73.8])
   })
 
   it('keeps home pass a number, so the column can be summed', async () => {
@@ -217,7 +227,7 @@ describe('the operator column', () => {
     const { columns } = await service.exportBuildings({}, ADMIN)
     expect(columns.indexOf('Zone')).toBe(4)
     expect(columns.indexOf('Operator')).toBe(5)
-    expect(columns.at(-1)).toBe('Live')
+    expect(columns.at(-1)).toBe('Longitude')
   })
 })
 

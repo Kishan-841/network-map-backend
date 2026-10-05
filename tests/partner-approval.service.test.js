@@ -4,7 +4,8 @@ import { createPartnerService } from '../src/modules/partners/partner.service.js
 const base = { id: 'p1', status: 'REGISTERED' }
 const doc = (type) => ({ type, url: 'https://cdn/uploads/x.jpg' })
 
-const deps = (partner, docs = []) => ({
+const deps = (partner, docs = [], bank = { accountLast4: '1234' }) => ({
+  bankAccountRepository: { findByPartnerId: vi.fn(async () => bank) },
   partnerRepository: {
     findById: vi.fn(async () => partner),
     listDocuments: vi.fn(async () => docs),
@@ -29,6 +30,18 @@ describe('submitting documents for approval', () => {
     await expect(svc.submitDocuments('p1')).rejects.toMatchObject({ status: 400 })
   })
 
+  it('refuses without bank details and names them', async () => {
+    const svc = createPartnerService(deps(base, [doc('AADHAAR'), doc('PAN'), doc('CANCELLED_CHEQUE')], null))
+    const msg = await svc.submitDocuments('p1').catch((e) => e.message)
+    expect(msg).toMatch(/Bank account/i)
+  })
+
+  it('refuses a submit from an approved partner (409) and changes nothing', async () => {
+    const d = deps({ id: 'p1', status: 'APPROVED' }, [doc('AADHAAR'), doc('PAN'), doc('CANCELLED_CHEQUE')])
+    await expect(createPartnerService(d).submitDocuments('p1')).rejects.toMatchObject({ status: 409 })
+    expect(d.partnerRepository.update).not.toHaveBeenCalled()
+  })
+
   it('names what is missing rather than just failing', async () => {
     const svc = createPartnerService(deps(base, []))
     const msg = await svc.submitDocuments('p1').catch((e) => e.message)
@@ -36,16 +49,16 @@ describe('submitting documents for approval', () => {
     expect(msg).toMatch(/PAN/i)
   })
 
-  it('accepts Aadhaar + PAN', async () => {
-    const d = deps(base, [doc('AADHAAR'), doc('PAN')])
+  it('accepts Aadhaar + PAN + cancelled cheque', async () => {
+    const d = deps(base, [doc('AADHAAR'), doc('PAN'), doc('CANCELLED_CHEQUE')])
     await createPartnerService(d).submitDocuments('p1')
     expect(d.partnerRepository.update).toHaveBeenCalledWith('p1', { status: 'PENDING_APPROVAL' })
   })
 
-  it('asks for Aadhaar and PAN only — nothing else', async () => {
-    const d = deps(base, [doc('AADHAAR'), doc('PAN')])
+  it('asks for Aadhaar, PAN and a cancelled cheque — nothing else', async () => {
+    const d = deps(base, [doc('AADHAAR'), doc('PAN'), doc('CANCELLED_CHEQUE')])
     const svc = createPartnerService(d)
-    expect(svc.requiredDocuments()).toEqual(['AADHAAR', 'PAN'])
+    expect(svc.requiredDocuments()).toEqual(['AADHAAR', 'PAN', 'CANCELLED_CHEQUE'])
     await svc.submitDocuments('p1')
     expect(d.partnerRepository.update).toHaveBeenCalledWith('p1', { status: 'PENDING_APPROVAL' })
   })

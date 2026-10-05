@@ -15,7 +15,9 @@ export function createNotifier({ tokenRepository, push, log = console }) {
       try {
         const rows = await tokenRepository.listForPartner(partnerId)
         if (!rows.length) return { sent: 0 }
-        const n = buildNotification(kind, payload)
+        // Every row belongs to the same partner, so any row carries their language.
+        const lang = rows[0]?.partner?.preferredLanguage ?? 'EN'
+        const n = buildNotification(kind, payload, lang)
         const messages = rows.map(({ token }) => ({ to: token, ...n, channelId: CHANNEL_ID }))
         const tickets = await push.send(messages)
 

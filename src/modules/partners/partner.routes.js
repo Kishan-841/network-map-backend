@@ -1,10 +1,16 @@
 import { Router } from 'express'
 import { z } from 'zod'
+import { ApiError } from '../../lib/api-error.js'
 import { requireAuth, requireRole } from '../../middleware/auth.js'
 import { requirePartner } from '../../middleware/partner-auth.js'
 import { validateBody } from '../../middleware/validate.js'
+import { ifscLimiter } from '../../middleware/rate-limit.js'
 import { audit } from '../system-logs/audit.js'
-import { createPartnerService } from './partner.service.js'
+import { createPartnerService, PARTNER_DOCUMENT_TYPES } from './partner.service.js'
+import { bankAccountRepository } from './bank-account.repository.js'
+import { createBankAccountService } from './bank-account.service.js'
+import { bankAccountSchema, redactBankBody } from './bank-account.schemas.js'
+import { bankCipher } from '../../lib/bank-cipher.js'
 import { partnerRepository } from './partner.repository.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
 import { env } from '../../config/env.js'
@@ -12,21 +18,26 @@ import { notifier } from '../../lib/push/notifier.js'
 import { createApprovalBypassService } from './approval-bypass.service.js'
 import { createDirectPartnerService } from './direct-add.service.js'
 import { partnerAuthRepository } from '../partner-auth/partner-auth.repository.js'
+import { createIfscLookup } from '../../lib/ifsc.js'
 
 const service = createPartnerService({
   partnerRepository,
   storage: getStorageProvider(),
   // Tells the partner when an admin approves or rejects their documents.
   notifyPartner: notifier.notifyPartner,
+  bankAccountRepository,
 })
+const bank = createBankAccountService({ bankAccountRepository, partnerRepository, cipher: bankCipher })
+export const bankAccountService = bank
 const directPartners = createDirectPartnerService({ partnerAuthRepository })
 const approvalBypass = createApprovalBypassService({
   partnerAuthRepository,
   allowed: env.allowApprovalBypass,
 })
+const lookupIfsc = createIfscLookup()
 
 const documentSchema = z.object({
-  type: z.enum(['AADHAAR', 'PAN']),
+  type: z.enum(PARTNER_DOCUMENT_TYPES),
   url: z.string().url(),
 })
 const rejectSchema = z.object({ reason: z.string().trim().min(3).max(500) })
@@ -50,6 +61,7 @@ partnerSelfRoutes.use(requirePartner)
 partnerSelfRoutes.get('/onboarding', async (req, res, next) => {
   try {
     const documents = await service.listDocuments(req.partner.id)
+    const bankAccount = await bank.getMasked(req.partner.id)
     res.json({
       success: true,
       data: {
@@ -57,6 +69,9 @@ partnerSelfRoutes.get('/onboarding', async (req, res, next) => {
         rejectionReason: req.partner.rejectionReason,
         required: service.requiredDocuments(),
         documents,
+        bankAccount,
+        // The lock rule lives in the service; the clients only read it.
+        bankEditable: bank.isEditableByPartner(req.partner.status, Boolean(bankAccount)),
         // The browser cannot be trusted to know whether the shortcut is on,
         // so the server says. False in production, always.
         bypassAvailable: env.allowApprovalBypass === true,
@@ -74,6 +89,24 @@ partnerSelfRoutes.post('/documents', validateBody(documentSchema), async (req, r
     next(err)
   }
 })
+
+partnerSelfRoutes.put(
+  '/bank-account',
+  audit('PartnerBankAccount', 'Update', {
+    recordId: (req) => req.partner?.id,
+    describe: (req) => `Partner ${req.partner?.id} saved bank details`,
+    // Never the account number — only its last 4.
+    newValue: (req) => redactBankBody(req.body),
+  }),
+  validateBody(bankAccountSchema),
+  async (req, res, next) => {
+    try {
+      res.json({ success: true, data: await bank.saveByPartner(req.partner, req.body) })
+    } catch (err) {
+      next(err)
+    }
+  },
+)
 
 /**
  * TESTING ONLY — approve yourself and skip the upload entirely. 404s unless
@@ -99,6 +132,14 @@ partnerSelfRoutes.post('/documents/submit', async (req, res, next) => {
   try {
     const updated = await service.submitDocuments(req.partner.id)
     res.json({ success: true, data: { status: updated.status } })
+  } catch (err) {
+    next(err)
+  }
+})
+
+partnerSelfRoutes.get('/ifsc/:code', ifscLimiter, async (req, res, next) => {
+  try {
+    res.json({ success: true, data: await lookupIfsc(req.params.code) })
   } catch (err) {
     next(err)
   }
@@ -146,6 +187,16 @@ partnerAdminRoutes.post(
   },
 )
 
+// IFSC lookup for the admin's bank form — the same cached lookup the partner
+// route uses. Registered before '/:id/…' routes; ADMIN only like the form.
+partnerAdminRoutes.get('/ifsc/:code', requireRole('ADMIN'), ifscLimiter, async (req, res, next) => {
+  try {
+    res.json({ success: true, data: await lookupIfsc(req.params.code) })
+  } catch (err) {
+    next(err)
+  }
+})
+
 partnerAdminRoutes.get('/:id/documents', requireRole('ADMIN'), async (req, res, next) => {
   try {
     res.json({ success: true, data: await service.listDocuments(req.params.id) })
@@ -153,6 +204,50 @@ partnerAdminRoutes.get('/:id/documents', requireRole('ADMIN'), async (req, res, 
     next(err)
   }
 })
+
+// Bank details: ADMIN only — the person approving, and the one person who may
+// change them once locked. Partner managers never see them.
+partnerAdminRoutes.get('/:id/bank-account', requireRole('ADMIN'), async (req, res, next) => {
+  try {
+    res.json({ success: true, data: await bank.getFull(req.params.id) })
+  } catch (err) {
+    next(err)
+  }
+})
+
+partnerAdminRoutes.put(
+  '/:id/bank-account',
+  requireRole('ADMIN'),
+  audit('PartnerBankAccount', 'AdminUpdate', {
+    describe: (req) => `Bank details of partner ${req.params.id} changed by an admin`,
+    newValue: (req) => redactBankBody(req.body),
+  }),
+  validateBody(bankAccountSchema),
+  async (req, res, next) => {
+    try {
+      res.json({ success: true, data: await bank.saveByAdmin(req.params.id, req.body, req.user) })
+    } catch (err) {
+      next(err)
+    }
+  },
+)
+
+// An admin replacing a partner's photo (in practice the cheque, when the bank
+// changes after approval). Same provenance rule as the partner's own upload.
+partnerAdminRoutes.post(
+  '/:id/documents',
+  requireRole('ADMIN'),
+  audit('Partner', 'DocumentReplace', { describe: (req) => `Partner ${req.params.id}: ${req.body?.type} replaced by an admin` }),
+  validateBody(documentSchema),
+  async (req, res, next) => {
+    try {
+      if (!(await partnerRepository.findById(req.params.id))) throw ApiError.notFound('Partner not found')
+      res.status(201).json({ success: true, data: await service.saveDocument(req.params.id, req.body) })
+    } catch (err) {
+      next(err)
+    }
+  },
+)
 
 // Approval is ADMIN-only: the employee who recruited a partner should not be
 // the one clearing their paperwork, especially once commission is attached.

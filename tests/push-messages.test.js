@@ -60,3 +60,32 @@ describe('every lead status and the approval decision', () => {
     expect(n.data).toEqual({ kind: 'partner.rejected' })
   })
 })
+
+describe('in the partner\'s language', () => {
+  const lead = { leadId: 'l1', customerName: 'Ramesh Patil', amount: 750 }
+  it('Hindi', () => {
+    const n = buildNotification('lead.converted', lead, 'HI')
+    expect(n.title).toContain('Ramesh')
+    expect(n.body).toContain('₹750')
+    expect(n.title).toMatch(/[ऀ-ॿ]/) // Devanagari
+    expect(n.data).toEqual({ kind: 'lead.converted', leadId: 'l1' })
+  })
+  it('Marathi', () => {
+    expect(buildNotification('partner.approved', {}, 'MR').body).toMatch(/[ऀ-ॿ]/)
+  })
+  it('every kind has all three languages', () => {
+    for (const kind of NOTIFICATION_KINDS) for (const lang of ['EN', 'HI', 'MR']) {
+      const n = buildNotification(kind, lead, lang)
+      expect(n.title, `${kind} ${lang}`).toBeTruthy()
+      expect(n.body, `${kind} ${lang}`).toBeTruthy()
+      if (lang !== 'EN') expect(`${n.title} ${n.body}`, `${kind} ${lang}`).toMatch(/[ऀ-ॿ]/)
+    }
+  })
+  it('an unknown or missing language falls back to English', () => {
+    expect(buildNotification('partner.approved', {}, 'TA').title).toBe("You're approved! 🎉")
+    expect(buildNotification('partner.approved', {}, null).title).toBe("You're approved! 🎉")
+  })
+  it('names a nameless customer in the partner\'s language', () => {
+    expect(buildNotification('lead.interested', { leadId: 'l1' }, 'HI').title).not.toContain('Your customer')
+  })
+})

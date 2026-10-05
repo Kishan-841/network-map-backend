@@ -68,4 +68,21 @@ describe('audit middleware', () => {
     expect(entry.newValue).toBeNull()
     expect(entry.oldValue).toBeNull()
   })
+
+  it('lets a route replace what is logged as newValue (so secrets never reach the log)', async () => {
+    const cap = capture()
+    const app = express()
+    app.use(express.json())
+    app.put(
+      '/secret',
+      createAudit(cap.recordLog)('PartnerBankAccount', 'Update', {
+        newValue: (req) => ({ last4: req.body.accountNumber.slice(-4) }),
+      }),
+      (req, res) => res.json({ success: true, data: { id: 'x' } }),
+    )
+    await request(app).put('/secret').send({ accountNumber: '123456789012' })
+    const entry = await cap.promise
+    expect(entry.newValue).toEqual({ last4: '9012' })
+    expect(JSON.stringify(entry)).not.toContain('123456789012')
+  })
 })

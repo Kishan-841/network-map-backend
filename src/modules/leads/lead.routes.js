@@ -12,6 +12,7 @@ import { createBuildingSearchService } from '../partners/building-search.service
 import { BILLING_PERIODS } from '../rate-card/rate-card.service.js'
 import { createPartnerService } from '../partners/partner.service.js'
 import { partnerRepository } from '../partners/partner.repository.js'
+import { fixedAmountFor } from '../earnings/commission.js'
 import { buildingRepository } from '../buildings/building.repository.js'
 import { createLeadCallService } from './lead-call.service.js'
 import { leadCallRepository } from './lead-call.repository.js'
@@ -26,6 +27,8 @@ const earningService = createEarningService({
   earningRepository,
   rateCardRepository,
   leadRepository,
+  // Knows the partner's type — a DSA is paid a flat amount (commission.js).
+  partnerRepository,
 })
 // Partner push notifications for lead milestones — shared by both status paths.
 const notifyLeadMilestone = createLeadMilestones({ notifyPartner: notifier.notifyPartner })
@@ -189,7 +192,9 @@ partnerLeadRoutes.get('/leads', async (req, res, next) => {
 partnerLeadRoutes.get('/earnings', async (req, res, next) => {
   try {
     partners.assertApproved(req.partner)
-    res.json({ success: true, data: await earningService.statementFor(req.partner.id) })
+    const statement = await earningService.statementFor(req.partner.id)
+    // A DSA is paid a flat amount per customer; the Earnings tab says so.
+    res.json({ success: true, data: { ...statement, fixedPerCustomer: fixedAmountFor(req.partner.type) } })
   } catch (err) {
     next(err)
   }

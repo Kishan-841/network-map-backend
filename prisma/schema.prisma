@@ -119,6 +119,7 @@ model User {
   closuresCreated  Closure[]  @relation("ClosureCreatedBy")
   popsCreated      Pop[]      @relation("PopCreatedBy")
   splittersCreated Splitter[] @relation("SplitterCreatedBy")
+  partnerBankEdits PartnerBankAccount[] @relation("PartnerBankEditor")
   assignedZones Zone[]        @relation("UserAssignedZones")
   /// City + pincodes an ACQUISITION_AGENT covers; unused for other roles.
   pincodes      UserPincode[]
@@ -771,6 +772,7 @@ enum PartnerStatus {
 enum PartnerDocumentType {
   AADHAAR
   PAN
+  CANCELLED_CHEQUE
 }
 
 model Partner {
@@ -799,6 +801,7 @@ model Partner {
   rejectionReason String?
 
   documents         PartnerDocument[]
+  bankAccount       PartnerBankAccount?
   invite            PartnerInvite?
   leads             Lead[]
   earnings          PartnerEarning[]
@@ -1206,4 +1209,23 @@ enum CallOutcome {
   CALL_LATER
   NOT_REACHABLE
   WRONG_NUMBER
+}
+
+/// Where a partner's commission is paid. One per partner. The account number
+/// is encrypted by the app (lib/field-cipher.js); only the last 4 are clear.
+model PartnerBankAccount {
+  id                String   @id @default(uuid())
+  partnerId         String   @unique
+  partner           Partner  @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  accountHolderName String
+  accountNumberEnc  String
+  accountLast4      String
+  ifsc              String
+  bankName          String?
+  branchName        String
+  /// The staff member who last edited it; null when the partner saved it.
+  updatedById       String?
+  updatedBy         User?    @relation("PartnerBankEditor", fields: [updatedById], references: [id], onDelete: SetNull)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }

@@ -12,7 +12,11 @@ export const pushTokenRepository = {
   removeForPartner: (partnerId, token) =>
     prisma.partnerPushToken.deleteMany({ where: { partnerId, token } }),
   listForPartner: (partnerId) =>
-    prisma.partnerPushToken.findMany({ where: { partnerId }, select: { token: true } }),
+    prisma.partnerPushToken.findMany({
+      where: { partnerId },
+      // The language comes along, so the notification is written in it.
+      select: { token: true, partner: { select: { preferredLanguage: true } } },
+    }),
   /** Tokens Expo reported dead (the app was uninstalled). */
   removeTokens: (tokens) =>
     tokens.length ? prisma.partnerPushToken.deleteMany({ where: { token: { in: tokens } } }) : null,

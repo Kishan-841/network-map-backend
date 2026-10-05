@@ -1,4 +1,5 @@
 import { ApiError } from '../../lib/api-error.js'
+import { commissionFor } from './commission.js'
 
 /** The month a date belongs to, as the statement groups it. */
 const monthKey = (date) => {
@@ -6,7 +7,7 @@ const monthKey = (date) => {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`
 }
 
-export function createEarningService({ earningRepository, rateCardRepository, leadRepository }) {
+export function createEarningService({ earningRepository, rateCardRepository, leadRepository, partnerRepository = null }) {
   return {
     /** The earning behind a lead, if one was ever recorded. */
     findForLead: (leadId) => earningRepository.findByLeadId(leadId),
@@ -37,6 +38,10 @@ export function createEarningService({ earningRepository, rateCardRepository, le
         )
       }
 
+      // The plan must still be one we sell (above), even for a partner paid a
+      // flat amount: it is recorded on the earning either way.
+      const partner = partnerRepository ? await partnerRepository.findById(lead.partnerId) : null
+
       return earningRepository.create({
         leadId: lead.id,
         partnerId: lead.partnerId,
@@ -45,7 +50,7 @@ export function createEarningService({ earningRepository, rateCardRepository, le
         employeeId: lead.employeeId ?? null,
         speedMbps: rate.speedMbps,
         billingPeriod: rate.billingPeriod,
-        amount: rate.amount,
+        amount: commissionFor(partner?.type, rate),
         earnedAt: at,
       })
     },

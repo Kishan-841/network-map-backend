@@ -68,3 +68,13 @@ export const feasibilityLimiter = rateLimit({
   skip: () => process.env.NODE_ENV === 'test',
   handler: (req, res) => json(res, 'Too many checks. Try again in a few minutes.'),
 })
+
+/** IFSC lookups: a form types a handful; this stops anyone using us as a free proxy. */
+export const ifscLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
+  handler: (req, res) => json(res, 'Too many lookups. Try again in a few minutes.'),
+})

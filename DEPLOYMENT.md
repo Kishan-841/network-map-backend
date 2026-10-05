@@ -83,6 +83,7 @@ public by design and only HTTP-referrer restrictions protect it.
 | `POSTGRES_PASSWORD` | Defaults to `isp`; set a real one per stack |
 | `CORS_ORIGIN`, `WEB_URL`, `APP_URL` | `WEB_URL` falls back to the first CORS origin, and partner **invite links are built from it** — copy these and company B emails links pointing at company A's site |
 | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | Set both, then `RUN_SEED=true` on the first deploy only |
+| `BANK_DETAILS_KEY` | Encrypts partners' bank account numbers. A fresh key per stack — a shared key means one company's database dump is readable with the other's `.env`. See the go-live checklist for how to make one and why it can never change |
 | `NODE_ENV=production` | The image sets it; do not override it in `.env`. It is what makes the server refuse to boot with `SHOW_OTP_IN_RESPONSE` or `ALLOW_APPROVAL_BYPASS` on |
 
 Leave `SHOW_OTP_IN_RESPONSE` and `ALLOW_APPROVAL_BYPASS` unset entirely.
@@ -123,6 +124,22 @@ Point `DATABASE_URL` at your managed database. The container runs
 - [ ] `JWT_SECRET` — long random unique value (`openssl rand -base64 48`). The
       app refuses to boot in production with a weak/default secret.
 - [ ] `POSTGRES_PASSWORD` / database credentials changed from defaults.
+- [ ] `BANK_DETAILS_KEY` — **required**; the server refuses to boot without
+      it. 32 random bytes, base64:
+      `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`.
+      It encrypts every partner's bank account number (AES-256-GCM).
+  - **Set it on the VM before merging the backend PR that introduces it.** The
+    container runs `prisma migrate deploy` and then starts the API; with no key
+    the API exits at boot and the container crash-loops.
+  - **Back it up like `JWT_SECRET`, somewhere outside the VM.** Lose it and
+    every stored account number is unreadable — partners would have to re-enter
+    their bank details.
+  - **Never change it once bank details are stored.** There is no key rotation
+    yet: a new key makes every existing number unreadable (payouts show
+    "Bank details unreadable" for those partners).
+  - **Rolling back:** once any `CANCELLED_CHEQUE` document rows exist, roll
+    forward only. The previous image's Prisma client does not know that enum
+    value and fails on reading those rows.
 - [ ] `SEED_ADMIN_PASSWORD` set, then **change the admin password after first
       login** and set `RUN_SEED=false` for subsequent deploys.
 - [ ] `APP_URL` = the public URL of this backend (stored file URLs depend on it).
