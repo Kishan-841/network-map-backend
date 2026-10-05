@@ -14,7 +14,7 @@ const tok = (sub) => ({ Authorization: `Bearer ${jwt.sign({ sub }, env.jwtSecret
 beforeAll(() =>
   prisma.partner.createMany({
     data: [
-      { id: DSA, name: DSA, type: 'DSA', mobile: `97${stamp}` },
+      { id: DSA, name: DSA, type: 'DSA', mobile: `97${stamp}`, status: 'APPROVED' },
       { id: SHOP, name: SHOP, type: 'RETAIL_SHOP', mobile: `96${stamp}` },
     ],
   }),
@@ -42,5 +42,13 @@ describe('GET /rate-card (staff) — the DSA amount for the convert preview', ()
     const res = await request(app).get('/api/v1/rate-card').set('Authorization', `Bearer ${token}`)
     expect(res.status).toBe(200)
     expect(res.body.data.dsaFixedAmount).toBe(500)
+  })
+})
+
+describe('GET /partner/earnings — fixed pay', () => {
+  it('carries fixedPerCustomer for a DSA', async () => {
+    const res = await request(app).get('/api/v1/partner/earnings').set(tok(DSA))
+    expect(res.status).toBe(200)
+    expect(res.body.data.fixedPerCustomer).toBe(500)
   })
 })
