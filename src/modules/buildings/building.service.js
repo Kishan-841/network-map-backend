@@ -390,7 +390,7 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       // Operator is appended rather than slotted beside Zone: anyone already
       // working from an exported file keeps their column positions.
       return {
-        columns: ['Building name', 'Address', 'Pincode', 'Home pass', 'Zone', 'Operator', 'Live'],
+        columns: ['Building name', 'Address', 'Pincode', 'Home pass', 'Zone', 'Operator', 'Live', 'Latitude', 'Longitude'],
         rows: found.map((b) => [
           // Blank, never the string "null" — a spreadsheet cell with nothing
           // in it reads as nothing; one containing "null" reads as data.
@@ -407,6 +407,9 @@ export function createBuildingService({ buildingRepository, storage, userReposit
           b.zone?.operator?.name ?? '',
           // The status the exporter filtered on, spelled out for the reader.
           b.isLive ? 'Live' : 'Not live',
+          // Coordinates stay numeric, so the columns can be mapped/sorted.
+          b.latitude,
+          b.longitude,
         ]),
         truncated: found.length === EXPORT_LIMIT,
       }
