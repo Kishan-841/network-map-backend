@@ -26,6 +26,8 @@ const earningService = createEarningService({
   earningRepository,
   rateCardRepository,
   leadRepository,
+  // Knows the partner's type — a DSA is paid a flat amount (commission.js).
+  partnerRepository,
 })
 // Partner push notifications for lead milestones — shared by both status paths.
 const notifyLeadMilestone = createLeadMilestones({ notifyPartner: notifier.notifyPartner })
