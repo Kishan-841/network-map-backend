@@ -52,6 +52,8 @@ const exportSelect = {
   formattedAddress: true,
   pincode: true,
   isLive: true,
+  latitude: true,
+  longitude: true,
   details: { select: { homePass: true } },
   zone: { select: { name: true, operator: { select: { name: true } } } },
 }
