@@ -150,6 +150,7 @@ model User {
   leadCalls          LeadCall[]        @relation("LeadCallBy")
   earningsMarkedPaid PartnerEarning[]  @relation("EarningPaidBy")
   paymentsRecorded   PartnerPayment[]  @relation("PaymentRecordedBy")
+  appReleases        AppRelease[]      @relation("AppReleaseCreatedBy")
 }
 
 /// One row per pincode an acquisition agent covers (within one city).
@@ -1228,4 +1229,23 @@ model PartnerBankAccount {
   updatedBy         User?    @relation("PartnerBankEditor", fields: [updatedById], references: [id], onDelete: SetNull)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
+}
+
+/// An APK partners can be asked to install. The file lives in R2 at apkKey.
+model AppRelease {
+  id          String   @id @default(cuid())
+  version     String   @unique
+  apkKey      String
+  notes       String?
+  createdById String?
+  createdBy   User?    @relation("AppReleaseCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+}
+
+/// One row (id 'singleton'): the oldest app version still allowed to run.
+model AppReleaseSetting {
+  id                      String   @id @default("singleton")
+  minimumSupportedVersion String   @default("0.0.0")
+  updatedById             String?
+  updatedAt               DateTime @default(now()) @updatedAt
 }
