@@ -27,7 +27,7 @@ const earningService = createEarningService({
   earningRepository,
   rateCardRepository,
   leadRepository,
-  // Knows the partner's type — a DSA is paid a flat amount (commission.js).
+  // Knows the partner's type — agents, society reps and shops are paid flat (commission.js).
   partnerRepository,
 })
 // Partner push notifications for lead milestones — shared by both status paths.
@@ -193,7 +193,7 @@ partnerLeadRoutes.get('/earnings', async (req, res, next) => {
   try {
     partners.assertApproved(req.partner)
     const statement = await earningService.statementFor(req.partner.id)
-    // A DSA is paid a flat amount per customer; the Earnings tab says so.
+    // A flat-pay partner (agent, society rep, shop) is told so on the Earnings tab.
     res.json({ success: true, data: { ...statement, fixedPerCustomer: fixedAmountFor(req.partner.type) } })
   } catch (err) {
     next(err)

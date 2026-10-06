@@ -3,7 +3,7 @@ import { requireAuth, requireRole } from '../../middleware/auth.js'
 import { requirePartner } from '../../middleware/partner-auth.js'
 import { createRateCardService } from './rate-card.service.js'
 import { rateCardRepository } from './rate-card.repository.js'
-import { DSA_FIXED_AMOUNT, fixedAmountFor } from '../earnings/commission.js'
+import { FIXED_AMOUNT_BY_TYPE, fixedAmountFor } from '../earnings/commission.js'
 
 const service = createRateCardService({ rateCardRepository })
 
@@ -22,7 +22,7 @@ const serve = (extra) => async (req, res, next) => {
  * it (partner-network.md §8).
  */
 export const partnerRateCardRoutes = Router()
-// A partner paid a flat amount (a DSA) is told so; the app shows that
+// A partner paid a flat amount (agent, society rep, shop) is told so; the app shows that
 // instead of the calculator. Null means "paid from the rate card".
 partnerRateCardRoutes.get(
   '/rate-card',
@@ -38,6 +38,6 @@ staffRateCardRoutes.get(
   // The rate card IS the commission structure — what every partner is paid.
   // Same audience as the rest of the partner network.
   requireRole('ADMIN', 'PARTNER_MANAGER'),
-  // So the "Mark converted" preview can show a DSA's flat amount.
-  serve(() => ({ dsaFixedAmount: DSA_FIXED_AMOUNT })),
+  // So the "Mark converted" preview can show a flat-pay partner's amount.
+  serve(() => ({ fixedAmountByType: FIXED_AMOUNT_BY_TYPE })),
 )
