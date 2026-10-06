@@ -1,5 +1,6 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { ApiError } from '../api-error.js'
 import { buildObjectKey, keyFromPublicUrl } from './object-key.js'
 
 export function createLocalStorageProvider({ rootDir, baseUrl }) {
@@ -35,6 +36,23 @@ export function createLocalStorageProvider({ rootDir, baseUrl }) {
     // nothing to sign, so the canonical URL is already the read URL.
     async readUrl(url) {
       return url
+    },
+
+    async uploadUrl() {
+      throw new ApiError(501, 'NOT_SUPPORTED', 'APK uploads need R2 storage (STORAGE_DRIVER=r2)')
+    },
+
+    async downloadUrl({ key }) {
+      return `${baseUrl}/${key}`
+    },
+
+    async exists({ key }) {
+      try {
+        await access(path.join(rootDir, key))
+        return true
+      } catch {
+        return false
+      }
     },
   }
 }

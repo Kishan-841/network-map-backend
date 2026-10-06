@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { S3Client } from '@aws-sdk/client-s3'
 import { createR2StorageProvider } from '../src/lib/storage/r2-storage-provider.js'
 
 const PUBLIC = 'https://cdn.example.com'
@@ -78,5 +79,35 @@ describe('r2 storage provider', () => {
     // signed url can only ever name an object inside our own bucket.
     expect(provider.keyFromUrl('https://docs.abc123.r2.cloudflarestorage.com/../secret')).toBe('secret')
     expect(provider.keyFromUrl('https://docs.abc123.r2.cloudflarestorage.com/%2E%2E/secret')).toBe('secret')
+  })
+})
+
+// The presigner signs locally — no network — so a real client with dummy
+// credentials is enough to check the URLs we hand out.
+const signingClient = () =>
+  new S3Client({ region: 'auto', endpoint: 'https://acc.r2.cloudflarestorage.com', credentials: { accessKeyId: 'a', secretAccessKey: 'b' } })
+
+describe('r2 storage provider — app releases', () => {
+  it('presigns a PUT for an exact key and content type', async () => {
+    const provider = createR2StorageProvider({ client: signingClient(), bucket: 'docs', publicBaseUrl: PUBLIC })
+    const url = await provider.uploadUrl({ key: 'app/partner-1.1.0.apk', contentType: 'application/vnd.android.package-archive' })
+    expect(url).toContain('app/partner-1.1.0.apk')
+    expect(url).toContain('X-Amz-Signature=')
+    expect(url).toContain('X-Amz-Expires=900')
+  })
+
+  it('presigns a GET by key with a download filename', async () => {
+    const provider = createR2StorageProvider({ client: signingClient(), bucket: 'docs', publicBaseUrl: PUBLIC })
+    const url = await provider.downloadUrl({ key: 'app/partner-1.1.0.apk', filename: 'partner-1.1.0.apk' })
+    expect(url).toContain('X-Amz-Expires=3600')
+    expect(decodeURIComponent(url)).toContain('attachment; filename="partner-1.1.0.apk"')
+  })
+
+  it('reports whether an object exists', async () => {
+    const yes = createR2StorageProvider({ client: { send: async () => ({}) }, bucket: 'docs', publicBaseUrl: PUBLIC })
+    expect(await yes.exists({ key: 'app/x.apk' })).toBe(true)
+    const missing = Object.assign(new Error('NotFound'), { name: 'NotFound', $metadata: { httpStatusCode: 404 } })
+    const no = createR2StorageProvider({ client: { send: async () => { throw missing } }, bucket: 'docs', publicBaseUrl: PUBLIC })
+    expect(await no.exists({ key: 'app/x.apk' })).toBe(false)
   })
 })

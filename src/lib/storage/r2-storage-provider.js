@@ -1,4 +1,4 @@
-import { PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3'
+import { PutObjectCommand, DeleteObjectCommand, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { buildObjectKey, keyFromPublicUrl, keyFromSignedUrl } from './object-key.js'
 
@@ -60,6 +60,38 @@ export function createR2StorageProvider({ client, bucket, publicBaseUrl }) {
       return getSignedUrl(client, new GetObjectCommand({ Bucket: bucket, Key: key }), {
         expiresIn,
       })
+    },
+
+    /**
+     * A short-lived link the browser PUTs one file to, straight into the
+     * bucket (the 100 MB APK never passes through our server). The signature
+     * pins the key and content type: the upload must send that exact type.
+     */
+    async uploadUrl({ key, contentType, expiresIn = 15 * 60 }) {
+      return getSignedUrl(client, new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: contentType }), { expiresIn })
+    },
+
+    /** A short-lived download link for a key we hold (never stored). */
+    async downloadUrl({ key, expiresIn = 60 * 60, filename }) {
+      return getSignedUrl(
+        client,
+        new GetObjectCommand({
+          Bucket: bucket,
+          Key: key,
+          ...(filename ? { ResponseContentDisposition: `attachment; filename="${filename}"` } : {}),
+        }),
+        { expiresIn },
+      )
+    },
+
+    async exists({ key }) {
+      try {
+        await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
+        return true
+      } catch (err) {
+        if (err?.$metadata?.httpStatusCode === 404 || err?.name === 'NotFound') return false
+        throw err
+      }
     },
   }
 }

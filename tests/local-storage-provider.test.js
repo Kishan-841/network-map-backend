@@ -65,4 +65,13 @@ describe('local storage provider', () => {
     ).resolves.toBe('safe')
     await rm(path.join(TEST_ROOT, '..', 'escape-canary.txt'), { force: true })
   })
+
+  it('app-release methods: uploadUrl is unsupported, downloadUrl is the plain url, exists checks disk', async () => {
+    const provider = createLocalStorageProvider({ rootDir: TEST_ROOT, baseUrl: 'http://localhost:4000/uploads' })
+    await expect(provider.uploadUrl({ key: 'app/x.apk', contentType: 'x' })).rejects.toMatchObject({ status: 501 })
+    expect(await provider.downloadUrl({ key: 'app/x.apk' })).toBe('http://localhost:4000/uploads/app/x.apk')
+    expect(await provider.exists({ key: 'app/x.apk' })).toBe(false)
+    const { key } = await provider.save({ buffer: Buffer.from('a'), extension: 'apk' })
+    expect(await provider.exists({ key })).toBe(true)
+  })
 })
