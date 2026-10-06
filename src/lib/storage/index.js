@@ -15,6 +15,9 @@ const providers = {
     createR2StorageProvider({
       client: new S3Client({
         region: 'auto',
+        // Presigned URLs must not embed a checksum of an empty body.
+        requestChecksumCalculation: 'WHEN_REQUIRED',
+        responseChecksumValidation: 'WHEN_REQUIRED',
         endpoint: env.r2.endpoint,
         credentials: {
           accessKeyId: env.r2.accessKeyId,

@@ -68,11 +68,16 @@ export function createR2StorageProvider({ client, bucket, publicBaseUrl }) {
      * pins the key and content type: the upload must send that exact type.
      */
     async uploadUrl({ key, contentType, expiresIn = 15 * 60 }) {
-      return getSignedUrl(client, new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: contentType }), { expiresIn })
+      return getSignedUrl(client, new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: contentType }), {
+        expiresIn,
+        // Sign content-type so the upload must send exactly this type.
+        signableHeaders: new Set(['content-type']),
+      })
     },
 
     /** A short-lived download link for a key we hold (never stored). */
     async downloadUrl({ key, expiresIn = 60 * 60, filename }) {
+      if (filename && /["\r\n]/.test(filename)) throw new Error('Invalid download filename')
       return getSignedUrl(
         client,
         new GetObjectCommand({

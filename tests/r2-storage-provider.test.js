@@ -85,7 +85,7 @@ describe('r2 storage provider', () => {
 // The presigner signs locally — no network — so a real client with dummy
 // credentials is enough to check the URLs we hand out.
 const signingClient = () =>
-  new S3Client({ region: 'auto', endpoint: 'https://acc.r2.cloudflarestorage.com', credentials: { accessKeyId: 'a', secretAccessKey: 'b' } })
+  new S3Client({ region: 'auto', endpoint: 'https://acc.r2.cloudflarestorage.com', credentials: { accessKeyId: 'a', secretAccessKey: 'b' }, requestChecksumCalculation: 'WHEN_REQUIRED', responseChecksumValidation: 'WHEN_REQUIRED' })
 
 describe('r2 storage provider — app releases', () => {
   it('presigns a PUT for an exact key and content type', async () => {
@@ -94,6 +94,27 @@ describe('r2 storage provider — app releases', () => {
     expect(url).toContain('app/partner-1.1.0.apk')
     expect(url).toContain('X-Amz-Signature=')
     expect(url).toContain('X-Amz-Expires=900')
+    const signed = decodeURIComponent(url).match(/X-Amz-SignedHeaders=([^&]*)/)[1]
+    expect(signed).toContain('content-type')
+  })
+
+  it('presigned PUT carries no checksum params (a real upload would fail them)', async () => {
+    const provider = createR2StorageProvider({ client: signingClient(), bucket: 'docs', publicBaseUrl: PUBLIC })
+    const url = (await provider.uploadUrl({ key: 'app/x.apk', contentType: 'application/vnd.android.package-archive' })).toLowerCase()
+    expect(url).not.toContain('x-amz-checksum')
+    expect(url).not.toContain('x-amz-sdk-checksum-algorithm')
+  })
+
+  it('refuses a download filename with a quote or line break', async () => {
+    const provider = createR2StorageProvider({ client: signingClient(), bucket: 'docs', publicBaseUrl: PUBLIC })
+    await expect(provider.downloadUrl({ key: 'k', filename: 'a".apk' })).rejects.toThrow()
+    await expect(provider.downloadUrl({ key: 'k', filename: 'a\nb.apk' })).rejects.toThrow()
+  })
+
+  it('exists() rethrows a non-404 error', async () => {
+    const denied = Object.assign(new Error('denied'), { name: 'AccessDenied', $metadata: { httpStatusCode: 403 } })
+    const p = createR2StorageProvider({ client: { send: async () => { throw denied } }, bucket: 'docs', publicBaseUrl: PUBLIC })
+    await expect(p.exists({ key: 'k' })).rejects.toBe(denied)
   })
 
   it('presigns a GET by key with a download filename', async () => {
