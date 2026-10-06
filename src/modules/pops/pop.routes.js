@@ -16,7 +16,9 @@ import { popController } from './pop.controller.js'
 export const popRoutes = Router()
 
 popRoutes.use(requireAuth)
-const READ = requireRole('ADMIN', 'MANAGER', 'SURVEYOR', 'SUPERVISOR')
+// TEAM_LEADER reads (never writes) the network in the zones their manager gave
+// them; the zone scope in lib/visibility.js does the filtering.
+const READ = requireRole('ADMIN', 'MANAGER', 'SURVEYOR', 'SUPERVISOR', 'TEAM_LEADER')
 // POPs are part of building the fiber network, so they follow the same
 // per-user grant as fibers and closures rather than a role of their own.
 const WRITE = requireFiberWrite

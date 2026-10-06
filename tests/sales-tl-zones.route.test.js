@@ -194,3 +194,56 @@ describe('a manager sets team-leader zones', () => {
     expect((await put('test-admin', U.tl2, [Z1])).status).toBe(200)
   })
 })
+
+describe("a team leader reads their zones' network", () => {
+  const F1 = `TLZ-F1-${S}`
+  const F2 = `TLZ-F2-${S}`
+  const P1 = `TLZ POP ${S}`
+  let f1, f2, p1
+  beforeAll(async () => {
+    f1 = (await prisma.fiber.create({ data: { name: F1, coreCount: 2, zoneId: Z1, createdById: 'test-admin' } })).id
+    f2 = (await prisma.fiber.create({ data: { name: F2, coreCount: 2, zoneId: Z2, createdById: 'test-admin' } })).id
+    p1 = (
+      await prisma.pop.create({
+        data: { name: P1, latitude: 18.5, longitude: 73.8, createdById: 'test-admin', zones: { connect: [{ id: Z1 }] } },
+      })
+    ).id
+  })
+  afterAll(async () => {
+    await prisma.fiber.deleteMany({ where: { id: { in: [f1, f2] } } })
+    await prisma.pop.deleteMany({ where: { id: p1 } })
+  })
+
+  it('sees fibres and POPs in their zones only', async () => {
+    const fibers = idsOf(await request(app).get('/api/v1/fibers').set(auth(U.tl)))
+    expect(fibers).toContain(f1)
+    expect(fibers).not.toContain(f2)
+    expect(idsOf(await request(app).get('/api/v1/pops').set(auth(U.tl)))).toContain(p1)
+    expect((await request(app).get(`/api/v1/fibers/${f2}`).set(auth(U.tl))).status).toBe(404)
+  })
+
+  it('a TL with no zones sees no network at all', async () => {
+    await prisma.user.update({ where: { id: U.tl2 }, data: { assignedZones: { set: [] } } })
+    expect(idsOf(await request(app).get('/api/v1/fibers').set(auth(U.tl2)))).not.toContain(f1)
+    await prisma.user.update({ where: { id: U.tl2 }, data: { assignedZones: { set: [{ id: Z1 }] } } })
+  })
+
+  it('cannot write (403)', async () => {
+    expect((await request(app).post('/api/v1/fibers').set(auth(U.tl)).send({ name: 'x', coreCount: 2 })).status).toBe(403)
+  })
+
+  it('GET /zones lists only their own zones', async () => {
+    const res = await request(app).get('/api/v1/zones').set(auth(U.tl))
+    expect(res.status).toBe(200)
+    expect(res.body.data.map((z) => z.id)).toEqual([Z1])
+  })
+})
+
+describe('admin sets a TL zone through the Users screen', () => {
+  it('PATCH /users/:id stores zoneIds for a TEAM_LEADER', async () => {
+    const res = await request(app).patch(`/api/v1/users/${U.tl2}`).set(auth('test-admin')).send({ zoneIds: [Z1, Z2] })
+    expect(res.status).toBe(200)
+    expect(res.body.data.assignedZones.map((z) => z.id).sort()).toEqual([Z1, Z2].sort())
+    await prisma.user.update({ where: { id: U.tl2 }, data: { assignedZones: { set: [{ id: Z1 }] } } })
+  })
+})

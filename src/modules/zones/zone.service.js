@@ -4,13 +4,14 @@ import { ApiError } from '../../lib/api-error.js'
 export function createZoneService({ zoneRepository }) {
   return {
     async listZones(actor) {
-      if (actor?.role === 'SURVEYOR') return zoneRepository.listAssigned(actor.id)
+      // Surveyors and team leaders see the zones they were given; others all.
+      if (['SURVEYOR', 'TEAM_LEADER'].includes(actor?.role)) return zoneRepository.listAssigned(actor.id)
       return zoneRepository.list()
     },
 
     async listZonesPaged({ page, pageSize, search }, actor) {
       const where = {
-        ...(actor?.role === 'SURVEYOR' && { assignedUsers: { some: { id: actor.id } } }),
+        ...(['SURVEYOR', 'TEAM_LEADER'].includes(actor?.role) && { assignedUsers: { some: { id: actor.id } } }),
         ...(search && {
           OR: [
             { name: { contains: search, mode: 'insensitive' } },
