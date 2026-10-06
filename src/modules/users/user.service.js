@@ -354,11 +354,20 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
         data.teamLeaderId = h.teamLeaderId
       }
 
-      // zoneIds replaces the full assignment set; omitting it leaves it unchanged.
+      // zoneIds replaces the full assignment set; omitting it leaves it unchanged
+      // — except that leftover zones never become access nobody chose to give:
+      // a role change, or a team leader moving to another manager, clears them
+      // unless new ones are sent with it (spec 2026-10-06 review).
       if (zoneIds !== undefined) {
         const targetRole = data.role ?? current.role
         const assignedZones = await zoneAssignment(zoneIds, targetRole, 'set')
         if (assignedZones) data.assignedZones = assignedZones
+      } else {
+        const tlMoved =
+          (data.role ?? current.role) === 'TEAM_LEADER' &&
+          data.managerId !== undefined &&
+          data.managerId !== current.managerId
+        if (roleChanged || tlMoved) data.assignedZones = { set: [] }
       }
 
       // pincodes replaces the agent's full set; omitting it leaves it as-is.

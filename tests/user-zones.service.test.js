@@ -84,4 +84,46 @@ describe('user zone assignment', () => {
     const [, , data] = deps.calls.find(([op]) => op === 'update')
     expect(data.assignedZones).toBeUndefined()
   })
+
+  // Leftover zones must never turn into access nobody chose to give (review of
+  // spec 2026-10-06): a surveyor made a team leader would otherwise work their
+  // old survey zones, and a TL moved to another manager would keep the zones
+  // the old manager gave.
+  it('a role change with no zoneIds clears the old zones', async () => {
+    const deps = fakeRepos({ users: [{ id: 'u1', email: 's@isp.local', role: 'SURVEYOR' }] })
+    await createUserService(deps).updateUser('u1', { role: 'MANAGER' })
+    const [, , data] = deps.calls.find(([op]) => op === 'update')
+    expect(data.assignedZones).toEqual({ set: [] })
+  })
+
+  it('a role change that sends zoneIds keeps exactly those', async () => {
+    const deps = fakeRepos({ users: [{ id: 'u1', email: 's@isp.local', role: 'SURVEYOR' }] })
+    await createUserService(deps).updateUser('u1', { role: 'TEAM_LEADER', zoneIds: ['z2'], managerId: null })
+    const [, , data] = deps.calls.find(([op]) => op === 'update')
+    expect(data.assignedZones).toEqual({ set: [{ id: 'z2' }] })
+  })
+
+  it("a team leader moved to another manager loses the old manager's zones", async () => {
+    const deps = fakeRepos({
+      users: [
+        { id: 'tl', email: 't@isp.local', role: 'TEAM_LEADER', managerId: 'm1' },
+        { id: 'm2', email: 'm2@isp.local', role: 'SALES_MANAGER' },
+      ],
+    })
+    await createUserService(deps).updateUser('tl', { managerId: 'm2' })
+    const [, , data] = deps.calls.find(([op]) => op === 'update')
+    expect(data.assignedZones).toEqual({ set: [] })
+  })
+
+  it("a team leader edited without a manager change keeps their zones", async () => {
+    const deps = fakeRepos({
+      users: [
+        { id: 'tl', email: 't@isp.local', role: 'TEAM_LEADER', managerId: 'm1' },
+        { id: 'm1', email: 'm1@isp.local', role: 'SALES_MANAGER' },
+      ],
+    })
+    await createUserService(deps).updateUser('tl', { name: 'New', managerId: 'm1' })
+    const [, , data] = deps.calls.find(([op]) => op === 'update')
+    expect(data.assignedZones).toBeUndefined()
+  })
 })
