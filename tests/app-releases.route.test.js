@@ -30,7 +30,13 @@ describe('app releases routes', () => {
   })
 
   it('refuses to register a release whose APK was never uploaded', async () => {
-    const res = await request(app).post('/api/v1/app-releases').set(as('test-admin', 'ADMIN')).send({ version: '987.6.5' })
+    const res = await request(app).post('/api/v1/app-releases').set(as('test-admin', 'ADMIN')).send({ version: '987.6.5', apkKey: 'app/partner-987.6.5-zz.apk' })
     expect([400, 501]).toContain(res.status) // 400 on R2 (missing object); local driver can't host APKs
+  })
+
+  it('requires the upload key and bounds the version length', async () => {
+    const admin = as('test-admin', 'ADMIN')
+    expect((await request(app).post('/api/v1/app-releases').set(admin).send({ version: '987.6.5' })).status).toBe(400)
+    expect((await request(app).post('/api/v1/app-releases').set(admin).send({ version: '9'.repeat(30), apkKey: 'app/x.apk' })).status).toBe(400)
   })
 })

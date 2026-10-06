@@ -1,8 +1,8 @@
+import { randomUUID } from 'node:crypto'
 import { ApiError } from '../../lib/api-error.js'
 import { compareSemver, isSemver } from '../../lib/semver.js'
 
 export const APK_CONTENT_TYPE = 'application/vnd.android.package-archive'
-const keyFor = (version) => `app/partner-${version}.apk`
 const NO_RELEASE = { latestVersion: null, apkUrl: null, notes: null }
 
 /**
@@ -38,14 +38,21 @@ export function createAppReleaseService({ repo, storage }) {
     async uploadUrl(version) {
       mustBeVersion(version)
       if (await repo.findByVersion(version)) throw ApiError.conflict(`Version ${version} is already released`)
-      const apkKey = keyFor(version)
+      const apkKey = `app/partner-${version}-${randomUUID()}.apk`
       return { uploadUrl: await storage.uploadUrl({ key: apkKey, contentType: APK_CONTENT_TYPE }), apkKey, contentType: APK_CONTENT_TYPE }
     },
 
-    async register({ version, notes }, actor) {
+    async register({ version, apkKey, notes }, actor) {
       mustBeVersion(version)
       if (await repo.findByVersion(version)) throw ApiError.conflict(`Version ${version} is already released`)
-      const apkKey = keyFor(version)
+      const prefix = `app/partner-${version}-`
+      const ownKey =
+        typeof apkKey === 'string' &&
+        apkKey.startsWith(prefix) &&
+        apkKey.endsWith('.apk') &&
+        !apkKey.slice('app/'.length).includes('/') &&
+        !apkKey.includes('..')
+      if (!ownKey) throw ApiError.badRequest('That upload does not belong to this version')
       if (!(await storage.exists({ key: apkKey }))) throw ApiError.badRequest('Upload the APK first')
       return repo.create({ version, apkKey, notes: notes?.trim() || null, createdById: actor.id })
     },

@@ -32,16 +32,24 @@ describe('app release service', () => {
 
   it('presigns an upload only for a new, valid version', async () => {
     const { svc } = make({ releases: [rel('1.1.0', '2026-10-06')] })
-    expect(await svc.uploadUrl('1.2.0')).toEqual({ uploadUrl: 'https://put/app/partner-1.2.0.apk', apkKey: 'app/partner-1.2.0.apk', contentType: APK_CONTENT_TYPE })
+    const up = await svc.uploadUrl('1.2.0')
+    expect(up.apkKey).toMatch(/^app\/partner-1\.2\.0-[0-9a-f-]{36}\.apk$/)
+    expect(up).toEqual({ uploadUrl: `https://put/${up.apkKey}`, apkKey: up.apkKey, contentType: APK_CONTENT_TYPE })
+    expect((await svc.uploadUrl('1.2.0')).apkKey).not.toBe(up.apkKey)
     await expect(svc.uploadUrl('1.1.0')).rejects.toMatchObject({ status: 409 })
     await expect(svc.uploadUrl('v1.2')).rejects.toMatchObject({ status: 400 })
   })
 
-  it('registers only after the file is in storage', async () => {
-    await expect(make({ exists: false }).svc.register({ version: '1.2.0' }, { id: 'a' })).rejects.toMatchObject({ status: 400 })
-    const { svc, repo } = make()
-    await svc.register({ version: '1.2.0', notes: ' Fixes ' }, { id: 'a' })
-    expect(repo.create).toHaveBeenCalledWith({ version: '1.2.0', apkKey: 'app/partner-1.2.0.apk', notes: 'Fixes', createdById: 'a' })
+  it('registers only a matching key whose file is in storage', async () => {
+    const key = 'app/partner-1.2.0-abc.apk'
+    await expect(make({ exists: false }).svc.register({ version: '1.2.0', apkKey: key }, { id: 'a' })).rejects.toMatchObject({ status: 400 })
+    const { svc, repo, storage } = make()
+    for (const bad of [undefined, 'app/partner-1.3.0-abc.apk', 'app/partner-1.2.0.apk', 'app/partner-1.2.0-x/../../evil.apk', 'app/partner-1.2.0-x/y.apk', 'app/partner-1.2.0-abc.zip']) {
+      await expect(svc.register({ version: '1.2.0', apkKey: bad }, { id: 'a' })).rejects.toMatchObject({ status: 400 })
+    }
+    expect(storage.exists).not.toHaveBeenCalled()
+    await svc.register({ version: '1.2.0', apkKey: key, notes: ' Fixes ' }, { id: 'a' })
+    expect(repo.create).toHaveBeenCalledWith({ version: '1.2.0', apkKey: key, notes: 'Fixes', createdById: 'a' })
   })
 
   it('minimum must be 0.0.0 or a released version', async () => {

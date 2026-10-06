@@ -10,9 +10,9 @@ import { createAppReleaseService } from './app-release.service.js'
 
 const service = createAppReleaseService({ repo: appReleaseRepository, storage: getStorageProvider() })
 
-const versionSchema = z.object({ version: z.string().trim() }).strict()
-const registerSchema = z.object({ version: z.string().trim(), notes: z.string().max(500).optional() }).strict()
-const minimumSchema = z.object({ minimumSupportedVersion: z.string().trim() }).strict()
+const versionSchema = z.object({ version: z.string().trim().max(20) }).strict()
+const registerSchema = z.object({ version: z.string().trim().max(20), apkKey: z.string().max(200), notes: z.string().max(500).optional() }).strict()
+const minimumSchema = z.object({ minimumSupportedVersion: z.string().trim().max(20) }).strict()
 
 const handle = (fn) => async (req, res, next) => {
   try {
