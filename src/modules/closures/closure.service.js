@@ -19,8 +19,57 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
     return splitter
   }
 
+  // A fiber the reader could not open is left out, exactly as a closure's
+  // "fibers through" does; only what the screens need is kept.
+  const visibleFiber = (actor, fiber) =>
+    fiber && canSeeFiber(actor, fiber) ? { id: fiber.id, name: fiber.name, status: fiber.status } : null
+
+  // What a splitter row says wherever it is listed or opened.
+  function splitterSummary(s, actor) {
+    const onFiber = s.points.map((p) => visibleFiber(actor, p.fiber)).find(Boolean) ?? null
+    return {
+      id: s.id,
+      code: s.code,
+      ratio: s.ratio,
+      location: s.location,
+      fiberType: s.fiberType,
+      latitude: s.latitude,
+      longitude: s.longitude,
+      createdAt: s.createdAt,
+      closure: s.closure,
+      inputFiber: visibleFiber(actor, s.inputFiber),
+      onFiber,
+      portsTotal: s.outputs.length,
+      portsUsed: s.outputs.filter((o) => o.toFiberId || o.toBuildingId).length,
+    }
+  }
+
   return {
     listClosures: (actor) => closureRepository.list(closureScope(actor)),
+
+    /** The Splitters page — every splitter in the reader's zones (or their own). */
+    async listSplitters(actor) {
+      const rows = await closureRepository.listSplitters(splitterScope(actor))
+      return rows.map((s) => splitterSummary(s, actor))
+    },
+
+    /** One splitter in full. Out of scope reads exactly like not found. */
+    async getSplitter(id, actor) {
+      const s = await closureRepository.findSplitterDetail(id, splitterScope(actor))
+      if (!s) throw ApiError.notFound('Splitter not found')
+      return {
+        ...splitterSummary(s, actor),
+        createdBy: s.createdBy,
+        outputs: s.outputs.map((o) => ({
+          portNo: o.portNo,
+          label: o.label,
+          // In use even when the reader cannot open the fiber it feeds.
+          used: Boolean(o.toFiberId || o.toBuildingId),
+          toFiber: visibleFiber(actor, o.toFiber),
+          toBuilding: o.toBuilding,
+        })),
+      }
+    },
 
     async getClosure(id, actor) {
       const closure = await mustFind(id, actor)

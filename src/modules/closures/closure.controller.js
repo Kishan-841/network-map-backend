@@ -61,6 +61,22 @@ export const closureController = {
 }
 
 export const splitterController = {
+  async list(req, res, next) {
+    try {
+      res.json({ success: true, data: await closureService.listSplitters(req.user) })
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  async get(req, res, next) {
+    try {
+      res.json({ success: true, data: await closureService.getSplitter(req.params.id, req.user) })
+    } catch (err) {
+      next(err)
+    }
+  },
+
   async update(req, res, next) {
     try {
       res.json({ success: true, data: await closureService.updateSplitter(req.params.id, req.body, req.user) })

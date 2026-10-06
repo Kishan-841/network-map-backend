@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { requireAuth, requireFiberWrite } from '../../middleware/auth.js'
+import { requireAuth, requireRole, requireFiberWrite } from '../../middleware/auth.js'
 import { validateBody } from '../../middleware/validate.js'
 import { audit } from '../system-logs/audit.js'
 import { closureRepository } from './closure.repository.js'
@@ -9,7 +9,12 @@ import { splitterController } from './closure.controller.js'
 export const splitterRoutes = Router()
 
 splitterRoutes.use(requireAuth)
+// Same readers as closures; writing still needs the fiber tick.
+const READ = requireRole('ADMIN', 'MANAGER', 'SURVEYOR', 'SUPERVISOR')
 const WRITE = requireFiberWrite
+
+splitterRoutes.get('/', READ, splitterController.list)
+splitterRoutes.get('/:id', READ, splitterController.get)
 
 splitterRoutes.patch(
   '/:id',

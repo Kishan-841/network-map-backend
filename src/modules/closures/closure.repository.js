@@ -8,6 +8,18 @@ const outputsWithTargets = {
   },
 }
 
+// A fiber as the splitter screens show it — with zoneId/createdById so the
+// service can drop the ones the reader could not open (canSeeFiber).
+const fiberForReader = { id: true, name: true, status: true, zoneId: true, createdById: true }
+
+const splitterReadInclude = {
+  closure: { select: { id: true, code: true } },
+  inputFiber: { select: fiberForReader },
+  // A splitter placed on a line has no closure; the fiber it sits on is its place.
+  points: { select: { fiber: { select: fiberForReader } } },
+  outputs: { select: { portNo: true, toFiberId: true, toBuildingId: true } },
+}
+
 const withDetail = {
   splitters: { include: { outputs: outputsWithTargets } },
   building: true,
@@ -72,6 +84,27 @@ export const closureRepository = {
     })
   },
   deleteSplitter: (id) => prisma.splitter.delete({ where: { id } }),
+
+  /** The Splitters page. `where` is the reader's splitterScope. */
+  listSplitters: (where = {}) =>
+    prisma.splitter.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: splitterReadInclude,
+    }),
+  /** One splitter in full, or null when the reader may not see it. */
+  findSplitterDetail: (id, where = {}) =>
+    prisma.splitter.findFirst({
+      where: { id, ...where },
+      include: {
+        ...splitterReadInclude,
+        outputs: {
+          orderBy: { portNo: 'asc' },
+          include: { toFiber: { select: fiberForReader }, toBuilding: { select: { id: true, buildingName: true } } },
+        },
+        createdBy: { select: { id: true, name: true } },
+      },
+    }),
   updateOutput: (splitterId, portNo, data, tx = prisma) =>
     tx.splitterOutput.update({ where: { splitterId_portNo: { splitterId, portNo } }, data }),
 
