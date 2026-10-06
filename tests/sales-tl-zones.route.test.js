@@ -247,3 +247,16 @@ describe('admin sets a TL zone through the Users screen', () => {
     await prisma.user.update({ where: { id: U.tl2 }, data: { assignedZones: { set: [{ id: Z1 }] } } })
   })
 })
+
+describe('the holder check survives a race (two TLs sharing a zone)', () => {
+  it('reassign refuses when a building is held outside the allowed holders, and changes nothing', async () => {
+    const { salesRepository } = await import('../src/modules/sales/sales.repository.js')
+    // As if tl's check ran before tl2's team took zoneOther: tl's write must
+    // re-check under lock and refuse, not close se2's assignment.
+    await expect(
+      salesRepository.reassign({ buildingIds: [B.zoneOther], assignedToId: U.se, assignedById: U.tl, allowedHolderIds: [U.tl, U.se] }),
+    ).rejects.toMatchObject({ status: 400 })
+    const active = await prisma.buildingAssignment.findMany({ where: { buildingId: B.zoneOther, status: 'ACTIVE' } })
+    expect(active.map((a) => a.assignedToId)).toEqual([U.se2])
+  })
+})

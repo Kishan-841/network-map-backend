@@ -157,7 +157,9 @@ export function createSalesService({ repo = salesRepository, storage = getStorag
         }
       }
 
-      await repo.reassign({ buildingIds: ids, assignedToId, assignedById: actor.id })
+      // A team leader's holder check is repeated under lock inside the write.
+      const allowedHolderIds = REGISTRY_ASSIGNERS.includes(actor.role) ? undefined : await scopeIdsFor(actor)
+      await repo.reassign({ buildingIds: ids, assignedToId, assignedById: actor.id, allowedHolderIds })
       return { count: ids.length, assignedToId }
     },
 
