@@ -148,3 +148,49 @@ describe('assigning', () => {
     expect((await assign(U.mgr, [B.outside], U.se)).status).toBe(200)
   })
 })
+
+describe('a manager sets team-leader zones', () => {
+  const put = (who, tl, zoneIds) =>
+    request(app).put(`/api/v1/sales/team-leaders/${tl}/zones`).set(auth(who)).send({ zoneIds })
+
+  it("lists only the manager's own TLs, with their zones", async () => {
+    const res = await request(app).get('/api/v1/sales/team-leaders').set(auth(U.mgr))
+    expect(res.status).toBe(200)
+    const ids = res.body.data.map((u) => u.id)
+    expect(ids).toContain(U.tl)
+    expect(ids).not.toContain(U.tl2)
+    expect(res.body.data.find((u) => u.id === U.tl).assignedZones.map((z) => z.id)).toEqual([Z1])
+  })
+
+  it("replaces their own TL's zones (duplicates tolerated)", async () => {
+    const res = await put(U.mgr, U.tl, [Z1, Z2, Z2])
+    expect(res.status).toBe(200)
+    expect(res.body.data.assignedZones.map((z) => z.id).sort()).toEqual([Z1, Z2].sort())
+    // The pool follows at once: B.outside (Z2) is now in.
+    expect(idsOf(await request(app).get('/api/v1/sales/buildings').set(auth(U.tl)))).toContain(B.outside)
+    await put(U.mgr, U.tl, [Z1])
+  })
+
+  it("another manager's TL is a 404, and nothing changes", async () => {
+    expect((await put(U.mgr, U.tl2, [Z2])).status).toBe(404)
+    const tl2 = await prisma.user.findUnique({ where: { id: U.tl2 }, include: { assignedZones: true } })
+    expect(tl2.assignedZones.map((z) => z.id)).toEqual([Z1])
+  })
+
+  it('a non-TL target (an executive) is a 404', async () => {
+    expect((await put(U.mgr, U.se, [Z1])).status).toBe(404)
+  })
+
+  it('an unknown zone is a 400', async () => {
+    expect((await put(U.mgr, U.tl, ['nope'])).status).toBe(400)
+  })
+
+  it('a TL or executive may not set zones (403)', async () => {
+    expect((await put(U.tl, U.tl, [])).status).toBe(403)
+    expect((await request(app).get('/api/v1/sales/team-leaders').set(auth(U.se))).status).toBe(403)
+  })
+
+  it("an admin may set any TL's zones", async () => {
+    expect((await put('test-admin', U.tl2, [Z1])).status).toBe(200)
+  })
+})

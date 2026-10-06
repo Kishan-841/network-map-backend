@@ -50,6 +50,25 @@ export const salesRepository = {
     })
   },
 
+  // The team leaders whose zones the actor may set: a manager's own, or every
+  // one for an admin. Zones included, for the Team zones page.
+  teamLeadersFor: (actor) =>
+    prisma.user.findMany({
+      where: { role: 'TEAM_LEADER', ...(actor.role === 'ADMIN' ? {} : { managerId: actor.id }) },
+      select: { id: true, name: true, email: true, isActive: true, managerId: true, assignedZones: { select: { id: true, name: true }, orderBy: { name: 'asc' } } },
+      orderBy: { name: 'asc' },
+    }),
+
+  countZones: (ids) => prisma.zone.count({ where: { id: { in: ids } } }),
+
+  // REPLACES the user's zones.
+  setUserZones: (id, zoneIds) =>
+    prisma.user.update({
+      where: { id },
+      data: { assignedZones: { set: zoneIds.map((zoneId) => ({ id: zoneId })) } },
+      select: { id: true, name: true, email: true, isActive: true, managerId: true, assignedZones: { select: { id: true, name: true }, orderBy: { name: 'asc' } } },
+    }),
+
   idsUnderManager: (managerId) =>
     prisma.user.findMany({ where: { managerId }, select: { id: true } }).then((r) => r.map((u) => u.id)),
 

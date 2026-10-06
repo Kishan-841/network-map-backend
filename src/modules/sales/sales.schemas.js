@@ -102,3 +102,8 @@ export const activityQuerySchema = z.object({
 })
 
 export const dashboardQuerySchema = activityQuerySchema
+
+// Replace a team leader's zones. Empty is allowed (takes every zone away).
+export const teamLeaderZonesSchema = z.object({
+  zoneIds: z.array(z.string().min(1)).max(200),
+})

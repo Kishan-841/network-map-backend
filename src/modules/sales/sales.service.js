@@ -44,6 +44,26 @@ export function createSalesService({ repo = salesRepository, storage = getStorag
       return repo.teamMembers(actor)
     },
 
+    /** The TLs whose zones the actor may set (Team zones page). */
+    async listTeamLeaders(actor) {
+      if (!REGISTRY_ASSIGNERS.includes(actor.role)) throw ApiError.forbidden()
+      return repo.teamLeadersFor(actor)
+    },
+
+    /**
+     * Replace a team leader's zones. A manager may set only their own TLs; an
+     * admin any TL. Anyone else's TL — or a user who is not a TL — is a 404.
+     */
+    async setTeamLeaderZones(teamLeaderId, { zoneIds }, actor) {
+      if (!REGISTRY_ASSIGNERS.includes(actor.role)) throw ApiError.forbidden()
+      const target = await repo.findUser(teamLeaderId)
+      const mine = actor.role === 'ADMIN' || target?.managerId === actor.id
+      if (!target || target.role !== 'TEAM_LEADER' || !mine) throw ApiError.notFound('Team leader not found')
+      const ids = [...new Set(zoneIds)]
+      if ((await repo.countZones(ids)) !== ids.length) throw ApiError.badRequest('One or more zones do not exist')
+      return repo.setUserZones(teamLeaderId, ids)
+    },
+
     /** The actor's in-scope buildings — the SE "my buildings" list / the pool. */
     async listMyBuildings(actor) {
       const ids = await scopeIdsFor(actor)
