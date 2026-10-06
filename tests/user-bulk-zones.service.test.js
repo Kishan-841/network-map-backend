@@ -71,7 +71,7 @@ describe('bulkAssignZones', () => {
     expect(result.updated).toHaveLength(0)
     expect(result.skipped).toEqual([
       { email: 'ghost@isp.local', reason: 'user not found' },
-      { email: 'mgr@isp.local', reason: 'not a surveyor' },
+      { email: 'mgr@isp.local', reason: 'not a surveyor or team leader' },
       { email: 'surv@isp.local', reason: "zone(s) not found: Nope Zone" },
     ])
     expect(result.total).toBe(3)

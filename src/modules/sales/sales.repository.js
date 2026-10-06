@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js'
+import { ApiError } from '../../lib/api-error.js'
 
 // What a scoped building row returns to the field team — enough to list and map
 // it, plus its current holder. Never the whole registry shape.
@@ -49,6 +50,25 @@ export const salesRepository = {
       orderBy: [{ role: 'asc' }, { name: 'asc' }],
     })
   },
+
+  // The team leaders whose zones the actor may set: a manager's own, or every
+  // one for an admin. Zones included, for the Team zones page.
+  teamLeadersFor: (actor) =>
+    prisma.user.findMany({
+      where: { role: 'TEAM_LEADER', ...(actor.role === 'ADMIN' ? {} : { managerId: actor.id }) },
+      select: { id: true, name: true, email: true, isActive: true, managerId: true, assignedZones: { select: { id: true, name: true }, orderBy: { name: 'asc' } } },
+      orderBy: { name: 'asc' },
+    }),
+
+  countZones: (ids) => prisma.zone.count({ where: { id: { in: ids } } }),
+
+  // REPLACES the user's zones.
+  setUserZones: (id, zoneIds) =>
+    prisma.user.update({
+      where: { id },
+      data: { assignedZones: { set: zoneIds.map((zoneId) => ({ id: zoneId })) } },
+      select: { id: true, name: true, email: true, isActive: true, managerId: true, assignedZones: { select: { id: true, name: true }, orderBy: { name: 'asc' } } },
+    }),
 
   idsUnderManager: (managerId) =>
     prisma.user.findMany({ where: { managerId }, select: { id: true } }).then((r) => r.map((u) => u.id)),
@@ -198,17 +218,30 @@ export const salesRepository = {
 
   // Close every ACTIVE assignment for these buildings, then open a fresh one —
   // in one transaction, so history is preserved and a building never has two
-  // ACTIVE holders.
-  reassign: ({ buildingIds, assignedToId, assignedById }) =>
-    prisma.$transaction([
-      prisma.buildingAssignment.updateMany({
+  // ACTIVE holders. With `allowedHolderIds` (a team leader assigning), the
+  // building rows are locked and the current holders re-checked inside the
+  // transaction, so two leaders sharing a zone cannot both take the same
+  // building in the gap between their checks and their writes.
+  reassign: ({ buildingIds, assignedToId, assignedById, allowedHolderIds }) =>
+    prisma.$transaction(async (tx) => {
+      if (allowedHolderIds) {
+        await tx.$queryRaw`SELECT id FROM "Building" WHERE id = ANY(${buildingIds}) FOR UPDATE`
+        const held = await tx.buildingAssignment.findMany({
+          where: { buildingId: { in: buildingIds }, status: 'ACTIVE', assignedToId: { notIn: allowedHolderIds } },
+          select: { building: { select: { buildingName: true } }, assignedTo: { select: { name: true } } },
+        })
+        if (held.length) {
+          throw ApiError.badRequest(`${held[0].building.buildingName} is held by ${held[0].assignedTo.name}`)
+        }
+      }
+      await tx.buildingAssignment.updateMany({
         where: { buildingId: { in: buildingIds }, status: 'ACTIVE' },
         data: { status: 'REASSIGNED', endedAt: new Date() },
-      }),
-      prisma.buildingAssignment.createMany({
+      })
+      await tx.buildingAssignment.createMany({
         data: buildingIds.map((buildingId) => ({ buildingId, assignedToId, assignedById })),
-      }),
-    ]),
+      })
+    }),
 
   // Daily morning meetings — immutable once logged; one per team leader per day.
   existingMeeting: (teamLeaderId, meetingDate) =>

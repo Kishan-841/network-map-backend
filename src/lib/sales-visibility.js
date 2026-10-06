@@ -40,3 +40,15 @@ export const buildingScopeWhere = (ids) => ({
 
 /** May this actor assign / distribute buildings at all? */
 export const canAssign = (role) => ['ADMIN', 'SALES_MANAGER', 'TEAM_LEADER'].includes(role)
+
+/**
+ * The buildings a sales user may work. Everyone works what their scope holds;
+ * a TEAM_LEADER also works every building in the zones their manager gave them
+ * (spec 2026-10-06-tl-zone-assignment). Zones on any other role are ignored.
+ * With no zones it is exactly buildingScopeWhere, so it fails closed the same way.
+ */
+export function poolWhere(actor, ids) {
+  const held = buildingScopeWhere(ids)
+  const zoneIds = actor?.role === 'TEAM_LEADER' ? (actor.zoneIds ?? []) : []
+  return zoneIds.length ? { OR: [{ zoneId: { in: zoneIds } }, held] } : held
+}

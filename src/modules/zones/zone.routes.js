@@ -19,8 +19,9 @@ zoneRoutes.use(requireAuth)
 zoneRoutes.get(
   '/',
   // SALES_MANAGER reads it to filter the registry by zone when assigning to
-  // their team (read-only; zone writes stay ADMIN/MANAGER).
-  requireRole('ADMIN', 'MANAGER', 'SURVEYOR', 'SUPERVISOR', 'SALES_MANAGER'),
+  // their team (read-only; zone writes stay ADMIN/MANAGER). A TEAM_LEADER reads
+  // their own zones' outlines for the Sales map.
+  requireRole('ADMIN', 'MANAGER', 'SURVEYOR', 'SUPERVISOR', 'SALES_MANAGER', 'TEAM_LEADER'),
   validateQuery(listZonesQuerySchema),
   zoneController.list,
 )

@@ -68,8 +68,7 @@ describe('sales photos are SAVED in their permanent form', () => {
       storage: store,
       repo: {
         openVisitFor: vi.fn(async () => null),
-        assignedInScope: vi.fn(async (ids) => new Set(ids)),
-        buildingBasic: vi.fn(async (id) => ({ id })),
+        listBuildings: vi.fn(async () => [{ id: 'b1', buildingName: 'B1', formattedAddress: 'Road' }]),
         createVisit,
       },
     })

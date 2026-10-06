@@ -10,6 +10,24 @@ export const salesController = {
     }
   },
 
+  async teamLeaders(req, res, next) {
+    try {
+      const data = await salesService.listTeamLeaders(req.user)
+      res.json({ success: true, data })
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  async setTeamLeaderZones(req, res, next) {
+    try {
+      const data = await salesService.setTeamLeaderZones(req.params.id, req.body, req.user)
+      res.json({ success: true, data })
+    } catch (err) {
+      next(err)
+    }
+  },
+
   async myBuildings(req, res, next) {
     try {
       const data = await salesService.listMyBuildings(req.user)

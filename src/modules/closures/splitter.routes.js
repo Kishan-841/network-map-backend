@@ -10,7 +10,9 @@ export const splitterRoutes = Router()
 
 splitterRoutes.use(requireAuth)
 // Same readers as closures; writing still needs the fiber tick.
-const READ = requireRole('ADMIN', 'MANAGER', 'SURVEYOR', 'SUPERVISOR')
+// TEAM_LEADER reads (never writes) the network in the zones their manager gave
+// them; the zone scope in lib/visibility.js does the filtering.
+const READ = requireRole('ADMIN', 'MANAGER', 'SURVEYOR', 'SUPERVISOR', 'TEAM_LEADER')
 const WRITE = requireFiberWrite
 
 splitterRoutes.get('/', READ, splitterController.list)

@@ -14,7 +14,9 @@ import { fiberController } from './fiber.controller.js'
 export const fiberRoutes = Router()
 
 fiberRoutes.use(requireAuth)
-const READ = requireRole('ADMIN', 'MANAGER', 'SURVEYOR', 'SUPERVISOR')
+// TEAM_LEADER reads (never writes) the network in the zones their manager gave
+// them; the zone scope in lib/visibility.js does the filtering.
+const READ = requireRole('ADMIN', 'MANAGER', 'SURVEYOR', 'SUPERVISOR', 'TEAM_LEADER')
 const WRITE = requireFiberWrite
 
 fiberRoutes.get('/', READ, fiberController.list)

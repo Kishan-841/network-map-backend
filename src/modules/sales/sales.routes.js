@@ -15,6 +15,7 @@ import {
   dashboardQuerySchema,
   createMeetingSchema,
   meetingsQuerySchema,
+  teamLeaderZonesSchema,
 } from './sales.schemas.js'
 import { salesController } from './sales.controller.js'
 
@@ -34,6 +35,21 @@ salesRoutes.get('/buildings', SALES_ANY, salesController.myBuildings)
 salesRoutes.get('/map-buildings', SALES_ANY, salesController.mapBuildings)
 
 salesRoutes.get('/team', ASSIGNER, salesController.team)
+
+// Team-leader zones: a manager gives their TLs zones to work (spec 2026-10-06).
+salesRoutes.get('/team-leaders', requireRole('ADMIN', 'SALES_MANAGER'), salesController.teamLeaders)
+salesRoutes.put(
+  '/team-leaders/:id/zones',
+  requireRole('ADMIN', 'SALES_MANAGER'),
+  audit('User', 'TeamLeaderZones', {
+    describe: (req, _old, body) =>
+      body?.data
+        ? `Zones for team leader '${body.data.email}' set (${body.data.assignedZones.length})`
+        : 'Team leader zones set',
+  }),
+  validateBody(teamLeaderZonesSchema),
+  salesController.setTeamLeaderZones,
+)
 
 // Registry search to assign from — a manager (or admin) only; a team leader
 // distributes their own pool instead.

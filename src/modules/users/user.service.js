@@ -5,6 +5,8 @@ import { toPublicUser } from '../auth/auth.service.js'
 import { BUILDING_EDIT_ROLES, FIBER_ACCESS_ROLES } from '../../middleware/auth.js'
 
 const BCRYPT_ROUNDS = 10
+// The roles that work by zone: surveyors, and team leaders (spec 2026-10-06).
+const ZONE_ROLES = ['SURVEYOR', 'TEAM_LEADER']
 
 // Accepts the enum values and the friendly sheet labels, case-insensitive.
 const BULK_ROLE_ALIASES = {
@@ -68,9 +70,9 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
   }
 
   // zoneIds -> Prisma relation op, or undefined when not applicable
-  // (assignments are stored only for surveyors).
+  // (assignments are stored only for surveyors and team leaders).
   async function zoneAssignment(zoneIds, role, op) {
-    if (zoneIds === undefined || role !== 'SURVEYOR') return undefined
+    if (zoneIds === undefined || !ZONE_ROLES.includes(role)) return undefined
     // Dedupe first: countByIds is a distinct-row count, so a repeated id
     // (UI double-click / merged sheet) would otherwise fail the length check.
     const uniqueIds = [...new Set(zoneIds)]
@@ -270,8 +272,8 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
           skipped.push({ email, reason: 'user not found' })
           continue
         }
-        if (user.role !== 'SURVEYOR') {
-          skipped.push({ email, reason: 'not a surveyor' })
+        if (!ZONE_ROLES.includes(user.role)) {
+          skipped.push({ email, reason: 'not a surveyor or team leader' })
           continue
         }
         const missing = zoneNames.filter(
@@ -352,11 +354,20 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
         data.teamLeaderId = h.teamLeaderId
       }
 
-      // zoneIds replaces the full assignment set; omitting it leaves it unchanged.
+      // zoneIds replaces the full assignment set; omitting it leaves it unchanged
+      // — except that leftover zones never become access nobody chose to give:
+      // a role change, or a team leader moving to another manager, clears them
+      // unless new ones are sent with it (spec 2026-10-06 review).
       if (zoneIds !== undefined) {
         const targetRole = data.role ?? current.role
         const assignedZones = await zoneAssignment(zoneIds, targetRole, 'set')
         if (assignedZones) data.assignedZones = assignedZones
+      } else {
+        const tlMoved =
+          (data.role ?? current.role) === 'TEAM_LEADER' &&
+          data.managerId !== undefined &&
+          data.managerId !== current.managerId
+        if (roleChanged || tlMoved) data.assignedZones = { set: [] }
       }
 
       // pincodes replaces the agent's full set; omitting it leaves it as-is.
