@@ -78,3 +78,13 @@ export const ifscLimiter = rateLimit({
   skip: () => process.env.NODE_ENV === 'test',
   handler: (req, res) => json(res, 'Too many lookups. Try again in a few minutes.'),
 })
+
+/** The partner app asks "is there a newer APK?" on every open, before sign-in. */
+export const appVersionLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test',
+  handler: (req, res) => json(res, 'Too many requests. Try again in a few minutes.'),
+})

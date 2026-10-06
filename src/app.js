@@ -20,6 +20,7 @@ import { salesRoutes } from './modules/sales/sales.routes.js'
 import { closureRoutes } from './modules/closures/closure.routes.js'
 import { splitterRoutes } from './modules/closures/splitter.routes.js'
 import { fiberRoutes } from './modules/fibers/fiber.routes.js'
+import { appVersionRoutes, appReleaseRoutes } from './modules/app-releases/app-release.routes.js'
 import { partnerAuthRoutes } from './modules/partner-auth/partner-auth.routes.js'
 import { inviteRoutes } from './modules/partner-invites/invite.routes.js'
 import { partnerSelfRoutes, partnerAdminRoutes } from './modules/partners/partner.routes.js'
@@ -78,6 +79,8 @@ export function createApp() {
   app.use('/api/v1/zones', zoneRoutes)
   app.use('/api/v1/buildings', buildingRoutes)
   app.use('/api/v1/sales', salesRoutes)
+  app.use('/api/v1/app-version', appVersionRoutes)
+  app.use('/api/v1/app-releases', appReleaseRoutes)
   // Uploads are user-supplied: block MIME sniffing and script execution so a
   // crafted file can never run in the app's origin (images still render inline).
   app.use(
