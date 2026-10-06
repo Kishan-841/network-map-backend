@@ -19,6 +19,7 @@ import { createApprovalBypassService } from './approval-bypass.service.js'
 import { createDirectPartnerService } from './direct-add.service.js'
 import { partnerAuthRepository } from '../partner-auth/partner-auth.repository.js'
 import { createIfscLookup } from '../../lib/ifsc.js'
+import { PARTNER_APPROVERS, PARTNER_STAFF, ownPartnersOnly } from '../../lib/partner-access.js'
 
 const service = createPartnerService({
   partnerRepository,
@@ -149,14 +150,15 @@ partnerSelfRoutes.get('/ifsc/:code', ifscLimiter, async (req, res, next) => {
 // Staff view: the approval queue and the roster.
 // ---------------------------------------------------------------------------
 export const partnerAdminRoutes = Router()
-partnerAdminRoutes.use(requireAuth, requireRole('ADMIN', 'PARTNER_MANAGER'))
+partnerAdminRoutes.use(requireAuth, requireRole(...PARTNER_STAFF))
 
 partnerAdminRoutes.get('/', async (req, res, next) => {
   try {
     const where = {
       ...(req.query.status && { status: req.query.status }),
-      // An employee sees only the partners they recruited.
-      ...(req.user.role !== 'ADMIN' && { onboardedById: req.user.id }),
+      // A partner manager sees only the partners they recruited; admin and
+      // sales manager see them all. Spread last, so a query param can't widen it.
+      ...(ownPartnersOnly(req.user) && { onboardedById: req.user.id }),
     }
     res.json({ success: true, data: await partnerRepository.listWithTotals(where) })
   } catch (err) {
@@ -189,7 +191,7 @@ partnerAdminRoutes.post(
 
 // IFSC lookup for the admin's bank form — the same cached lookup the partner
 // route uses. Registered before '/:id/…' routes; ADMIN only like the form.
-partnerAdminRoutes.get('/ifsc/:code', requireRole('ADMIN'), ifscLimiter, async (req, res, next) => {
+partnerAdminRoutes.get('/ifsc/:code', requireRole(...PARTNER_APPROVERS), ifscLimiter, async (req, res, next) => {
   try {
     res.json({ success: true, data: await lookupIfsc(req.params.code) })
   } catch (err) {
@@ -197,7 +199,7 @@ partnerAdminRoutes.get('/ifsc/:code', requireRole('ADMIN'), ifscLimiter, async (
   }
 })
 
-partnerAdminRoutes.get('/:id/documents', requireRole('ADMIN'), async (req, res, next) => {
+partnerAdminRoutes.get('/:id/documents', requireRole(...PARTNER_APPROVERS), async (req, res, next) => {
   try {
     res.json({ success: true, data: await service.listDocuments(req.params.id) })
   } catch (err) {
@@ -207,7 +209,7 @@ partnerAdminRoutes.get('/:id/documents', requireRole('ADMIN'), async (req, res, 
 
 // Bank details: ADMIN only — the person approving, and the one person who may
 // change them once locked. Partner managers never see them.
-partnerAdminRoutes.get('/:id/bank-account', requireRole('ADMIN'), async (req, res, next) => {
+partnerAdminRoutes.get('/:id/bank-account', requireRole(...PARTNER_APPROVERS), async (req, res, next) => {
   try {
     res.json({ success: true, data: await bank.getFull(req.params.id) })
   } catch (err) {
@@ -217,7 +219,7 @@ partnerAdminRoutes.get('/:id/bank-account', requireRole('ADMIN'), async (req, re
 
 partnerAdminRoutes.put(
   '/:id/bank-account',
-  requireRole('ADMIN'),
+  requireRole(...PARTNER_APPROVERS),
   audit('PartnerBankAccount', 'AdminUpdate', {
     describe: (req) => `Bank details of partner ${req.params.id} changed by an admin`,
     newValue: (req) => redactBankBody(req.body),
@@ -236,7 +238,7 @@ partnerAdminRoutes.put(
 // changes after approval). Same provenance rule as the partner's own upload.
 partnerAdminRoutes.post(
   '/:id/documents',
-  requireRole('ADMIN'),
+  requireRole(...PARTNER_APPROVERS),
   audit('Partner', 'DocumentReplace', { describe: (req) => `Partner ${req.params.id}: ${req.body?.type} replaced by an admin` }),
   validateBody(documentSchema),
   async (req, res, next) => {
@@ -253,7 +255,7 @@ partnerAdminRoutes.post(
 // the one clearing their paperwork, especially once commission is attached.
 partnerAdminRoutes.post(
   '/:id/approve',
-  requireRole('ADMIN'),
+  requireRole(...PARTNER_APPROVERS),
   audit('Partner', 'Approve', { describe: (req) => `Partner ${req.params.id} approved` }),
   async (req, res, next) => {
     try {
@@ -267,7 +269,7 @@ partnerAdminRoutes.post(
 
 partnerAdminRoutes.post(
   '/:id/reject',
-  requireRole('ADMIN'),
+  requireRole(...PARTNER_APPROVERS),
   audit('Partner', 'Reject', { describe: (req) => `Partner ${req.params.id} rejected` }),
   validateBody(rejectSchema),
   async (req, res, next) => {

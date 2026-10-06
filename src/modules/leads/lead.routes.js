@@ -22,6 +22,7 @@ import { rateCardRepository } from '../rate-card/rate-card.repository.js'
 import { notifier } from '../../lib/push/notifier.js'
 import { createLeadMilestones } from './lead-notify.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
+import { PARTNER_STAFF } from '../../lib/partner-access.js'
 
 const earningService = createEarningService({
   earningRepository,
@@ -208,7 +209,7 @@ export const staffLeadRoutes = Router()
 // manager or supervisor oversees the building registry, not other people's
 // customers — a lead carries a member of the public's name and mobile number,
 // so reaching it needs a reason, not just a senior-sounding role.
-staffLeadRoutes.use(requireAuth, requireRole('ADMIN', 'PARTNER_MANAGER'))
+staffLeadRoutes.use(requireAuth, requireRole(...PARTNER_STAFF))
 
 staffLeadRoutes.get('/', async (req, res, next) => {
   try {
@@ -248,8 +249,8 @@ staffLeadRoutes.post(
 staffLeadRoutes.patch(
   '/:id/status',
   // A partner manager works their own partners' leads; the service enforces
-  // which ones those are.
-  requireRole('ADMIN', 'PARTNER_MANAGER'),
+  // which ones those are. Admin and sales manager work every lead.
+  requireRole(...PARTNER_STAFF),
   audit('Lead', 'StatusChange', { describe: (req) => `Lead ${req.params.id} → ${req.body?.status}` }),
   validateBody(statusSchema),
   async (req, res, next) => {

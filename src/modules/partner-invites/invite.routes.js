@@ -5,6 +5,7 @@ import { inviteService } from './invite.service.js'
 import { inviteRepository } from './invite.repository.js'
 import { env } from '../../config/env.js'
 import { ApiError } from '../../lib/api-error.js'
+import { PARTNER_STAFF, ownPartnersOnly } from '../../lib/partner-access.js'
 
 /** Loopback only: http://localhost:3001, http://127.0.0.1:3000, … */
 const LOOPBACK_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/
@@ -35,7 +36,7 @@ export function inviteBaseUrl(req, { nodeEnv = process.env.NODE_ENV } = {}) {
 
 export const inviteRoutes = Router()
 
-const MANAGES_PARTNERS = ['ADMIN', 'PARTNER_MANAGER']
+const MANAGES_PARTNERS = PARTNER_STAFF
 
 // Public: the join page resolves a token to show who invited the partner.
 // Returns the employee's NAME only — never the invite id or the employee id.
@@ -72,11 +73,10 @@ inviteRoutes.post(
 
 inviteRoutes.get('/', async (req, res, next) => {
   try {
-    // An employee sees their own invites; an admin sees everyone's.
-    const items =
-      req.user.role === 'ADMIN'
-        ? await inviteRepository.listAll()
-        : await inviteRepository.listForEmployee(req.user.id)
+    // A partner manager sees their own invites; admin and sales manager see everyone's.
+    const items = ownPartnersOnly(req.user)
+      ? await inviteRepository.listForEmployee(req.user.id)
+      : await inviteRepository.listAll()
     // The token hash never leaves the server — it is not secret, but it is
     // not useful to a client either, and shipping it invites misuse.
     res.json({
@@ -95,8 +95,8 @@ inviteRoutes.post(
     try {
       const invite = await inviteRepository.findById(req.params.id)
       if (!invite) return next(ApiError.notFound('Invite not found'))
-      // An employee may only revoke their own.
-      if (req.user.role !== 'ADMIN' && invite.employeeId !== req.user.id) {
+      // A partner manager may only revoke their own.
+      if (ownPartnersOnly(req.user) && invite.employeeId !== req.user.id) {
         return next(ApiError.notFound('Invite not found'))
       }
       await inviteRepository.revoke(req.params.id)

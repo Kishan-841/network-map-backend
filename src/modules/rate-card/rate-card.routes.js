@@ -4,6 +4,7 @@ import { requirePartner } from '../../middleware/partner-auth.js'
 import { createRateCardService } from './rate-card.service.js'
 import { rateCardRepository } from './rate-card.repository.js'
 import { FIXED_AMOUNT_BY_TYPE, fixedAmountFor } from '../earnings/commission.js'
+import { PARTNER_STAFF } from '../../lib/partner-access.js'
 
 const service = createRateCardService({ rateCardRepository })
 
@@ -37,7 +38,7 @@ staffRateCardRoutes.get(
   requireAuth,
   // The rate card IS the commission structure — what every partner is paid.
   // Same audience as the rest of the partner network.
-  requireRole('ADMIN', 'PARTNER_MANAGER'),
+  requireRole(...PARTNER_STAFF),
   // So the "Mark converted" preview can show a flat-pay partner's amount.
   serve(() => ({ fixedAmountByType: FIXED_AMOUNT_BY_TYPE })),
 )
