@@ -1,7 +1,7 @@
 import { ApiError } from '../../lib/api-error.js'
 import { salesRepository } from './sales.repository.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
-import { scopedUserIds, buildingScopeWhere, canAssign } from '../../lib/sales-visibility.js'
+import { scopedUserIds, canAssign, poolWhere } from '../../lib/sales-visibility.js'
 
 const SALES_ROLES = ['SALES_MANAGER', 'TEAM_LEADER', 'SALES_EXECUTIVE']
 // May search the whole building registry and assign any building from it; a
@@ -48,7 +48,7 @@ export function createSalesService({ repo = salesRepository, storage = getStorag
     async listMyBuildings(actor) {
       const ids = await scopeIdsFor(actor)
       if (ids !== null && ids.length === 0) return []
-      return repo.listBuildings(buildingScopeWhere(ids))
+      return repo.listBuildings(poolWhere(actor, ids))
     },
 
     /**
@@ -56,8 +56,9 @@ export function createSalesService({ repo = salesRepository, storage = getStorag
      * in the actor's scope, so they may check in there):
      *  - ADMIN / SALES_MANAGER: the WHOLE registry — assigned=true only where the
      *    ACTIVE holder is in their scope (admin: any active holder).
-     *  - TEAM_LEADER / SALES_EXECUTIVE: only the buildings assigned to their
-     *    scope, all assigned=true.
+     *  - TEAM_LEADER: their pool — every building in their zones plus what their
+     *    team holds; SALES_EXECUTIVE: only what is assigned to them. All
+     *    assigned=true.
      * The map click uses `assigned` to choose check-in vs assign.
      */
     async listMapBuildings(actor) {
@@ -71,7 +72,7 @@ export function createSalesService({ repo = salesRepository, storage = getStorag
         return buildings.map((b) => ({ ...b, assigned: inScope(b) }))
       }
       if (ids !== null && ids.length === 0) return []
-      const buildings = await repo.listBuildings(buildingScopeWhere(ids))
+      const buildings = await repo.listBuildings(poolWhere(actor, ids))
       return buildings.map((b) => ({ ...b, assigned: true }))
     },
 
@@ -110,15 +111,29 @@ export function createSalesService({ repo = salesRepository, storage = getStorag
         throw ApiError.badRequest('Assignee must be an active sales user')
       }
       assertTargetInTeam(actor, target)
+      // Team leaders work zones now, not hand-picked buildings (spec 2026-10-06).
+      if (target.role === 'TEAM_LEADER') {
+        throw ApiError.badRequest('Give team leaders zones instead of buildings')
+      }
 
       const ids = [...new Set(buildingIds)]
       if (REGISTRY_ASSIGNERS.includes(actor.role)) {
         if ((await repo.countExisting(ids)) !== ids.length) throw ApiError.badRequest('Some buildings do not exist')
       } else {
-        // A team leader distributes only their own pool.
-        const pool = await repo.assignedInScope(ids, await scopeIdsFor(actor))
-        if (ids.some((id) => !pool.has(id))) {
+        // A team leader distributes only their own pool — their zones plus what
+        // their team holds — and never takes a building another team holds,
+        // even in a zone two leaders share.
+        const scope = await scopeIdsFor(actor)
+        const rows = await repo.listBuildings({ AND: [{ id: { in: ids } }, poolWhere(actor, scope)] })
+        if (rows.length !== ids.length) {
           throw ApiError.badRequest('Some buildings are not in your pool to assign')
+        }
+        const taken = rows.find((b) => {
+          const holder = b.salesAssignments?.[0]
+          return holder && !scope.includes(holder.assignedToId)
+        })
+        if (taken) {
+          throw ApiError.badRequest(`${taken.buildingName} is held by ${taken.salesAssignments[0].assignedTo.name}`)
         }
       }
 
@@ -350,13 +365,12 @@ export function createSalesService({ repo = salesRepository, storage = getStorag
     }
   }
 
-  // A building the actor may act on: it must be in their sales scope. Anything
-  // else is a 404, never a hint that it exists.
+  // A building the actor may act on: it must be in their pool (a TL's zones
+  // count). Anything else is a 404, never a hint that it exists.
   async function assertBuildingInScope(buildingId, actor) {
     const ids = await scopeIdsFor(actor)
-    const inScope = await repo.assignedInScope([buildingId], ids)
-    if (!inScope.has(buildingId)) throw ApiError.notFound('Building not found')
-    const building = await repo.buildingBasic(buildingId)
+    if (ids !== null && ids.length === 0) throw ApiError.notFound('Building not found')
+    const [building] = await repo.listBuildings({ AND: [{ id: buildingId }, poolWhere(actor, ids)] })
     if (!building) throw ApiError.notFound('Building not found')
     return building
   }

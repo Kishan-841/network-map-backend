@@ -77,9 +77,12 @@ describe('field-sales assignment + scope', () => {
     expect(buildingIdsOf(await request(app).get('/api/v1/sales/buildings').set(auth('sales-mgr2')))).not.toContain(B1)
   })
 
-  it('manager distributes to a team leader; leader and manager both see it', async () => {
+  it('a manager cannot hand a building to a team leader (zones instead); a legacy one still shows', async () => {
     const res = await request(app).post('/api/v1/sales/assignments').set(auth('sales-mgr')).send({ buildingIds: [B1], assignedToId: 'sales-tl' })
-    expect(res.status).toBe(200)
+    expect(res.status).toBe(400)
+    // A holding from before zones (spec 2026-10-06, D4) stays in the TL's pool.
+    await prisma.buildingAssignment.updateMany({ where: { buildingId: B1, status: 'ACTIVE' }, data: { status: 'REASSIGNED', endedAt: new Date() } })
+    await prisma.buildingAssignment.create({ data: { buildingId: B1, assignedToId: 'sales-tl', assignedById: 'sales-mgr', status: 'ACTIVE' } })
     expect(buildingIdsOf(await request(app).get('/api/v1/sales/buildings').set(auth('sales-tl')))).toContain(B1)
     expect(buildingIdsOf(await request(app).get('/api/v1/sales/buildings').set(auth('sales-mgr')))).toContain(B1)
   })
@@ -105,7 +108,7 @@ describe('field-sales assignment + scope', () => {
 
   it('a manager may assign ANY registry building, not just their pool', async () => {
     // B2 has never been assigned — a manager can still hand it out.
-    const res = await request(app).post('/api/v1/sales/assignments').set(auth('sales-mgr')).send({ buildingIds: [B2], assignedToId: 'sales-tl' })
+    const res = await request(app).post('/api/v1/sales/assignments').set(auth('sales-mgr')).send({ buildingIds: [B2], assignedToId: 'sales-se1' })
     expect(res.status).toBe(200)
   })
 
