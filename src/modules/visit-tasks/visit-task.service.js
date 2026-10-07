@@ -42,16 +42,40 @@ function parseRow(row, today) {
  * Exact name or email auto-matches. A partial ("contains") match is only ever a
  * candidate for the planner to pick — "Amit" sits inside both "Amit Kumar" and
  * "Amit Shah", so it must never be chosen silently.
+ *
+ * Every name is normalised ONCE here, not once per sheet row: an admin's
+ * preview matches up to 3,000 rows against every coverage building, and
+ * re-normalising them all per row blocked the event loop.
+ * Returns `(text) => { match, candidates }`; candidates keep list order.
  */
-function matchByName(text, items, nameOf, emailOf = () => null) {
-  const n = normalizeName(text)
-  if (!n) return { match: null, candidates: [] }
-  const raw = String(text ?? '').trim().toLowerCase()
-  const exact = items.filter((i) => normalizeName(nameOf(i)) === n || (emailOf(i) && emailOf(i).toLowerCase() === raw))
-  if (exact.length === 1) return { match: exact[0], candidates: [] }
-  if (exact.length > 1) return { match: null, candidates: exact.slice(0, 5) }
-  const loose = items.filter((i) => { const m = normalizeName(nameOf(i)); return m && (m.includes(n) || n.includes(m)) })
-  return { match: null, candidates: loose.slice(0, 5) }
+export function createNameMatcher(items, nameOf, emailOf = () => null) {
+  const norms = items.map((i) => normalizeName(nameOf(i)))
+  const index = (map, key, i) => {
+    if (!key) return
+    if (!map.has(key)) map.set(key, [])
+    map.get(key).push(i)
+  }
+  const byName = new Map()
+  const byEmail = new Map()
+  items.forEach((item, i) => {
+    index(byName, norms[i], i)
+    const email = emailOf(item)
+    index(byEmail, email && email.toLowerCase(), i)
+  })
+  return (text) => {
+    const n = normalizeName(text)
+    if (!n) return { match: null, candidates: [] }
+    const raw = String(text ?? '').trim().toLowerCase()
+    const hits = [...new Set([...(byName.get(n) ?? []), ...(byEmail.get(raw) ?? [])])].sort((a, b) => a - b)
+    if (hits.length === 1) return { match: items[hits[0]], candidates: [] }
+    if (hits.length > 1) return { match: null, candidates: hits.slice(0, 5).map((i) => items[i]) }
+    const loose = []
+    for (let i = 0; i < items.length && loose.length < 5; i++) {
+      const m = norms[i]
+      if (m && (m.includes(n) || n.includes(m))) loose.push(items[i])
+    }
+    return { match: null, candidates: loose }
+  }
 }
 
 const overlaps = (a, b) => a.startTime && b.startTime && a.startTime < b.endTime && b.startTime < a.endTime
@@ -88,10 +112,8 @@ const heldElsewhere = (mine, who, b) => {
   return Boolean(h && h !== who.id && !mine.includes(h))
 }
 
-const byId = (id, items) => {
-  const hit = items.find((i) => i.id === id)
-  return { match: hit ?? null, candidates: [] }
-}
+/** A planner's explicit pick, resolved only within `byIdMap` (their scope). */
+const byId = (id, byIdMap) => ({ match: byIdMap.get(id) ?? null, candidates: [] })
 
 export function createVisitTaskService({ repo, scope }) {
   /**
@@ -325,14 +347,18 @@ export function createVisitTaskService({ repo, scope }) {
       const buildings = await repo.listBuildingsLite(await scope.assignableBuildingsWhere(actor))
       const mine = actor.role === 'TEAM_LEADER' ? await scope.readableUserIds(actor) : null
       const canWork = workCheck()
+      const matchPerson = createNameMatcher(people, (u) => u.name, (u) => u.email)
+      const matchBuilding = createNameMatcher(buildings, (b) => b.buildingName)
+      const peopleById = new Map(people.map((u) => [u.id, u]))
+      const buildingsById = new Map(buildings.map((b) => [b.id, b]))
       const out = []
       let ok = []
       let skippedPast = 0
       for (const row of rows) {
         const parsed = parseRow(row, today)
         skippedPast += parsed.skippedPast
-        const emp = row.assigneeId ? byId(row.assigneeId, people) : matchByName(row.employee, people, (u) => u.name, (u) => u.email)
-        const bld = row.buildingId ? byId(row.buildingId, buildings) : matchByName(row.building, buildings, (b) => b.buildingName)
+        const emp = row.assigneeId ? byId(row.assigneeId, peopleById) : matchPerson(row.employee)
+        const bld = row.buildingId ? byId(row.buildingId, buildingsById) : matchBuilding(row.building)
         const errors = [...parsed.errors]
         if (emp.match && bld.match && !(await canWork(emp.match, bld.match))) {
           errors.push(`${bld.match.buildingName} is not in ${emp.match.name}'s zones or team — give them the zone first`)
