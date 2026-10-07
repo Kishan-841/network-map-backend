@@ -6,7 +6,7 @@ describe('visitTaskRepository', () => {
     for (const m of [
       'listUsersForPlanning', 'zoneIdsFor', 'listBuildingsLite', 'searchBuildings', 'tasksInRange',
       'visitsInRange', 'findTask', 'createTask', 'updateTask', 'deleteTask', 'importPlan', 'listUploads',
-      // 'assignBuilding' is added in Task 8 — add it to this list there.
+      'assignBuilding',
     ]) expect(typeof repo[m]).toBe('function')
   })
 })

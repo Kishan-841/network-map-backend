@@ -58,6 +58,25 @@ export const visitTaskRepository = {
   deleteTask: (id) => prisma.visitTask.delete({ where: { id } }),
 
   /**
+   * Hand one building to an executive: close its ACTIVE assignment, open a new
+   * one. With `allowedHolderIds` (a team leader planning) the building is locked
+   * and its holder re-checked inside the transaction, as importPlan does.
+   */
+  assignBuilding: ({ buildingId, assigneeId, actorId, allowedHolderIds }) =>
+    prisma.$transaction(async (tx) => {
+      if (allowedHolderIds) {
+        await tx.$queryRaw`SELECT id FROM "Building" WHERE id = ${buildingId} FOR UPDATE`
+        const held = await tx.buildingAssignment.findFirst({
+          where: { buildingId, status: 'ACTIVE', assignedToId: { notIn: allowedHolderIds } },
+          select: { building: { select: { buildingName: true } } },
+        })
+        if (held) throw ApiError.badRequest(`${held.building.buildingName} is held by another team`)
+      }
+      await tx.buildingAssignment.updateMany({ where: { buildingId, status: 'ACTIVE' }, data: { status: 'REASSIGNED', endedAt: new Date() } })
+      await tx.buildingAssignment.create({ data: { buildingId, assignedToId: assigneeId, assignedById: actorId } })
+    }),
+
+  /**
    * One transaction: close + re-open building assignments, delete the replaced
    * tasks, create the new ones, record the upload.
    * `assignments`: [{ assigneeId, buildingIds }]; `deletes`: task ids;

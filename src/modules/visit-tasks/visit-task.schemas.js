@@ -40,3 +40,16 @@ export const rangeQuerySchema = z.object({
   from: day.optional(),
   to: day.optional(),
 })
+
+// One task added or edited by hand. A window is both times or neither (checked in the service).
+const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:mm').nullable()
+const taskFields = {
+  assigneeId: z.string().min(1).max(100),
+  buildingId: z.string().min(1).max(100),
+  taskDate: day,
+  startTime: hhmm,
+  endTime: hhmm,
+}
+export const taskSchema = z.object(taskFields).strict()
+export const taskPatchSchema = z.object(taskFields).partial().strict()
+  .refine((b) => Object.keys(b).length > 0, 'Nothing to change')

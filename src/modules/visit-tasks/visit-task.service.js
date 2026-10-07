@@ -1,6 +1,6 @@
 import { ApiError } from '../../lib/api-error.js'
 import {
-  MAX_UNTIL_DAYS, addDays, expandDates, istDay, istToday, normalizeName, parseSheetDate, parseSheetTime, toMinutes,
+  MAX_UNTIL_DAYS, addDays, dateOnly, expandDates, istDay, istToday, normalizeName, parseSheetDate, parseSheetTime, toMinutes,
 } from '../../lib/visit-plan.js'
 import { matchDay } from '../../lib/visit-task-status.js'
 
@@ -186,8 +186,112 @@ export function createVisitTaskService({ repo, scope }) {
     return out
   }
 
+  // ---- single-task edits (phase 3) ----------------------------------------
+  const shape = (t) => ({ ...t, taskDate: dayOf(t.taskDate) })
+  const VISITED = "This task has a visit — it can't be changed"
+
+  /** One person's tasks (shaped) and visits on one IST day. */
+  async function dayOfPerson(assigneeId, day) {
+    const tasks = (await repo.tasksInRange({ assigneeIds: [assigneeId], from: day, to: day })).map(shape)
+    const visits = await repo.visitsInRange({
+      userIds: [assigneeId], from: new Date(`${day}T00:00:00+05:30`), to: new Date(`${addDays(day, 1)}T00:00:00+05:30`),
+    })
+    return { tasks, visits }
+  }
+
+  /** The task, if the actor plans for its assignee (else 404) and it has no matching visit (else 409). */
+  async function mustFindEditable(id, actor, now) {
+    const task = await repo.findTask(id)
+    const mine = new Set((await scope.assignees(actor)).map((u) => u.id))
+    if (!task || !mine.has(task.assigneeId)) throw ApiError.notFound('Task not found')
+    const { tasks, visits } = await dayOfPerson(task.assigneeId, dayOf(task.taskDate))
+    if (matchDay({ tasks, visits, now }).tasks.find((t) => t.id === id)?.visit) throw ApiError.conflict(VISITED)
+    return task
+  }
+
+  /** Person, building and window for a task the actor wants to save. */
+  async function checkEdit({ assigneeId, buildingId, taskDate, startTime, endTime }, actor, now) {
+    const who = (await scope.assignees(actor)).find((u) => u.id === assigneeId)
+    if (!who) throw ApiError.notFound('Person not found')
+    if (parseSheetDate(taskDate) !== taskDate) throw ApiError.badRequest('Pick a valid date')
+    if (taskDate > addDays(istToday(now), MAX_UNTIL_DAYS)) throw ApiError.badRequest(`Plan at most ${MAX_UNTIL_DAYS} days ahead`)
+    if (Boolean(startTime) !== Boolean(endTime)) throw ApiError.badRequest('Give both a start and an end time, or neither')
+    if (startTime && toMinutes(endTime) <= toMinutes(startTime)) throw ApiError.badRequest('End time must be after start time')
+    const [building] = await repo.listBuildingsLite({ AND: [await scope.assignableBuildingsWhere(actor), { id: buildingId }] })
+    if (!building) throw ApiError.notFound('Building not found')
+    if (!(await scope.canWorkBuilding(who, building))) {
+      throw ApiError.badRequest(`${building.buildingName} is not in ${who.name}'s zones or team — give them the zone first`)
+    }
+    const mine = actor.role === 'TEAM_LEADER' ? await scope.readableUserIds(actor) : null
+    if (heldElsewhere(mine, who, building)) throw ApiError.badRequest(HELD_ELSEWHERE(building.buildingName))
+    return { who, building, mine, window: { startTime: startTime || null, endTime: endTime || null } }
+  }
+
+  /**
+   * The target day must not already hold this exact task, and the new/moved
+   * task must not take the visit of a task that is already visited (that task
+   * is locked, and losing its visit would turn it into a miss).
+   */
+  async function checkTargetDay(task, exceptId, now) {
+    const { tasks, visits } = await dayOfPerson(task.assigneeId, task.taskDate)
+    const others = tasks.filter((t) => t.id !== exceptId)
+    if (others.some((t) => keyOf(t) === keyOf(task))) throw ApiError.conflict('That task is already in the plan')
+    const before = matchDay({ tasks: others, visits, now }).tasks.filter((t) => t.visit).map((t) => t.id)
+    if (!before.length) return
+    const after = new Map(matchDay({ tasks: [...others, { ...task, id: '__candidate__' }], visits, now }).tasks.map((t) => [t.id, t]))
+    if (before.some((id) => !after.get(id).visit)) {
+      throw ApiError.conflict('That would take the visit of a task already visited that day')
+    }
+  }
+
+  async function assignIfNeeded(who, building, mine, actor) {
+    if (who.role !== 'SALES_EXECUTIVE' || holderOf(building) === who.id) return
+    await repo.assignBuilding({ buildingId: building.id, assigneeId: who.id, actorId: actor.id, allowedHolderIds: mine ?? undefined })
+  }
+
   return {
     listTasks,
+
+    /** Add one task; an executive who doesn't hold the building is given it. */
+    async createTask(body, actor, now = new Date()) {
+      if (!scope.isPlanner(actor.role)) throw ApiError.forbidden()
+      const { who, building, mine, window } = await checkEdit(body, actor, now)
+      const task = { assigneeId: who.id, buildingId: building.id, taskDate: body.taskDate, ...window }
+      await checkTargetDay(task, null, now)
+      await assignIfNeeded(who, building, mine, actor)
+      return shape(await repo.createTask({ ...task, taskDate: dateOnly(task.taskDate), createdById: actor.id }))
+    },
+
+    /**
+     * Edit / move / reassign any task with no matching visit — past ones too
+     * (moving a missed task reschedules it). The actor must plan for both the
+     * current and the new assignee.
+     */
+    async updateTask(id, patch, actor, now = new Date()) {
+      if (!scope.isPlanner(actor.role)) throw ApiError.forbidden()
+      const current = await mustFindEditable(id, actor, now)
+      const next = {
+        assigneeId: patch.assigneeId ?? current.assigneeId,
+        buildingId: patch.buildingId ?? current.buildingId,
+        taskDate: patch.taskDate ?? dayOf(current.taskDate),
+        startTime: 'startTime' in patch ? patch.startTime : current.startTime,
+        endTime: 'endTime' in patch ? patch.endTime : current.endTime,
+      }
+      const { who, building, mine, window } = await checkEdit(next, actor, now)
+      const task = { assigneeId: who.id, buildingId: building.id, taskDate: next.taskDate, ...window }
+      await checkTargetDay(task, id, now)
+      // Only a change of person or building hands the building over — moving a
+      // day or a window must not take a building back from its new holder.
+      if (who.id !== current.assigneeId || building.id !== current.buildingId) await assignIfNeeded(who, building, mine, actor)
+      return shape(await repo.updateTask(id, { ...task, taskDate: dateOnly(task.taskDate) }))
+    },
+
+    async deleteTask(id, actor, now = new Date()) {
+      if (!scope.isPlanner(actor.role)) throw ApiError.forbidden()
+      await mustFindEditable(id, actor, now)
+      await repo.deleteTask(id)
+      return { deleted: true }
+    },
 
     /** Missed tasks from the last 30 days, newest first. */
     async listOverdue({ userId } = {}, actor, now = new Date()) {

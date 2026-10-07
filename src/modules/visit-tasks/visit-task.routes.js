@@ -6,7 +6,7 @@ import { salesRepository } from '../sales/sales.repository.js'
 import { visitTaskRepository } from './visit-task.repository.js'
 import { createPlanScope } from './plan-scope.js'
 import { createVisitTaskService } from './visit-task.service.js'
-import { importSchema, previewSchema, rangeQuerySchema } from './visit-task.schemas.js'
+import { importSchema, previewSchema, rangeQuerySchema, taskPatchSchema, taskSchema } from './visit-task.schemas.js'
 
 const scope = createPlanScope({ repo: visitTaskRepository, salesRepo: salesRepository })
 export const visitTaskService = createVisitTaskService({ repo: visitTaskRepository, scope })
@@ -41,4 +41,33 @@ visitTaskRoutes.post(
   }),
   validateBody(importSchema),
   handle((req) => visitTaskService.import(req.body, req.user)),
+)
+
+// Single tasks — registered after every literal path so '/:id' never shadows one.
+const loadTask = (req) => visitTaskRepository.findTask(req.params.id)
+visitTaskRoutes.post(
+  '/',
+  PLANNER,
+  audit('VisitTask', 'TaskCreate', { describe: () => 'Visit task added' }),
+  validateBody(taskSchema),
+  async (req, res, next) => {
+    try {
+      res.status(201).json({ success: true, data: await visitTaskService.createTask(req.body, req.user) })
+    } catch (err) {
+      next(err)
+    }
+  },
+)
+visitTaskRoutes.patch(
+  '/:id',
+  PLANNER,
+  audit('VisitTask', 'TaskUpdate', { load: loadTask, describe: (req) => `Visit task ${req.params.id} changed` }),
+  validateBody(taskPatchSchema),
+  handle((req) => visitTaskService.updateTask(req.params.id, req.body, req.user)),
+)
+visitTaskRoutes.delete(
+  '/:id',
+  PLANNER,
+  audit('VisitTask', 'TaskDelete', { load: loadTask, describe: (req) => `Visit task ${req.params.id} deleted` }),
+  handle((req) => visitTaskService.deleteTask(req.params.id, req.user)),
 )
