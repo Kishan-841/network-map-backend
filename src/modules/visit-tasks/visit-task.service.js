@@ -248,9 +248,10 @@ export function createVisitTaskService({ repo, scope }) {
     }
   }
 
-  async function assignIfNeeded(who, building, mine, actor) {
+  /** Hands the building over (and drops the previous holder's planned tasks there from today on). */
+  async function assignIfNeeded(who, building, mine, actor, now) {
     if (who.role !== 'SALES_EXECUTIVE' || holderOf(building) === who.id) return
-    await repo.assignBuilding({ buildingId: building.id, assigneeId: who.id, actorId: actor.id, allowedHolderIds: mine ?? undefined })
+    await repo.assignBuilding({ buildingId: building.id, assigneeId: who.id, actorId: actor.id, allowedHolderIds: mine ?? undefined, now })
   }
 
   return {
@@ -262,7 +263,7 @@ export function createVisitTaskService({ repo, scope }) {
       const { who, building, mine, window } = await checkEdit(body, actor, now)
       const task = { assigneeId: who.id, buildingId: building.id, taskDate: body.taskDate, ...window }
       await checkTargetDay(task, null, now)
-      await assignIfNeeded(who, building, mine, actor)
+      await assignIfNeeded(who, building, mine, actor, now)
       return shape(await repo.createTask({ ...task, taskDate: dateOnly(task.taskDate), createdById: actor.id }))
     },
 
@@ -287,7 +288,7 @@ export function createVisitTaskService({ repo, scope }) {
       await checkTargetDay(task, id, now)
       // Only a change of person or building hands the building over — moving a
       // day or a window must not take a building back from its new holder.
-      if (who.id !== current.assigneeId || building.id !== current.buildingId) await assignIfNeeded(who, building, mine, actor)
+      if (who.id !== current.assigneeId || building.id !== current.buildingId) await assignIfNeeded(who, building, mine, actor, now)
       return shape(await repo.updateTask(id, { ...task, taskDate: dateOnly(task.taskDate) }))
     },
 
@@ -373,12 +374,25 @@ export function createVisitTaskService({ repo, scope }) {
       }
       // Count what the import would create: duplicates merged, kept tasks not recreated.
       const summary = []
+      const replacedIds = new Set()
       let tasks = 0
-      for (const p of perPerson(ok)) {
+      const persons = perPerson(ok)
+      for (const p of persons) {
         const { del, keep } = await replaceable(p.assigneeId, p.from, p.to, today)
+        for (const t of del) replacedIds.add(t.id)
         const count = [...p.keys].filter((k) => !keep.has(k)).length
         tasks += count
         summary.push({ assigneeId: p.assigneeId, name: p.name, tasks: count, from: p.from, to: p.to, replaces: del.length, assigns: p.buildings.size })
+      }
+      // Buildings handed over: the previous holder's planned visits there from
+      // today on go (they could never check in). A task already counted in
+      // someone's `replaces` is not counted twice.
+      for (const [i, p] of persons.entries()) {
+        const taken = p.buildings.size ? await repo.strandedTasks({ buildingIds: [...p.buildings], newHolderId: p.assigneeId, now }) : []
+        summary[i].takesFrom = taken.map((t) => ({
+          buildingId: t.buildingId, buildingName: t.buildingName, fromId: t.fromId, fromName: t.fromName,
+          tasks: t.taskIds.filter((id) => !replacedIds.has(id)).length,
+        }))
       }
       const errors = tasks > MAX_TASKS ? [`This sheet makes ${tasks} tasks — the limit is ${MAX_TASKS}`] : []
       return { rows: out, people: summary, totals: { tasks, rows: rows.length, skippedPast }, errors }
@@ -455,6 +469,7 @@ export function createVisitTaskService({ repo, scope }) {
         deletes,
         creates,
         allowedHolderIds: mine ?? undefined,
+        now,
         upload: {
           fromDate: all.reduce((m, r) => (r.from < m ? r.from : m), all[0].from),
           toDate: all.reduce((m, r) => (r.to > m ? r.to : m), all[0].to),

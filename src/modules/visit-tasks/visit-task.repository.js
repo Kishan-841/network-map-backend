@@ -1,6 +1,7 @@
 import { prisma } from '../../lib/prisma.js'
 import { ApiError } from '../../lib/api-error.js'
 import { dateOnly } from '../../lib/visit-plan.js'
+import { releaseStrandedTasks, strandedTasks } from '../../lib/handover-tasks.js'
 
 const userLite = { id: true, name: true, email: true, role: true, managerId: true, teamLeaderId: true, isActive: true }
 const buildingLite = {
@@ -61,8 +62,10 @@ export const visitTaskRepository = {
    * Hand one building to an executive: close its ACTIVE assignment, open a new
    * one. With `allowedHolderIds` (a team leader planning) the building is locked
    * and its holder re-checked inside the transaction, as importPlan does.
+   * The previous holder's planned tasks there from today on are dropped
+   * (lib/handover-tasks.js) — they could never be checked in.
    */
-  assignBuilding: ({ buildingId, assigneeId, actorId, allowedHolderIds }) =>
+  assignBuilding: ({ buildingId, assigneeId, actorId, allowedHolderIds, now = new Date() }) =>
     prisma.$transaction(async (tx) => {
       if (allowedHolderIds) {
         await tx.$queryRaw`SELECT id FROM "Building" WHERE id = ${buildingId} FOR UPDATE`
@@ -72,13 +75,15 @@ export const visitTaskRepository = {
         })
         if (held) throw ApiError.badRequest(`${held.building.buildingName} is held by another team`)
       }
+      await releaseStrandedTasks(tx, { buildingIds: [buildingId], newHolderId: assigneeId, now })
       await tx.buildingAssignment.updateMany({ where: { buildingId, status: 'ACTIVE' }, data: { status: 'REASSIGNED', endedAt: new Date() } })
       await tx.buildingAssignment.create({ data: { buildingId, assignedToId: assigneeId, assignedById: actorId } })
     }),
 
   /**
-   * One transaction: close + re-open building assignments, delete the replaced
-   * tasks, create the new ones, record the upload.
+   * One transaction: close + re-open building assignments (dropping the
+   * previous holders' tasks there from today on), delete the replaced tasks,
+   * create the new ones, record the upload.
    * `assignments`: [{ assigneeId, buildingIds }]; `deletes`: task ids;
    * `creates`: [{ assigneeId, buildingId, taskDate:'YYYY-MM-DD', startTime, endTime }].
    * With `allowedHolderIds` (a team leader planning), the buildings are locked
@@ -86,7 +91,7 @@ export const visitTaskRepository = {
    * salesRepository.reassign — so another team cannot lose a building in the
    * gap between the service's check and this write.
    */
-  importPlan: ({ actorId, assignments, deletes, creates, upload, allowedHolderIds }) =>
+  importPlan: ({ actorId, assignments, deletes, creates, upload, allowedHolderIds, now = new Date() }) =>
     prisma.$transaction(async (tx) => {
       const lockIds = assignments.flatMap((a) => a.buildingIds)
       if (allowedHolderIds && lockIds.length) {
@@ -98,8 +103,10 @@ export const visitTaskRepository = {
         if (held) throw ApiError.badRequest(`${held.building.buildingName} is held by another team`)
       }
       let assigned = 0
+      let released = 0
       for (const { assigneeId, buildingIds } of assignments) {
         if (!buildingIds.length) continue
+        released += await releaseStrandedTasks(tx, { buildingIds, newHolderId: assigneeId, now })
         await tx.buildingAssignment.updateMany({
           where: { buildingId: { in: buildingIds }, status: 'ACTIVE' },
           data: { status: 'REASSIGNED', endedAt: new Date() },
@@ -109,9 +116,12 @@ export const visitTaskRepository = {
         })
         assigned += buildingIds.length
       }
-      const { count: replaced } = deletes.length
+      const { count: deleted } = deletes.length
         ? await tx.visitTask.deleteMany({ where: { id: { in: deletes } } })
         : { count: 0 }
+      // `replaced` covers both: the planned assignees' replaced tasks and the
+      // previous holders' tasks at the buildings handed over.
+      const replaced = deleted + released
       const row = await tx.taskUpload.create({
         data: { ...upload, fromDate: dateOnly(upload.fromDate), toDate: dateOnly(upload.toDate),
           uploadedById: actorId, created: creates.length, replaced, assigned },
@@ -121,6 +131,9 @@ export const visitTaskRepository = {
       })
       return { uploadId: row.id, created: creates.length, replaced, assigned }
     }, { timeout: 60000 }),
+
+  /** Read-only: what handing these buildings to `newHolderId` would drop (preview). */
+  strandedTasks: ({ buildingIds, newHolderId, now }) => strandedTasks(prisma, { buildingIds, newHolderId, now }),
 
   listUploads: (where) =>
     prisma.taskUpload.findMany({

@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js'
 import { ApiError } from '../../lib/api-error.js'
+import { releaseStrandedTasks } from '../../lib/handover-tasks.js'
 
 // What a scoped building row returns to the field team — enough to list and map
 // it, plus its current holder. Never the whole registry shape.
@@ -234,6 +235,9 @@ export const salesRepository = {
           throw ApiError.badRequest(`${held[0].building.buildingName} is held by ${held[0].assignedTo.name}`)
         }
       }
+      // The previous holders can no longer check in there: drop their planned
+      // visits from today on, before their assignments close.
+      await releaseStrandedTasks(tx, { buildingIds, newHolderId: assignedToId })
       await tx.buildingAssignment.updateMany({
         where: { buildingId: { in: buildingIds }, status: 'ACTIVE' },
         data: { status: 'REASSIGNED', endedAt: new Date() },
