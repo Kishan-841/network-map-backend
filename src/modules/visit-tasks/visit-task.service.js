@@ -1,7 +1,12 @@
 import { ApiError } from '../../lib/api-error.js'
 import {
-  MAX_UNTIL_DAYS, addDays, expandDates, istToday, normalizeName, parseSheetDate, parseSheetTime, toMinutes,
+  MAX_UNTIL_DAYS, addDays, expandDates, istDay, istToday, normalizeName, parseSheetDate, parseSheetTime, toMinutes,
 } from '../../lib/visit-plan.js'
+import { matchDay } from '../../lib/visit-task-status.js'
+
+const MAX_RANGE_DAYS = 62
+const OVERDUE_DAYS = 30
+const byDayThenStart = (a, b) => a.taskDate.localeCompare(b.taskDate) || (a.startTime ?? '99').localeCompare(b.startTime ?? '99')
 
 const MAX_TASKS = 15000
 const pick = (b) => ({ id: b.id, buildingName: b.buildingName, formattedAddress: b.formattedAddress })
@@ -139,7 +144,58 @@ export function createVisitTaskService({ repo, scope }) {
     }
   }
 
+  /**
+   * One person's tasks in [from, to] with live status, plus their visits that
+   * matched no task (off-plan). Out of the actor's scope → 404.
+   */
+  async function listTasks({ userId, from, to } = {}, actor, now = new Date()) {
+    const target = userId ?? actor.id
+    const readable = await scope.readableUserIds(actor)
+    if (readable !== null && !readable.includes(target)) throw ApiError.notFound('Not found')
+    const start = from ?? istToday(now)
+    const end = to ?? start
+    if (end < start || addDays(start, MAX_RANGE_DAYS) < end) {
+      throw ApiError.badRequest(`Pick a range of at most ${MAX_RANGE_DAYS} days`)
+    }
+    // @db.Date comes back as UTC midnight, so its ISO date IS the stored day.
+    const tasks = (await repo.tasksInRange({ assigneeIds: [target], from: start, to: end }))
+      .map((t) => ({ ...t, taskDate: t.taskDate.toISOString().slice(0, 10) }))
+    const visits = await repo.visitsInRange({
+      userIds: [target],
+      from: new Date(`${start}T00:00:00+05:30`),
+      to: new Date(`${addDays(end, 1)}T00:00:00+05:30`),
+    })
+    const days = new Map()
+    const bucket = (d) => {
+      if (!days.has(d)) days.set(d, { tasks: [], visits: [] })
+      return days.get(d)
+    }
+    for (const t of tasks) bucket(t.taskDate).tasks.push(t)
+    for (const v of visits) bucket(istDay(v.visitedAt)).visits.push(v)
+    const out = { tasks: [], offPlan: [] }
+    for (const [day, { tasks: dt, visits: dv }] of days) {
+      const m = matchDay({ tasks: dt, visits: dv, now })
+      out.tasks.push(...m.tasks)
+      out.offPlan.push(...m.offPlan.map((v) => ({
+        id: v.id, userId: v.userId, buildingId: v.buildingId, buildingName: v.building?.buildingName ?? null,
+        visitedAt: v.visitedAt, checkOutAt: v.checkOutAt, day,
+      })))
+    }
+    out.tasks.sort(byDayThenStart)
+    out.offPlan.sort((a, b) => a.visitedAt - b.visitedAt)
+    return out
+  }
+
   return {
+    listTasks,
+
+    /** Missed tasks from the last 30 days, newest first. */
+    async listOverdue({ userId } = {}, actor, now = new Date()) {
+      const today = istToday(now)
+      const { tasks } = await listTasks({ userId, from: addDays(today, -OVERDUE_DAYS), to: today }, actor, now)
+      return tasks.filter((t) => t.status === 'OVERDUE').reverse()
+    },
+
     async listAssignees(actor) {
       if (!scope.isPlanner(actor.role)) throw ApiError.forbidden()
       return (await scope.assignees(actor)).map((u) => ({ id: u.id, name: u.name, role: u.role }))
