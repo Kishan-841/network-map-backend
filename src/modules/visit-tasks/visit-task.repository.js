@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js'
+import { ApiError } from '../../lib/api-error.js'
 import { dateOnly } from '../../lib/visit-plan.js'
 
 const userLite = { id: true, name: true, email: true, role: true, managerId: true, teamLeaderId: true, isActive: true }
@@ -61,9 +62,22 @@ export const visitTaskRepository = {
    * tasks, create the new ones, record the upload.
    * `assignments`: [{ assigneeId, buildingIds }]; `deletes`: task ids;
    * `creates`: [{ assigneeId, buildingId, taskDate:'YYYY-MM-DD', startTime, endTime }].
+   * With `allowedHolderIds` (a team leader planning), the buildings are locked
+   * and their holders re-checked inside the transaction — mirrors
+   * salesRepository.reassign — so another team cannot lose a building in the
+   * gap between the service's check and this write.
    */
-  importPlan: ({ actorId, assignments, deletes, creates, upload }) =>
+  importPlan: ({ actorId, assignments, deletes, creates, upload, allowedHolderIds }) =>
     prisma.$transaction(async (tx) => {
+      const lockIds = assignments.flatMap((a) => a.buildingIds)
+      if (allowedHolderIds && lockIds.length) {
+        await tx.$queryRaw`SELECT id FROM "Building" WHERE id = ANY(${lockIds}) FOR UPDATE`
+        const held = await tx.buildingAssignment.findFirst({
+          where: { buildingId: { in: lockIds }, status: 'ACTIVE', assignedToId: { notIn: allowedHolderIds } },
+          select: { building: { select: { buildingName: true } } },
+        })
+        if (held) throw ApiError.badRequest(`${held.building.buildingName} is held by another team`)
+      }
       let assigned = 0
       for (const { assigneeId, buildingIds } of assignments) {
         if (!buildingIds.length) continue

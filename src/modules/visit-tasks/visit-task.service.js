@@ -1,6 +1,6 @@
 import { ApiError } from '../../lib/api-error.js'
 import {
-  MAX_UNTIL_DAYS, addDays, expandDates, istDay, istToday, normalizeName, parseSheetDate, parseSheetTime, toMinutes,
+  MAX_UNTIL_DAYS, addDays, expandDates, istToday, normalizeName, parseSheetDate, parseSheetTime, toMinutes,
 } from '../../lib/visit-plan.js'
 
 const MAX_TASKS = 15000
@@ -51,26 +51,52 @@ function matchByName(text, items, nameOf, emailOf = () => null) {
 
 const overlaps = (a, b) => a.startTime && b.startTime && a.startTime < b.endTime && b.startTime < a.endTime
 
+/** One task's identity — exact duplicates (same person, building, day, window) merge. */
+const keyOf = (t, day = t.taskDate) =>
+  [t.assigneeId, t.buildingId, day, t.startTime ?? '', t.endTime ?? ''].join('|')
+const dayOf = (d) => (typeof d === 'string' ? d : d.toISOString().slice(0, 10))
+
+const CONTESTED = (name) => `${name} is planned for more than one executive — a building has one holder`
+const HELD_ELSEWHERE = (name) => `${name} is held by another team`
+
 /**
- * importPlan re-points a building to ONE executive, so two executives in one
- * sheet who would both need the same building cannot both be satisfied.
- * Returns Map(buildingId → Set(assigneeId)) for every building wanted by >1.
+ * importPlan re-points a building to ONE executive, so within one sheet a
+ * building may be planned for one executive only — the current holder's own
+ * rows count. Team leaders are never assigned, so their rows don't.
+ * `rows` must only hold rows that still have a day left.
+ * Returns the set of building ids planned for more than one executive.
  */
 function contested(rows) {
   const want = new Map()
   for (const r of rows) {
-    if (r.role !== 'SALES_EXECUTIVE' || holderOf(r.building) === r.assigneeId) continue
+    if (r.role !== 'SALES_EXECUTIVE') continue
     if (!want.has(r.building.id)) want.set(r.building.id, new Set())
     want.get(r.building.id).add(r.assigneeId)
   }
-  return new Map([...want].filter(([, who]) => who.size > 1))
+  return new Set([...want].filter(([, who]) => who.size > 1).map(([id]) => id))
+}
+
+/** A team leader may not take a building whose holder is outside their team. */
+const heldElsewhere = (mine, who, b) => {
+  if (!mine || who.role !== 'SALES_EXECUTIVE') return false
+  const h = holderOf(b)
+  return Boolean(h && h !== who.id && !mine.includes(h))
+}
+
+const byId = (id, items) => {
+  const hit = items.find((i) => i.id === id)
+  return { match: hit ?? null, candidates: [] }
 }
 
 export function createVisitTaskService({ repo, scope }) {
-  /** Tasks the import would delete for one assignee: from today in their range, no visit. */
+  /**
+   * One assignee's existing tasks from today in their range: `del` = no visit
+   * (the import replaces them), `keep` = keys of the ones it keeps (visited
+   * today), so the import never recreates a task it kept.
+   */
   async function replaceable(assigneeId, from, to, today) {
     const start = from < today ? today : from
-    if (start > to) return []
+    if (start > to) return { del: [], keep: new Set() }
     const tasks = await repo.tasksInRange({ assigneeIds: [assigneeId], from: start, to })
     const visits = await repo.visitsInRange({
       userIds: [assigneeId],
@@ -78,15 +104,22 @@ export function createVisitTaskService({ repo, scope }) {
       to: new Date(`${addDays(today, 1)}T00:00:00+05:30`),
     })
     const visitedToday = new Set(visits.map((v) => v.buildingId))
-    return tasks.filter((t) => !(istDay(t.taskDate) === today && visitedToday.has(t.buildingId)))
+    const del = []
+    const keep = new Set()
+    for (const t of tasks) {
+      const day = dayOf(t.taskDate)
+      if (day === today && visitedToday.has(t.buildingId)) keep.add(keyOf(t, day))
+      else del.push(t)
+    }
+    return { del, keep }
   }
 
   function perPerson(rows) {
     const map = new Map()
     for (const r of rows) {
-      const p = map.get(r.assigneeId) ?? { assigneeId: r.assigneeId, name: r.name, tasks: 0, from: null, to: null, buildings: new Set() }
-      p.tasks += r.dates.length
+      const p = map.get(r.assigneeId) ?? { assigneeId: r.assigneeId, name: r.name, keys: new Set(), from: null, to: null, buildings: new Set() }
       for (const d of r.dates) {
+        p.keys.add(keyOf({ ...r, buildingId: r.building.id }, d))
         if (!p.from || d < p.from) p.from = d
         if (!p.to || d > p.to) p.to = d
       }
@@ -124,20 +157,21 @@ export function createVisitTaskService({ repo, scope }) {
       const today = istToday(now)
       const people = await scope.assignees(actor)
       const buildings = await repo.listBuildingsLite(await scope.assignableBuildingsWhere(actor))
+      const mine = actor.role === 'TEAM_LEADER' ? await scope.readableUserIds(actor) : null
       const canWork = workCheck()
       const out = []
-      const byRow = new Map()
       let ok = []
       let skippedPast = 0
       for (const row of rows) {
         const parsed = parseRow(row, today)
         skippedPast += parsed.skippedPast
-        const emp = matchByName(row.employee, people, (u) => u.name, (u) => u.email)
-        const bld = matchByName(row.building, buildings, (b) => b.buildingName)
+        const emp = row.assigneeId ? byId(row.assigneeId, people) : matchByName(row.employee, people, (u) => u.name, (u) => u.email)
+        const bld = row.buildingId ? byId(row.buildingId, buildings) : matchByName(row.building, buildings, (b) => b.buildingName)
         const errors = [...parsed.errors]
         if (emp.match && bld.match && !(await canWork(emp.match, bld.match))) {
           errors.push(`${bld.match.buildingName} is not in ${emp.match.name}'s zones or team — give them the zone first`)
         }
+        if (emp.match && bld.match && heldElsewhere(mine, emp.match, bld.match)) errors.push(HELD_ELSEWHERE(bld.match.buildingName))
         const state = errors.length ? 'error' : emp.match && bld.match ? 'ok' : 'fix'
         const item = {
           rowNumber: row.rowNumber, state, errors, warnings: parsed.warnings,
@@ -146,16 +180,18 @@ export function createVisitTaskService({ repo, scope }) {
           dates: parsed.dates, startTime: parsed.startTime, endTime: parsed.endTime,
         }
         out.push(item)
-        byRow.set(row.rowNumber, item)
-        if (state === 'ok') ok.push({ ...parsed, assigneeId: emp.match.id, name: emp.match.name, role: emp.match.role, building: bld.match, item })
+        // A row whose every day has passed saves nothing and assigns nothing.
+        if (state === 'ok' && parsed.dates.length) {
+          ok.push({ ...parsed, assigneeId: emp.match.id, name: emp.match.name, role: emp.match.role, building: bld.match, item })
+        }
       }
-      // Two executives wanting one building — the import would refuse it.
+      // One building, more than one executive — the import would refuse it.
       const clash = contested(ok)
       if (clash.size) {
         ok = ok.filter((r) => {
-          if (!clash.has(r.building.id) || r.role !== 'SALES_EXECUTIVE') return true
+          if (r.role !== 'SALES_EXECUTIVE' || !clash.has(r.building.id)) return true
           r.item.state = 'error'
-          r.item.errors.push(`${r.building.buildingName} is planned for more than one executive in this sheet — a building goes to one executive`)
+          r.item.errors.push(CONTESTED(r.building.buildingName))
           return false
         })
       }
@@ -170,13 +206,17 @@ export function createVisitTaskService({ repo, scope }) {
           if (b.dates.some((d) => days.has(d))) b.item.warnings.push(`Overlaps row ${a.item.rowNumber} for ${b.name}`)
         }
       }
+      // Count what the import would create: duplicates merged, kept tasks not recreated.
       const summary = []
+      let tasks = 0
       for (const p of perPerson(ok)) {
-        const replaces = p.from ? (await replaceable(p.assigneeId, p.from, p.to, today)).length : 0
-        summary.push({ assigneeId: p.assigneeId, name: p.name, tasks: p.tasks, from: p.from, to: p.to, replaces, assigns: p.buildings.size })
+        const { del, keep } = await replaceable(p.assigneeId, p.from, p.to, today)
+        const count = [...p.keys].filter((k) => !keep.has(k)).length
+        tasks += count
+        summary.push({ assigneeId: p.assigneeId, name: p.name, tasks: count, from: p.from, to: p.to, replaces: del.length, assigns: p.buildings.size })
       }
-      const tasks = ok.reduce((n, r) => n + r.dates.length, 0)
-      return { rows: out, people: summary, totals: { tasks, rows: rows.length, skippedPast } }
+      const errors = tasks > MAX_TASKS ? [`This sheet makes ${tasks} tasks — the limit is ${MAX_TASKS}`] : []
+      return { rows: out, people: summary, totals: { tasks, rows: rows.length, skippedPast }, errors }
     },
 
     async import({ rows, fileName }, actor, now = new Date()) {
@@ -186,9 +226,10 @@ export function createVisitTaskService({ repo, scope }) {
       const where = await scope.assignableBuildingsWhere(actor)
       const ids = [...new Set(rows.map((r) => r.buildingId))]
       const buildings = new Map((await repo.listBuildingsLite({ AND: [where, { id: { in: ids } }] })).map((b) => [b.id, b]))
+      const mine = actor.role === 'TEAM_LEADER' ? await scope.readableUserIds(actor) : null
       const canWork = workCheck()
 
-      const creates = []
+      let creates = []
       const seen = new Set()
       const ranges = new Map()
       const checked = []
@@ -198,14 +239,18 @@ export function createVisitTaskService({ repo, scope }) {
         if (!who) throw ApiError.badRequest(`Row ${r.rowNumber}: that person is not on your team`)
         if (!b) throw ApiError.badRequest(`Row ${r.rowNumber}: that building is not one you can plan`)
         if (!(await canWork(who, b))) throw ApiError.badRequest(`Row ${r.rowNumber}: ${b.buildingName} is not in ${who.name}'s zones or team`)
+        if (heldElsewhere(mine, who, b)) throw ApiError.badRequest(`Row ${r.rowNumber}: ${HELD_ELSEWHERE(b.buildingName)}`)
         const parsed = parseRow({ ...r, until: r.until ?? '', startTime: r.startTime ?? '', endTime: r.endTime ?? '' }, today)
         if (parsed.errors.length) throw ApiError.badRequest(`Row ${r.rowNumber}: ${parsed.errors[0]}`)
+        // Every day passed: the row contributes nothing — no tasks, no assignment.
+        if (!parsed.dates.length) continue
         checked.push({ assigneeId: who.id, role: who.role, building: b })
         for (const d of parsed.dates) {
-          const key = [r.assigneeId, r.buildingId, d, parsed.startTime, parsed.endTime].join('|')
+          const task = { assigneeId: r.assigneeId, buildingId: r.buildingId, taskDate: d, startTime: parsed.startTime, endTime: parsed.endTime }
+          const key = keyOf(task)
           if (seen.has(key)) continue
           seen.add(key)
-          creates.push({ assigneeId: r.assigneeId, buildingId: r.buildingId, taskDate: d, startTime: parsed.startTime, endTime: parsed.endTime })
+          creates.push(task)
           const range = ranges.get(r.assigneeId) ?? { from: d, to: d }
           if (d < range.from) range.from = d
           if (d > range.to) range.to = d
@@ -213,13 +258,12 @@ export function createVisitTaskService({ repo, scope }) {
         }
       }
       if (!creates.length) throw ApiError.badRequest('Nothing to save — every day in this sheet has passed')
-      if (creates.length > MAX_TASKS) throw ApiError.badRequest(`This sheet makes ${creates.length} tasks — the limit is ${MAX_TASKS}`)
 
       // importPlan re-points each building to one holder: the sets must be disjoint.
       const clash = contested(checked)
       if (clash.size) {
-        const [id] = clash.keys()
-        throw ApiError.badRequest(`${buildings.get(id).buildingName} is planned for more than one executive — a building goes to one executive`)
+        const [id] = clash
+        throw ApiError.badRequest(CONTESTED(buildings.get(id).buildingName))
       }
       const toAssign = new Map()
       for (const { assigneeId, role, building } of checked) {
@@ -227,25 +271,25 @@ export function createVisitTaskService({ repo, scope }) {
         if (!toAssign.has(assigneeId)) toAssign.set(assigneeId, new Set())
         toAssign.get(assigneeId).add(building.id)
       }
-      // A team leader never takes a building another team holds.
-      if (actor.role === 'TEAM_LEADER') {
-        const mine = await scope.readableUserIds(actor)
-        for (const set of toAssign.values()) for (const id of set) {
-          const holder = holderOf(buildings.get(id))
-          if (holder && !mine.includes(holder)) throw ApiError.badRequest(`${buildings.get(id).buildingName} is held by another team`)
-        }
-      }
 
+      // Replace unvisited tasks in each range; never recreate one that is kept.
       const deletes = []
+      const kept = new Set()
       for (const [assigneeId, { from, to }] of ranges) {
-        deletes.push(...(await replaceable(assigneeId, from, to, today)).map((t) => t.id))
+        const { del, keep } = await replaceable(assigneeId, from, to, today)
+        deletes.push(...del.map((t) => t.id))
+        for (const k of keep) kept.add(k)
       }
+      creates = creates.filter((t) => !kept.has(keyOf(t)))
+      if (creates.length > MAX_TASKS) throw ApiError.badRequest(`This sheet makes ${creates.length} tasks — the limit is ${MAX_TASKS}`)
+
       const all = [...ranges.values()]
       return repo.importPlan({
         actorId: actor.id,
         assignments: [...toAssign].map(([assigneeId, set]) => ({ assigneeId, buildingIds: [...set] })),
         deletes,
         creates,
+        allowedHolderIds: mine ?? undefined,
         upload: {
           fromDate: all.reduce((m, r) => (r.from < m ? r.from : m), all[0].from),
           toDate: all.reduce((m, r) => (r.to > m ? r.to : m), all[0].to),
