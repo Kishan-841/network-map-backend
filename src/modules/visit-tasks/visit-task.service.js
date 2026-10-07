@@ -214,6 +214,10 @@ export function createVisitTaskService({ repo, scope }) {
     const who = (await scope.assignees(actor)).find((u) => u.id === assigneeId)
     if (!who) throw ApiError.notFound('Person not found')
     if (parseSheetDate(taskDate) !== taskDate) throw ApiError.badRequest('Pick a valid date')
+    // Nothing is planned backwards: a past-dated task on top of an off-plan
+    // visit would relabel it as planned. A past task can still be moved
+    // forward or deleted.
+    if (taskDate < istToday(now)) throw ApiError.badRequest('Pick today or a later day')
     if (taskDate > addDays(istToday(now), MAX_UNTIL_DAYS)) throw ApiError.badRequest(`Plan at most ${MAX_UNTIL_DAYS} days ahead`)
     if (Boolean(startTime) !== Boolean(endTime)) throw ApiError.badRequest('Give both a start and an end time, or neither')
     if (startTime && toMinutes(endTime) <= toMinutes(startTime)) throw ApiError.badRequest('End time must be after start time')
@@ -263,9 +267,10 @@ export function createVisitTaskService({ repo, scope }) {
     },
 
     /**
-     * Edit / move / reassign any task with no matching visit — past ones too
-     * (moving a missed task reschedules it). The actor must plan for both the
-     * current and the new assignee.
+     * Edit / move / reassign any task with no matching visit. A past (missed)
+     * task may be moved forward to today or later, or deleted — never kept or
+     * placed in the past. The actor must plan for both the current and the new
+     * assignee.
      */
     async updateTask(id, patch, actor, now = new Date()) {
       if (!scope.isPlanner(actor.role)) throw ApiError.forbidden()

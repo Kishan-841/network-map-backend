@@ -142,6 +142,17 @@ describe('visit plan single-task edits', () => {
     expect((await patch(pastId, {})).status).toBe(400)
   })
 
+  it('nothing is planned backwards: a create or move to a past day is a 400', async () => {
+    expect((await post({ assigneeId: SE, buildingId: B1, taskDate: yesterday, startTime: null, endTime: null })).status).toBe(400)
+    const future = await prisma.visitTask.create({ data: { assigneeId: SE, buildingId: B1, taskDate: dateOnly(dayAfter), createdById: MGR } })
+    expect((await patch(future.id, { taskDate: yesterday })).status).toBe(400)
+    // A missed task left in the past may not be edited in place either…
+    const missed = await prisma.visitTask.create({ data: { assigneeId: SE, buildingId: B1, taskDate: dateOnly(addDays(today, -2)), createdById: MGR } })
+    expect((await patch(missed.id, { startTime: '09:00', endTime: '10:00' })).status).toBe(400)
+    // …but it can be deleted.
+    expect((await del(missed.id)).status).toBe(200)
+  })
+
   it('an executive cannot add a task — 403', async () => {
     const res = await post({ assigneeId: SE, buildingId: B1, taskDate: tomorrow, startTime: null, endTime: null }, SE, 'SALES_EXECUTIVE')
     expect(res.status).toBe(403)
