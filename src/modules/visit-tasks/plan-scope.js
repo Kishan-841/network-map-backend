@@ -19,6 +19,7 @@ export function createPlanScope({ repo, salesRepo }) {
     isAssigneeRole: (role) => ASSIGNEE_ROLES.includes(role),
 
     async assignees(actor) {
+      if (!actor?.id) return []
       const base = { role: { in: ASSIGNEE_ROLES }, isActive: true }
       if (actor.role === 'ADMIN') return repo.listUsersForPlanning(base)
       if (actor.role === 'SALES_MANAGER') return repo.listUsersForPlanning({ ...base, managerId: actor.id })
@@ -29,13 +30,17 @@ export function createPlanScope({ repo, salesRepo }) {
     },
 
     async readableUserIds(actor) {
+      if (!actor?.id) return []
       if (actor.role === 'ADMIN') return null
       if (actor.role === 'SALES_EXECUTIVE') return [actor.id]
       if (actor.role === 'SALES_MANAGER' || actor.role === 'TEAM_LEADER') return [actor.id, ...(await teamUnder(actor))]
       return []
     },
 
+    // `actor` must be req.user (it carries zoneIds); a bare user row would
+    // narrow a team leader's pool to what their team holds.
     async assignableBuildingsWhere(actor) {
+      if (!actor?.id) return { id: '__none__' }
       if (actor.role === 'ADMIN' || actor.role === 'SALES_MANAGER') return { source: 'COVERAGE' }
       if (actor.role === 'TEAM_LEADER') return poolWhere(actor, scopedUserIds(actor, await teamUnder(actor)))
       return { id: '__none__' }

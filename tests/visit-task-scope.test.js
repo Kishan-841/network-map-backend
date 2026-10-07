@@ -47,4 +47,10 @@ describe('plan scope', () => {
     expect(await scope.canWorkBuilding({ id: 't1', role: 'TEAM_LEADER' }, { id: 'b', zoneId: 'z9', salesAssignments: [] })).toBe(false)
     expect(await scope.canWorkBuilding({ id: 't1', role: 'TEAM_LEADER' }, { id: 'b', zoneId: 'z9', salesAssignments: [{ assignedToId: 'e1' }] })).toBe(true)
   })
+  it('fails closed for an actor with no id, and for roles that plan nothing', async () => {
+    expect(await scope.assignees({ role: 'SALES_MANAGER' })).toEqual([])
+    expect(await scope.readableUserIds({ role: 'SALES_MANAGER' })).toEqual([])
+    expect(await scope.assignableBuildingsWhere({ role: 'ADMIN' })).toEqual({ id: '__none__' })
+    expect(await scope.assignableBuildingsWhere({ id: 'e1', role: 'SALES_EXECUTIVE' })).toEqual({ id: '__none__' })
+  })
 })
