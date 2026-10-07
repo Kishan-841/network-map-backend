@@ -17,6 +17,7 @@ import { cityRoutes } from './modules/cities/city.routes.js'
 import { fiberRouteRoutes } from './modules/fiber-routes/fiber-route.routes.js'
 import { popRoutes } from './modules/pops/pop.routes.js'
 import { salesRoutes } from './modules/sales/sales.routes.js'
+import { visitTaskRoutes } from './modules/visit-tasks/visit-task.routes.js'
 import { closureRoutes } from './modules/closures/closure.routes.js'
 import { splitterRoutes } from './modules/closures/splitter.routes.js'
 import { fiberRoutes } from './modules/fibers/fiber.routes.js'
@@ -78,6 +79,8 @@ export function createApp() {
   app.use('/api/v1/users', userRoutes)
   app.use('/api/v1/zones', zoneRoutes)
   app.use('/api/v1/buildings', buildingRoutes)
+  // Before /api/v1/sales so its own router never sees /tasks.
+  app.use('/api/v1/sales/tasks', visitTaskRoutes)
   app.use('/api/v1/sales', salesRoutes)
   app.use('/api/v1/app-version', appVersionRoutes)
   app.use('/api/v1/app-releases', appReleaseRoutes)
