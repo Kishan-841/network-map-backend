@@ -106,4 +106,9 @@ describe('visit plan read API', () => {
   it('a non-sales role is refused', async () => {
     expect((await get('', SV, 'SURVEYOR')).status).toBe(403)
   })
+
+  it('refuses an impossible calendar day with 400', async () => {
+    const res = await request(app).get('/api/v1/sales/tasks?from=2026-02-30&to=2026-03-02').set(auth(SE, 'SALES_EXECUTIVE'))
+    expect(res.status).toBe(400)
+  })
 })

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { parseSheetDate } from '../../lib/visit-plan.js'
 
 const weekdays = z.array(z.boolean()).length(7)
 
@@ -31,8 +32,8 @@ export const importSchema = z.object({
     weekdays,
   })).min(1).max(3000),
 }).strict()
-
-const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
+// A real calendar day: '2026-02-30' must be refused here, not by Prisma later.
+const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine((d) => parseSheetDate(d) === d, 'Not a real date')
 
 export const rangeQuerySchema = z.object({
   userId: z.string().min(1).max(100).optional(),
