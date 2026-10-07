@@ -131,3 +131,17 @@ describe('Assign to… frees the previous holder\'s planned tasks', () => {
     expect((await aTasks()).length).toBe(4)
   })
 })
+
+describe('a big sheet fits the body limit', () => {
+  it('a preview body just over 1 MB is not refused with 413', async () => {
+    const rows = Array.from({ length: 3000 }, (_, i) => ({
+      rowNumber: i + 2, employee: B, building: `${'Very Long Building Name '.repeat(12)}${i}`.slice(0, 300),
+      date: addDays(today, 1), startTime: '', endTime: '', until: '', weekdays: none,
+    }))
+    const size = Buffer.byteLength(JSON.stringify({ rows }))
+    expect(size).toBeGreaterThan(1024 * 1024)
+    const res = await request(app).post('/api/v1/sales/tasks/preview').set(mgr).send({ rows })
+    expect(res.status).not.toBe(413)
+    expect(res.status).toBe(200)
+  })
+})

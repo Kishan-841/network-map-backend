@@ -55,6 +55,10 @@ export function createApp() {
       exposedHeaders: ['Content-Disposition', 'X-Export-Rows', 'X-Export-Truncated'],
     }),
   )
+  // A visit-plan sheet is up to 3,000 rows of long names — more than 1 MB.
+  // Parsed here first, so the global 1 MB parser below sees a consumed body
+  // and skips it.
+  app.use('/api/v1/sales/tasks', express.json({ limit: '5mb' }))
   app.use(express.json({ limit: '1mb' }))
 
   app.get('/api/v1/health', (req, res) => {
