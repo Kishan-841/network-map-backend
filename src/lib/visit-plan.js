@@ -68,8 +68,12 @@ export const isYes = (value) => ['y', 'yes', '✓', 'true', '1'].includes(String
 
 /** Every day the row asks for: Date alone, or each ticked weekday Date..until. */
 export function expandDates({ date, until, weekdays }) {
+  const ISO = /^\d{4}-\d{2}-\d{2}$/
+  if (typeof date !== 'string' || !ISO.test(date)) return []
+  if (!Array.isArray(weekdays) || weekdays.length !== 7) return []
   if (!weekdays.some(Boolean)) return [date]
-  if (!until || until < date) return []
+  if (typeof until !== 'string' || !ISO.test(until) || until < date) return []
+  if (until > addDays(date, MAX_UNTIL_DAYS * 2)) return []
   const out = []
   for (let day = date; day <= until; day = addDays(day, 1)) {
     if (weekdays[weekdayIndex(day)]) out.push(day)

@@ -63,4 +63,19 @@ describe('expandDates', () => {
   it('until before date gives nothing', () => {
     expect(expandDates({ date: '2026-11-10', until: '2026-11-01', weekdays: [true, ...none.slice(1)] })).toEqual([])
   })
+  it('defends itself against bad input', () => {
+    const mon = [true, false, false, false, false, false, false]
+    expect(expandDates({ date: '2026-11-02', until: 'garbage', weekdays: mon })).toEqual([])
+    expect(expandDates({ date: '2026-11-02', until: '9999-12-31', weekdays: mon })).toEqual([])
+    expect(expandDates({ date: 'bad', until: '2026-11-30', weekdays: mon })).toEqual([])
+    expect(expandDates({ date: '2026-11-02', until: '2026-11-30', weekdays: mon.slice(1) })).toEqual([])
+  })
+})
+
+describe('boundaries', () => {
+  it('IST midnight edge and leap day', () => {
+    expect(istDay(new Date('2026-11-02T18:29:59.999Z'))).toBe('2026-11-02')
+    expect(istDay(new Date('2026-11-02T18:30:00Z'))).toBe('2026-11-03')
+    expect(parseSheetDate('29-02-2028')).toBe('2028-02-29')
+  })
 })
