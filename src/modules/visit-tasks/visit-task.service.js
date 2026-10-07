@@ -198,7 +198,8 @@ export function createVisitTaskService({ repo, scope }) {
     for (const [day, { tasks: dt, visits: dv }] of days) {
       const m = matchDay({ tasks: dt, visits: dv, now })
       out.tasks.push(...m.tasks)
-      out.offPlan.push(...m.offPlan.map((v) => ({
+      // Someone else's visit they came along on is not their off-plan visit.
+      out.offPlan.push(...m.offPlan.filter((v) => !v.viaCompanion).map((v) => ({
         id: v.id, userId: v.userId, buildingId: v.buildingId, buildingName: v.building?.buildingName ?? null,
         visitedAt: v.visitedAt, checkOutAt: v.checkOutAt, day,
       })))

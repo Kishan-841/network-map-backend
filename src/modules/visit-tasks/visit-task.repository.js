@@ -2,6 +2,7 @@ import { prisma } from '../../lib/prisma.js'
 import { ApiError } from '../../lib/api-error.js'
 import { dateOnly } from '../../lib/visit-plan.js'
 import { releaseStrandedTasks, strandedTasks } from '../../lib/handover-tasks.js'
+import { visitsForMatching } from '../../lib/visit-matching.js'
 
 const userLite = { id: true, name: true, email: true, role: true, managerId: true, teamLeaderId: true, isActive: true }
 const buildingLite = {
@@ -43,15 +44,9 @@ export const visitTaskRepository = {
       orderBy: [{ taskDate: 'asc' }, { startTime: 'asc' }],
     }),
 
-  visitsInRange: ({ userIds, from, to }) =>
-    prisma.buildingVisit.findMany({
-      where: { ...(userIds ? { userId: { in: userIds } } : {}), visitedAt: { gte: from, lt: to } },
-      select: {
-        id: true, userId: true, buildingId: true, visitedAt: true, checkOutAt: true,
-        building: { select: { id: true, buildingName: true } },
-      },
-      orderBy: { visitedAt: 'asc' },
-    }),
+  // The visits that count for these people's tasks: their own plus those they
+  // were a companion on (lib/visit-matching.js), in visitedAt order.
+  visitsInRange: ({ userIds, from, to }) => visitsForMatching(prisma, { userIds, from, to }),
 
   findTask: (id) => prisma.visitTask.findUnique({ where: { id }, include: taskInclude }),
   createTask: (data) => prisma.visitTask.create({ data, include: taskInclude }),

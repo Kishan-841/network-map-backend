@@ -23,6 +23,12 @@ export function taskStatus(task, visit, now) {
   return m <= toMinutes(task.endTime) ? 'DUE_NOW' : 'OVERDUE'
 }
 
+/** Who checked in rides along when the visit came from lib/visit-matching.js (a TL's visit with the executive as companion). */
+const visitOut = (v) => ({
+  id: v.id, visitedAt: v.visitedAt, checkOutAt: v.checkOutAt,
+  ...('byUserId' in v ? { byUserId: v.byUserId, byName: v.byName, viaCompanion: Boolean(v.viaCompanion) } : {}),
+})
+
 const byStart = (a, b) => (a.startTime ?? '99').localeCompare(b.startTime ?? '99')
 
 /**
@@ -49,7 +55,7 @@ export function matchDay({ tasks, visits, now }) {
   return {
     tasks: tasks.map((t) => {
       const v = pairs.get(t.id) ?? null
-      return { ...t, status: taskStatus(t, v, now), visit: v && { id: v.id, visitedAt: v.visitedAt, checkOutAt: v.checkOutAt } }
+      return { ...t, status: taskStatus(t, v, now), visit: v && visitOut(v) }
     }),
     offPlan: visits.filter((v) => !used.has(v.id)),
   }

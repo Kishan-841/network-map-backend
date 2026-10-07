@@ -1,4 +1,5 @@
 import { addDays, dateOnly, istToday } from './visit-plan.js'
+import { visitsForMatching } from './visit-matching.js'
 
 /**
  * When a building moves to a new holder, the previous holder can no longer
@@ -32,12 +33,11 @@ export async function strandedTasks(db, { buildingIds, newHolderId, now = new Da
     where: { OR: pairs, taskDate: { gte: dateOnly(today) } },
     select: { id: true, assigneeId: true, buildingId: true, taskDate: true },
   })
-  const visits = await db.buildingVisit.findMany({
-    where: {
-      OR: pairs.map((p) => ({ userId: p.assigneeId, buildingId: p.buildingId })),
-      visitedAt: { gte: new Date(`${today}T00:00:00+05:30`), lt: new Date(`${addDays(today, 1)}T00:00:00+05:30`) },
-    },
-    select: { userId: true, buildingId: true },
+  // Own visits and companion visits both count (lib/visit-matching.js).
+  const visits = await visitsForMatching(db, {
+    userIds: [...new Set(pairs.map((p) => p.assigneeId))],
+    from: new Date(`${today}T00:00:00+05:30`),
+    to: new Date(`${addDays(today, 1)}T00:00:00+05:30`),
   })
   const visitedToday = new Set(visits.map((v) => `${v.userId}|${v.buildingId}`))
   const byPair = new Map()
