@@ -159,6 +159,8 @@ model User {
   appReleases        AppRelease[]      @relation("AppReleaseCreatedBy")
   permissionVisits   PermissionVisit[] @relation("PermissionVisitBy")
   societiesDecided   Building[]        @relation("BuildingApprovalDecidedBy")
+  surveysSubmitted   SocietySurvey[]   @relation("SocietySurveySubmittedBy")
+  surveysDecided     SocietySurvey[]   @relation("SocietySurveyDecidedBy")
 }
 
 /// One row per pincode an acquisition agent covers (within one city).
@@ -544,6 +546,7 @@ model Building {
   salesVisits      BuildingVisit[]
   salesInquiries   CustomerInquiry[]
   permissionVisits PermissionVisit[]
+  societySurvey    SocietySurvey?
 
   @@index([latitude, longitude])
   @@index([source, createdById])
@@ -726,11 +729,43 @@ model PermissionVisit {
   statusAfter  String?
   /// Fields a details edit changed, e.g. contact, offer, photos.
   changes      String[] @default([])
-  /// 'ADDED' | 'VISIT' | 'EDIT' | 'SUBMITTED' | 'WITHDRAWN' | 'APPROVED' | 'REJECTED'
+  /// 'ADDED' | 'VISIT' | 'EDIT' | 'SUBMITTED' | 'WITHDRAWN' | 'APPROVED' | 'REJECTED' |
+  /// 'SURVEY_SUBMITTED' | 'SURVEY_EDITED' | 'MATERIALS_APPROVED' | 'MATERIALS_REJECTED' | 'MARKED_LIVE'
   kind         String
   createdAt    DateTime @default(now())
 
   @@index([buildingId, createdAt])
+}
+
+/// Society permissions, phase 3: the zone surveyor's site survey + material
+/// request for an APPROVED society. One per building. JSON shapes and the
+/// material catalogue: src/lib/society-materials.js.
+model SocietySurvey {
+  id            String    @id @default(cuid())
+  buildingId    String    @unique
+  building      Building  @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  /// 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED'
+  status        String
+  /// { nameOk, nameCorrection?, wingsOk, homePassOk, note? }
+  checks        Json      @default("{}")
+  /// [{ name, floors, flatsPerFloor, shafts, homePass }]
+  wings         Json      @default("[]")
+  /// [{ from, to, method: 'AERIAL' | 'UNDERGROUND' | 'TRAY', meters? }]
+  links         Json      @default("[]")
+  /// { <catalogue key>: qty } — zero quantities are not stored
+  materials     Json      @default("{}")
+  /// The last reject reason — kept until the materials are approved.
+  rejectReason  String?
+  submittedAt   DateTime?
+  submittedById String?
+  submittedBy   User?     @relation("SocietySurveySubmittedBy", fields: [submittedById], references: [id], onDelete: SetNull)
+  decidedAt     DateTime?
+  decidedById   String?
+  decidedBy     User?     @relation("SocietySurveyDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([status])
 }
 
 /// The decision-maker an acquisition agent met at the building.
