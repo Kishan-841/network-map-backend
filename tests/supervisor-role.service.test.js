@@ -62,10 +62,11 @@ const build = (buildings) => {
 }
 
 describe('SUPERVISOR sees both registries', () => {
-  it('applies no source filter at all', async () => {
+  // Both registries — but never the societies (society permissions, phase 1).
+  it('applies no registry filter beyond hiding PERMISSION societies', async () => {
     const { repo, service } = build()
     await service.listBuildings({}, SUPERVISOR)
-    expect(repo.calls[0].source).toBeUndefined()
+    expect(repo.calls[0].source).toEqual({ not: 'PERMISSION' })
   })
 
   it('still scopes a manager to the coverage registry', async () => {
@@ -141,6 +142,6 @@ describe('SUPERVISOR may edit anything it can see', () => {
   it('marks buildings live in bulk across both registries', async () => {
     const { repo, service } = build()
     await service.bulkSetLive({ filter: {}, isLive: true }, SUPERVISOR)
-    expect(repo.updateMany.mock.calls[0][0].source).toBeUndefined()
+    expect(repo.updateMany.mock.calls[0][0].source).toEqual({ not: 'PERMISSION' })
   })
 })

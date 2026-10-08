@@ -32,6 +32,7 @@ describe('building service listMarkers', () => {
       zoneId: 'z1',
       feasibleStatus: 'FEASIBLE',
       createdById: 'u1',
+      source: { not: 'PERMISSION' },
     })
   })
 
@@ -77,7 +78,7 @@ describe('building service listMarkers', () => {
       page: 3,
       pageSize: 500,
     })
-    expect(repo.calls[0].where).toEqual({})
+    expect(repo.calls[0].where).toEqual({ source: { not: 'PERMISSION' } })
   })
 
   it('returns the repository rows unchanged', async () => {

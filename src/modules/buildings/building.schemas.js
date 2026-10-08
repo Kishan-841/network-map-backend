@@ -31,6 +31,14 @@ export const PERMISSION_STATUSES = ['ACCEPTED', 'FOLLOW_UP', 'DENIED']
 export const SOCIETY_OFFERS = ['PAYMENT', 'DEMO']
 export const PAYMENT_TYPES = ['ONE_TIME', 'RECURRING']
 
+/**
+ * The note a Permission Executive (or an admin) writes with every change to a
+ * society: the first add, a visit update, a details edit. Optional in the
+ * schemas — the service demands it where it applies, with a message that says
+ * so rather than the generic validation error.
+ */
+export const remarkSchema = z.string().trim().max(1000)
+
 export const addPhotoSchema = z.object({
   type: z.enum(PHOTO_TYPES),
   url: z.string().min(1).max(500),
@@ -132,8 +140,27 @@ export const listQuerySchema = z.object({
   pageSize: z.coerce.number().int().positive().max(500).optional(),
 })
 
+// A building's photo set: one entrance photo and one permission letter at most.
+const photosSchema = z
+  .array(
+    z.object({
+      type: z.enum(PHOTO_TYPES),
+      url: z.string().min(1).max(500),
+    }),
+  )
+  .max(20)
+  .refine(
+    (photos) =>
+      ['ENTRANCE', 'PERMISSION_LETTER'].every(
+        (type) => photos.filter((photo) => photo.type === type).length <= 1,
+      ),
+    { message: 'Only one entrance photo and one permission letter per building' },
+  )
+
 // Admin/Manager edit — location (lat/lng/placeId) is immutable and the
 // permission documentUrl belongs to the photo manager, so neither appears here.
+// `contact`, `photos` (the full desired set) and `remark` apply only to a
+// PERMISSION building (society permissions) — the service refuses them elsewhere.
 export const updateBuildingSchema = z
   .object({
     buildingName: z.string().trim().min(1).max(200),
@@ -165,6 +192,9 @@ export const updateBuildingSchema = z
         demoCount: z.number().int().nonnegative().nullable(),
       })
       .partial(),
+    contact: z.lazy(() => contactSchema),
+    photos: photosSchema,
+    remark: remarkSchema,
   })
   .partial()
   .strict()
@@ -234,20 +264,8 @@ export const createBuildingSchema = z.object({
       demoCount: z.number().int().nonnegative().optional(),
     })
     .optional(),
-  photos: z
-    .array(
-      z.object({
-        type: z.enum(PHOTO_TYPES),
-        url: z.string().min(1).max(500),
-      }),
-    )
-    .max(20)
-    .refine(
-      (photos) =>
-        ['ENTRANCE', 'PERMISSION_LETTER'].every(
-          (type) => photos.filter((photo) => photo.type === type).length <= 1,
-        ),
-      { message: 'Only one entrance photo and one permission letter per building' },
-    )
-    .optional(),
+  photos: photosSchema.optional(),
+  // Compulsory for a Permission Executive (the first visit's note); ignored
+  // for every other role.
+  remark: remarkSchema.optional(),
 })

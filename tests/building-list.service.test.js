@@ -20,7 +20,7 @@ describe('building service listBuildings filters', () => {
   it('passes an empty where when no filters given', async () => {
     const repo = captureRepo()
     await createBuildingService({ buildingRepository: repo }).listBuildings({})
-    expect(repo.calls.find((c) => c.where).where).toEqual({})
+    expect(repo.calls.find((c) => c.where).where).toEqual({ source: { not: 'PERMISSION' } })
   })
 
   it('builds zone/status/surveyor filters', async () => {
@@ -34,16 +34,17 @@ describe('building service listBuildings filters', () => {
       zoneId: 'z1',
       feasibleStatus: 'FEASIBLE',
       createdById: 'u1',
+      source: { not: 'PERMISSION' },
     })
   })
 
   it('filters by live status when isLive is given', async () => {
     const repo = captureRepo()
     await createBuildingService({ buildingRepository: repo }).listBuildings({ isLive: true })
-    expect(repo.calls.find((c) => c.where).where).toEqual({ isLive: true })
+    expect(repo.calls.find((c) => c.where).where).toEqual({ isLive: true, source: { not: 'PERMISSION' } })
     const repo2 = captureRepo()
     await createBuildingService({ buildingRepository: repo2 }).listBuildings({ isLive: false })
-    expect(repo2.calls.find((c) => c.where).where).toEqual({ isLive: false })
+    expect(repo2.calls.find((c) => c.where).where).toEqual({ isLive: false, source: { not: 'PERMISSION' } })
   })
 
   it('filters by cityId through the zone operator', async () => {

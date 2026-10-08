@@ -28,7 +28,7 @@ export const statsRepository = {
              COALESCE(SUM(d."homePass"), 0)::int AS "homePass"
       FROM "Operator" o
       JOIN "Zone" z ON z."operatorId" = o.id
-      JOIN "Building" b ON b."zoneId" = z.id
+      JOIN "Building" b ON b."zoneId" = z.id AND b."source" <> 'PERMISSION'
       LEFT JOIN "BuildingDetails" d ON d."buildingId" = b.id
       GROUP BY o.id, o.name
       ORDER BY "buildings" DESC`,
@@ -72,6 +72,7 @@ export const statsRepository = {
       JOIN "Zone" z ON z.id = b."zoneId"
       LEFT JOIN "Operator" o ON o.id = z."operatorId"
       WHERE b."createdAt" >= ${sinceDate}
+        AND b."source" <> 'PERMISSION'
         AND (${createdById}::text IS NULL OR b."createdById" = ${createdById})
         AND (${operatorId}::text IS NULL OR z."operatorId" = ${operatorId})
         AND (${cityId}::text IS NULL OR o."cityId" = ${cityId})

@@ -3,6 +3,7 @@ import { ApiError } from '../../lib/api-error.js'
 import { dateOnly } from '../../lib/visit-plan.js'
 import { releaseStrandedTasks, strandedTasks } from '../../lib/handover-tasks.js'
 import { visitsForMatching } from '../../lib/visit-matching.js'
+import { NOT_PERMISSION, withoutPermission } from '../../lib/building-source.js'
 
 const userLite = { id: true, name: true, email: true, role: true, managerId: true, teamLeaderId: true, isActive: true }
 const buildingLite = {
@@ -21,11 +22,12 @@ export const visitTaskRepository = {
     (await prisma.user.findUnique({ where: { id: userId }, select: { assignedZones: { select: { id: true } } } }))
       ?.assignedZones.map((z) => z.id) ?? [],
 
-  listBuildingsLite: (where) => prisma.building.findMany({ where, select: buildingLite }),
+  // Society-permission rows are never planned (phase 1).
+  listBuildingsLite: (where) => prisma.building.findMany({ where: withoutPermission(where), select: buildingLite }),
 
   searchBuildings: (where, q, take = 10) =>
     prisma.building.findMany({
-      where: { AND: [where, { OR: [
+      where: { AND: [where, NOT_PERMISSION, { OR: [
         { buildingName: { contains: q, mode: 'insensitive' } },
         { formattedAddress: { contains: q, mode: 'insensitive' } },
       ] }] },

@@ -1,6 +1,7 @@
 import { prisma } from '../../lib/prisma.js'
 import { ApiError } from '../../lib/api-error.js'
 import { releaseStrandedTasks } from '../../lib/handover-tasks.js'
+import { NOT_PERMISSION, withoutPermission } from '../../lib/building-source.js'
 
 // What a scoped building row returns to the field team — enough to list and map
 // it, plus its current holder. Never the whole registry shape.
@@ -86,18 +87,20 @@ export const salesRepository = {
       .then((r) => r.map((u) => u.id)),
 
   listBuildings: (scopeWhere) =>
-    prisma.building.findMany({ where: scopeWhere, select: buildingCard, orderBy: { buildingName: 'asc' } }),
+    prisma.building.findMany({ where: withoutPermission(scopeWhere), select: buildingCard, orderBy: { buildingName: 'asc' } }),
 
   // Every building in the registry, for the sales map a manager / admin sees.
   // Carries the ACTIVE holder (via buildingCard) so the caller can flag which
   // ones are assigned within their team.
   listAllBuildings: () =>
-    prisma.building.findMany({ select: buildingCard, orderBy: { buildingName: 'asc' } }),
+    // Society-permission rows stay out of the sales views (phase 1).
+    prisma.building.findMany({ where: NOT_PERMISSION, select: buildingCard, orderBy: { buildingName: 'asc' } }),
 
   // Registry search for assignment — name or address, with the current holder.
   searchBuildings: (q) =>
     prisma.building.findMany({
       where: {
+        ...NOT_PERMISSION,
         OR: [
           { buildingName: { contains: q, mode: 'insensitive' } },
           { formattedAddress: { contains: q, mode: 'insensitive' } },
@@ -108,7 +111,7 @@ export const salesRepository = {
       take: 30,
     }),
 
-  countExisting: (ids) => prisma.building.count({ where: { id: { in: ids } } }),
+  countExisting: (ids) => prisma.building.count({ where: { id: { in: ids }, ...NOT_PERMISSION } }),
 
   // Of these building ids, the ones whose ACTIVE holder is in the scope set
   // (null scope = admin = every id that has an active assignment).
@@ -131,7 +134,7 @@ export const salesRepository = {
       include: { assignedTo: holder, assignedBy: holder },
     }),
 
-  buildingExists: (id) => prisma.building.findUnique({ where: { id }, select: { id: true } }),
+  buildingExists: (id) => prisma.building.findFirst({ where: { id, ...NOT_PERMISSION }, select: { id: true } }),
 
   buildingBasic: (id) =>
     prisma.building.findUnique({ where: { id }, select: { id: true, buildingName: true, formattedAddress: true } }),

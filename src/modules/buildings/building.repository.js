@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js'
+import { NOT_PERMISSION } from '../../lib/building-source.js'
 
 const fullInclude = {
   contact: true,
@@ -170,11 +171,14 @@ export const buildingRepository = {
   },
   // Capped so a large/degenerate box can't pull the whole table into memory.
   // The nearby check only needs enough candidates to flag a duplicate.
-  findWithinBounds: ({ minLat, maxLat, minLon, maxLon }) =>
+  // Society-permission rows are left out (partner matching, coverage
+  // duplicates) unless the caller asks — the PE's own duplicate check does.
+  findWithinBounds: ({ minLat, maxLat, minLon, maxLon }, { includePermission = false } = {}) =>
     prisma.building.findMany({
       where: {
         latitude: { gte: minLat, lte: maxLat },
         longitude: { gte: minLon, lte: maxLon },
+        ...(!includePermission && NOT_PERMISSION),
       },
       include: listInclude,
       take: 200,
@@ -183,8 +187,11 @@ export const buildingRepository = {
     prisma.building.findFirst({
       where: { zoneId, buildingName: { equals: buildingName, mode: 'insensitive' } },
     }),
-  findByPlaceId: (placeId) =>
-    prisma.building.findUnique({ where: { placeId }, include: listInclude }),
+  findByPlaceId: (placeId, { includePermission = false } = {}) =>
+    prisma.building.findFirst({
+      where: { placeId, ...(!includePermission && NOT_PERMISSION) },
+      include: listInclude,
+    }),
   createPhoto: (data) => prisma.photo.create({ data }),
   findPhotoById: (id) => prisma.photo.findUnique({ where: { id } }),
   deletePhoto: (id) => prisma.photo.delete({ where: { id } }),

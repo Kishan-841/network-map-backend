@@ -2,6 +2,8 @@ import { ApiError } from '../../lib/api-error.js'
 import { homePassTier, HOME_PASS_TIERS } from '../../lib/home-pass-tier.js'
 import { haversineMeters, boundingBox } from '../../lib/geo.js'
 import { isSimilarName } from '../../lib/name-similarity.js'
+import { PERMISSION_STATUSES } from './building.schemas.js'
+import { diffPermissionEdit } from './permission-edit-diff.js'
 
 /**
  * The most rows one export will carry. Well beyond the current registry, and
@@ -29,6 +31,13 @@ const PINCODE_AT_END = /\b([1-9][0-9]{5})\b(?:,[^,]*)?\s*$/
 export const exportPincode = (building) => {
   if (building.pincode) return building.pincode
   return building.formattedAddress?.match(PINCODE_AT_END)?.[1] ?? ''
+}
+
+/** The note every society-permission change carries (first add, visit, edit). */
+export function requireRemark(remark) {
+  const text = typeof remark === 'string' ? remark.trim() : ''
+  if (!text) throw ApiError.badRequest('A remark is required — say what happened at this society')
+  return text
 }
 
 export function createBuildingService({ buildingRepository, storage, userRepository, zoneRepository, operatorRepository }) {
@@ -126,12 +135,15 @@ export function createBuildingService({ buildingRepository, storage, userReposit
     if (!where.source && ['ADMIN', 'MANAGER', 'SURVEYOR', 'SALES_MANAGER'].includes(actor?.role)) {
       where.source = 'COVERAGE'
     }
-    // A Permission Executive works the coverage registry but sees only the
-    // societies they added themselves.
+    // A Permission Executive sees only the societies they added themselves —
+    // their own PERMISSION registry (society permissions, phase 1).
     if (actor?.role === 'PERMISSION_EXECUTIVE') {
-      where.source = 'COVERAGE'
+      where.source = 'PERMISSION'
       where.createdById = actor.id
     }
+    // Everyone else never sees PERMISSION rows here (SUPERVISOR, and any role
+    // without a default, included): they live in /permission-buildings.
+    if (!where.source) where.source = { not: 'PERMISSION' }
     const andWhere = []
 
     if (pincode) where.pincode = pincode
@@ -198,6 +210,12 @@ export function createBuildingService({ buildingRepository, storage, userReposit
     const assignedZoneIds =
       actor?.role === 'SURVEYOR' ? await userRepository.assignedZoneIds(actor.id) : []
     return (building) => {
+      // A society-permission row is the executive's own and the admin's —
+      // hidden from every other role, even ones that read the whole registry.
+      if (building.source === 'PERMISSION') {
+        return actor?.role === 'ADMIN' ||
+          (actor?.role === 'PERMISSION_EXECUTIVE' && building.createdById === actor.id)
+      }
       switch (actor?.role) {
         case 'ADMIN':
         case 'MANAGER':
@@ -267,10 +285,101 @@ export function createBuildingService({ buildingRepository, storage, userReposit
     return building
   }
 
+  /**
+   * A details edit on a society (PERMISSION building). Only its executive or
+   * an ADMIN; a remark is compulsory; the fields that actually changed are
+   * written to its history in the same statement as the edit, and an edit
+   * that changes nothing is refused (a visit update is the way to add a note).
+   */
+  async function updatePermissionBuilding(existing, { details, permission, contact, photos, remark, building }, actor) {
+    if (actor?.role === 'PERMISSION_EXECUTIVE') {
+      if (existing.createdById !== actor.id) {
+        throw ApiError.forbidden('You can only edit societies you added')
+      }
+      if (building.isLive !== undefined) {
+        throw ApiError.forbidden('Only admins or managers can mark a building live')
+      }
+    } else if (actor?.role !== 'ADMIN') {
+      // Hidden from every other role — the same 404 a read gives them.
+      throw ApiError.notFound('Building not found')
+    }
+    const note = requireRemark(remark)
+    if (permission?.permissionStatus != null && !PERMISSION_STATUSES.includes(permission.permissionStatus)) {
+      throw ApiError.badRequest(`Permission status must be one of ${PERMISSION_STATUSES.join(', ')}`)
+    }
+    if (building.zoneId && building.zoneId !== existing.zoneId) {
+      const zone = await zoneRepository.findById(building.zoneId)
+      if (!zone) throw ApiError.badRequest('Zone does not exist')
+    }
+    const nextPhotos = photos?.map((photo) => {
+      assertOwnedUrl(photo.url)
+      return { type: photo.type, url: canonical(photo.url) }
+    })
+
+    const { changes, statusBefore, statusAfter, photoPlan } = diffPermissionEdit(existing, {
+      building,
+      details,
+      permission,
+      contact,
+      photos: nextPhotos,
+    })
+    if (changes.length === 0) {
+      throw ApiError.badRequest('Nothing changed — use Add visit update to record a visit')
+    }
+
+    const data = { ...building }
+    if (details) data.details = { upsert: { create: details, update: details } }
+    const patch = permission ? { ...permission } : {}
+    if (patch.permissionDate !== undefined) {
+      patch.permissionDate = patch.permissionDate ? new Date(patch.permissionDate) : null
+    }
+    if (patch.renewalDate !== undefined) {
+      patch.renewalDate = patch.renewalDate ? new Date(patch.renewalDate) : null
+    }
+    // The permission letter photo IS the permission document (as addPhoto keeps it).
+    if (photoPlan && photoPlan.documentUrl !== undefined) patch.documentUrl = photoPlan.documentUrl
+    if (Object.keys(patch).length) data.permission = { upsert: { create: patch, update: patch } }
+    if (contact) {
+      const c = {
+        contactName: contact.contactName,
+        contactPhone: contact.contactPhone,
+        contactEmail: contact.contactEmail ?? null,
+        designation: contact.designation,
+        designationOther: contact.designation === 'OTHER' ? contact.designationOther ?? null : null,
+      }
+      data.contact = { upsert: { create: c, update: c } }
+    }
+    if (photoPlan) {
+      data.photos = {
+        ...(photoPlan.removeIds.length && { deleteMany: { id: { in: photoPlan.removeIds } } }),
+        ...(photoPlan.add.length && { create: photoPlan.add }),
+      }
+    }
+    data.permissionVisits = {
+      create: { userId: actor.id, remark: note, kind: 'EDIT', changes, statusBefore, statusAfter },
+    }
+    const updated = await buildingRepository.update(existing.id, data)
+
+    // Files of removed photos go after the row change — best-effort, as elsewhere.
+    for (const url of photoPlan?.removeUrls ?? []) {
+      const key = storage?.keyFromUrl(url)
+      if (!key) continue
+      try {
+        await storage.delete({ key })
+      } catch (err) {
+        console.error('File deletion failed (row removed):', err.message)
+      }
+    }
+    return signUrls(updated)
+  }
+
   return {
     async createBuilding(input, createdById, actor) {
       // eslint-disable-next-line prefer-const -- photos is normalised below
-      let { details, permission, photos, contact, ...building } = input
+      let { details, permission, photos, contact, remark, ...building } = input
+      // A Permission Executive's first visit needs its note; checked before any
+      // other rule so the form hears about it straight away.
+      const peRemark = actor?.role === 'PERMISSION_EXECUTIVE' ? requireRemark(remark) : null
       photos?.forEach((photo) => assertOwnedUrl(photo.url))
       if (permission?.documentUrl) assertOwnedUrl(permission.documentUrl)
       photos = photos?.map((photo) => ({ ...photo, url: canonical(photo.url) }))
@@ -356,6 +465,21 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       const created = await buildingRepository.create({
         ...building,
         createdById,
+        // A Permission Executive's society lives in its own registry, with
+        // its history starting at this first visit — written in the same
+        // statement, so a society never exists without its ADDED row.
+        ...(peRemark && {
+          source: 'PERMISSION',
+          permissionVisits: {
+            create: {
+              userId: createdById,
+              remark: peRemark,
+              kind: 'ADDED',
+              statusBefore: null,
+              statusAfter: permission?.permissionStatus ?? null,
+            },
+          },
+        }),
         // A surveyor adding a building means: surveyed, and viable for fiber
         // (user decision — ease of use over a manual status step).
         feasibleStatus: 'FEASIBLE',
@@ -474,9 +598,18 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       return signUrls(withTier(building))
     },
 
-    async updateBuilding(id, { details, permission, ...building }, actor) {
+    async updateBuilding(id, { details, permission, contact, photos, remark, ...building }, actor) {
       const existing = await buildingRepository.findById(id)
       if (!existing) throw ApiError.notFound('Building not found')
+      if (existing.source === 'PERMISSION') {
+        return updatePermissionBuilding(existing, { details, permission, contact, photos, remark, building }, actor)
+      }
+      if (contact || photos) {
+        throw ApiError.badRequest('Contact and photos are edited this way only on a society')
+      }
+      if (Object.keys(building).length === 0 && !details && !permission) {
+        throw ApiError.badRequest('Provide at least one field to update')
+      }
       // A granted surveyor edits what they logged and nothing else. The route
       // has already checked the grant; this is the row-level half of it, and
       // it mirrors the rules that applied when they created the building.
@@ -578,9 +711,13 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       return { count, oltId, ponPorts: ports }
     },
 
-    async updateStatus(id, { feasibleStatus, surveyStatus, isLive }) {
+    async updateStatus(id, { feasibleStatus, surveyStatus, isLive }, actor) {
       const building = await buildingRepository.findById(id)
       if (!building) throw ApiError.notFound('Building not found')
+      // Society-permission rows are hidden from the coverage roles (phase 1).
+      if (building.source === 'PERMISSION' && actor?.role !== 'ADMIN') {
+        throw ApiError.notFound('Building not found')
+      }
       return buildingRepository.update(id, {
         ...(feasibleStatus && { feasibleStatus }),
         ...(surveyStatus && { surveyStatus }),
@@ -590,7 +727,14 @@ export function createBuildingService({ buildingRepository, storage, userReposit
 
     async findNearby({ latitude, longitude, radiusMeters, name, placeId }, actor) {
       const box = boundingBox(latitude, longitude, radiusMeters)
-      const candidates = await buildingRepository.findWithinBounds(box)
+      // Societies are a duplicate only for whoever may read them (the
+      // executive who added them, an admin); for everyone else they are not
+      // part of the registry at all — not even as a masked "one exists here".
+      const includePermission = ['ADMIN', 'PERMISSION_EXECUTIVE'].includes(actor?.role)
+      const canRead = await readScope(actor)
+      const candidates = (await buildingRepository.findWithinBounds(box, { includePermission })).filter(
+        (b) => b.source !== 'PERMISSION' || canRead(b),
+      )
 
       const withinRadius = candidates
         .map((building) => ({
@@ -603,7 +747,8 @@ export function createBuildingService({ buildingRepository, storage, userReposit
 
       // An exact placeId match is a duplicate no matter how far the GPS drifted.
       if (placeId && !withinRadius.some((b) => b.placeId === placeId)) {
-        const exact = await buildingRepository.findByPlaceId(placeId)
+        const found = await buildingRepository.findByPlaceId(placeId, { includePermission })
+        const exact = found && (found.source !== 'PERMISSION' || canRead(found)) ? found : null
         if (exact) {
           withinRadius.push({
             ...exact,
@@ -613,8 +758,6 @@ export function createBuildingService({ buildingRepository, storage, userReposit
           })
         }
       }
-
-      const canRead = await readScope(actor)
 
       return withinRadius
         .map((building) => {
