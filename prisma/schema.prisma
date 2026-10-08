@@ -432,6 +432,8 @@ model Closure {
   buildingId String?
   building   Building? @relation(fields: [buildingId], references: [id], onDelete: SetNull)
   notes      String?
+  /// Photos: an array of upload-API URLs (stored canonical, served signed).
+  images     Json?
   /// Who made it. Only they and an ADMIN can see or change it. Null only for
   /// rows the migration could not trace to anyone — those are ADMIN's alone.
   createdById String?

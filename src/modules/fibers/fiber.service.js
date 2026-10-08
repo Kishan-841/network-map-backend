@@ -74,6 +74,13 @@ export function createFiberService(deps) {
     return { ...data, images: data.images.map((url) => storage.canonicalUrl(url)) }
   }
 
+  /** A drawn closure's photos, checked and made canonical — or nothing at all. */
+  function closureImagesOf(images) {
+    if (!images) return {}
+    assertOwnedImages(images)
+    return { images: canonicalImages({ images }).images }
+  }
+
   /**
    * Same rule as building photos: the stored URL is the object's identity, the
    * link handed to a browser is short-lived and signed.
@@ -124,6 +131,8 @@ export function createFiberService(deps) {
                 tubeCount: p.newClosure.tubeCount ?? null,
                 inCoreCount: p.newClosure.inCoreCount ?? null,
                 outCoreCount: p.newClosure.outCoreCount ?? null,
+                // Same rule as the closure form: our own uploads, stored canonical.
+                ...closureImagesOf(p.newClosure.images),
                 createdById: owner,
               },
               tx,
