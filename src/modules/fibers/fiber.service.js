@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client'
+import { isVisibleBuilding } from '../../lib/building-source.js'
 import { ApiError } from '../../lib/api-error.js'
 import { prisma } from '../../lib/prisma.js'
 import { pathMeters } from '../../lib/fiber-geo.js'
@@ -178,7 +179,8 @@ export function createFiberService(deps) {
         })
       } else {
         const b = await buildingRepository.findById(p.buildingId)
-        if (!b) throw ApiError.badRequest('Building does not exist')
+        // A society not yet approved is not part of the network's registry.
+        if (!b || !isVisibleBuilding(b)) throw ApiError.badRequest('Building does not exist')
         out.push({ type: 'BUILDING', buildingId: b.id, latitude: b.latitude, longitude: b.longitude })
       }
     }

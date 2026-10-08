@@ -150,6 +150,25 @@ export const permissionBuildingRepository = {
       return { visit, status }
     }),
 
+  /**
+   * The building already in `zoneId` that this society would duplicate once
+   * approved into it — the same two checks a normal add / import makes (one
+   * row per Place per zone; one name per zone), the society itself excluded.
+   */
+  findClashInZone: async (tx, { id, placeId, buildingName, zoneId }) => {
+    const select = { id: true, buildingName: true }
+    const samePlace = placeId
+      ? await tx.building.findFirst({ where: { placeId, zoneId, id: { not: id } }, select })
+      : null
+    return (
+      samePlace ??
+      (await tx.building.findFirst({
+        where: { zoneId, id: { not: id }, buildingName: { equals: buildingName, mode: 'insensitive' } },
+        select,
+      }))
+    )
+  },
+
   pendingCount: () => prisma.building.count({ where: { source: 'PERMISSION', permissionApproval: 'PENDING' } }),
 
   /**
@@ -157,11 +176,15 @@ export const permissionBuildingRepository = {
    * society is still PENDING when locked; `data` is the Building update and
    * `visit` the history row to add with it.
    */
-  decide: ({ buildingId, data, visit, notPending }) =>
+  decide: ({ buildingId, data, visit, notPending, beforeWrite }) =>
     prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "Building" WHERE id = ${buildingId} FOR UPDATE`
-      const fresh = await tx.building.findUnique({ where: { id: buildingId }, select: { permissionApproval: true } })
+      const fresh = await tx.building.findUnique({
+        where: { id: buildingId },
+        select: { id: true, buildingName: true, placeId: true, permissionApproval: true },
+      })
       if (fresh?.permissionApproval !== 'PENDING') throw notPending()
+      await beforeWrite?.(fresh, tx)
       await tx.building.update({
         where: { id: buildingId },
         data: { ...data, permissionVisits: { create: visit } },

@@ -83,6 +83,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   const ids = Object.values(U).map((u) => u.id)
+  // A fibre point RESTRICTs its building's delete — fibres go first.
+  await prisma.fiber.deleteMany({ where: { zoneId: ZONE } })
   await prisma.building.deleteMany({ where: { buildingName: { startsWith: S } } })
   await prisma.systemLog.deleteMany({ where: { userId: { in: ids } } })
   await prisma.user.updateMany({ where: { id: { in: ids } }, data: { managerId: null } })
@@ -523,5 +525,129 @@ describe('GET /permission-buildings: approval on the list, filter, pending count
     expect(res.body.data.count).toBeGreaterThanOrEqual(1)
     expect(Math.abs(res.body.data.count - inDb)).toBeLessThanOrEqual(5) // other files may add rows meanwhile
     expect((await request(app).get('/api/v1/permission-buildings/pending-count').set(...as('PE'))).status).toBe(403)
+  })
+})
+
+// URLs the active storage provider recognises as ours, under a test-only key
+// prefix (nothing is uploaded).
+const storageBase = () => (env.storageDriver === 'r2' ? env.r2.publicUrl : `${env.appUrl}/uploads`)
+const fileUrl = (n) => `${storageBase()}/${S}/${n}`
+
+describe('fix round 1', () => {
+  it('approve refuses a society whose Place is already in the target zone (clear 409, stays PENDING)', async () => {
+    const soc = await addAs('PE', { zoneId: undefined, buildingName: `${S} Clash place society` })
+    await prisma.building.update({ where: { id: soc.id }, data: { placeId: `${S}-place-1` } })
+    await prisma.building.create({
+      data: {
+        buildingName: `${S} Clash place coverage`,
+        formattedAddress: 'x',
+        latitude: 18.5,
+        longitude: 73.8,
+        zoneId: ZONE,
+        placeId: `${S}-place-1`,
+        createdById: U.ADMIN.id,
+      },
+    })
+    const res = await approve(soc.id, { zoneId: ZONE })
+    expect(res.status).toBe(409)
+    expect(res.body.error.message).toBe(`This society is already in ${S} Zone as '${S} Clash place coverage'`)
+    const row = await prisma.building.findUnique({ where: { id: soc.id } })
+    expect(row).toMatchObject({ permissionApproval: 'PENDING', zoneId: null })
+    expect((await detail(soc.id)).visits[0].kind).toBe('SUBMITTED')
+  })
+
+  it('approve refuses a society whose name is already in the target zone', async () => {
+    await prisma.building.create({
+      data: {
+        buildingName: `${S} Clash Name`,
+        formattedAddress: 'x',
+        latitude: 18.5,
+        longitude: 73.8,
+        zoneId: ZONE,
+        createdById: U.ADMIN.id,
+      },
+    })
+    const soc = await addAs('PE', { zoneId: undefined, buildingName: `${S} clash name` })
+    const res = await approve(soc.id, { zoneId: ZONE })
+    expect(res.status).toBe(409)
+    expect(res.body.error.message).toBe(`This society is already in ${S} Zone as '${S} Clash Name'`)
+    expect((await prisma.building.findUnique({ where: { id: soc.id } })).permissionApproval).toBe('PENDING')
+  })
+
+  describe('photos on an approved society', () => {
+    let b = null
+    let letter = null
+    beforeAll(async () => {
+      b = await addAs('PE', {
+        buildingName: `${S} Approved photos`,
+        photos: [{ type: 'PERMISSION_LETTER', url: fileUrl('letter.pdf') }],
+        permission: { permissionStatus: 'ACCEPTED', documentUrl: fileUrl('letter.pdf') },
+      })
+      expect((await approve(b.id, { zoneId: ZONE })).status).toBe(200)
+      letter = await prisma.photo.findFirst({ where: { buildingId: b.id, type: 'PERMISSION_LETTER' } })
+    })
+    const docUrl = async () => (await prisma.permission.findUnique({ where: { buildingId: b.id } })).documentUrl
+
+    it('nobody uploads or deletes the permission letter through the photo routes', async () => {
+      const before = await docUrl()
+      for (const key of ['MANAGER', 'ADMIN']) {
+        const up = await request(app)
+          .post(`/api/v1/buildings/${b.id}/photos`)
+          .set(...as(key))
+          .send({ type: 'PERMISSION_LETTER', url: fileUrl(`letter-${key}.pdf`) })
+        expect(up.status).toBe(400)
+        expect(up.body.error.message).toBe('Change the permission letter from Edit details')
+        const del = await request(app).delete(`/api/v1/buildings/${b.id}/photos/${letter.id}`).set(...as(key))
+        expect(del.status).toBe(400)
+        expect(del.body.error.message).toBe('Change the permission letter from Edit details')
+      }
+      expect(await docUrl()).toBe(before)
+      expect(await prisma.photo.count({ where: { buildingId: b.id, type: 'PERMISSION_LETTER' } })).toBe(1)
+    })
+
+    it('a manager adds an entrance photo like on any building', async () => {
+      const res = await request(app)
+        .post(`/api/v1/buildings/${b.id}/photos`)
+        .set(...as('MANAGER'))
+        .send({ type: 'ENTRANCE', url: fileUrl('entrance.jpg') })
+      expect(res.status).toBe(201)
+    })
+
+    it('another executive gets a 404; the owner the lock', async () => {
+      const other = await request(app)
+        .post(`/api/v1/buildings/${b.id}/photos`)
+        .set(...as('PE2'))
+        .send({ type: 'ADDITIONAL', url: fileUrl('x.jpg') })
+      expect(other.status).toBe(404)
+      const own = await request(app)
+        .post(`/api/v1/buildings/${b.id}/photos`)
+        .set(...as('PE'))
+        .send({ type: 'ADDITIONAL', url: fileUrl('x.jpg') })
+      expect(own.status).toBe(400)
+      expect(own.body.error.message).toBe("Approved societies can't be edited")
+    })
+  })
+
+  it('a fibre point cannot attach to a society not yet approved; an approved one is fine', async () => {
+    const waiting = await addAs('PE')
+    const ok = await addAs('PE')
+    expect((await approve(ok.id, { zoneId: ZONE })).status).toBe(200)
+    const fibre = (buildingId) =>
+      request(app)
+        .post('/api/v1/fibers')
+        .set(...as('ADMIN'))
+        .send({
+          zoneId: ZONE,
+          coreCount: 2,
+          points: [
+            { type: 'WAYPOINT', latitude: 18.5, longitude: 73.8 },
+            { type: 'BUILDING', buildingId, latitude: 18.5074, longitude: 73.8077 },
+          ],
+        })
+    const refused = await fibre(waiting.id)
+    expect(refused.status).toBe(400)
+    expect(refused.body.error.message).toBe('Building does not exist')
+    const fine = await fibre(ok.id)
+    expect(fine.status).toBe(201)
   })
 })

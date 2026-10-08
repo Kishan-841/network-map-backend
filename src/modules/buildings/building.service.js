@@ -303,23 +303,19 @@ export function createBuildingService({ buildingRepository, storage, userReposit
   }
 
   /**
-   * The single-photo routes would change a society with no remark and no
-   * history row (and a letter rewrites the permission document), so they are
-   * closed for PERMISSION rows: the owner / an admin is sent to Edit details,
-   * whose PATCH carries the full photo set and logs it; anyone else gets the
-   * same 404 a read gives them.
+   * The single-photo routes on a society, in order: out of scope is the 404 a
+   * read gives; a society not yet approved is changed only from Edit details;
+   * the permission letter IS Permission.documentUrl, so it changes only
+   * through the logged society edit, for everyone; an approved society is
+   * locked for its executive. Other photos on an approved society then follow
+   * the normal building rules.
    */
-  async function refusePermissionPhotoRoute(building, actor) {
+  async function guardSocietyPhoto(building, type, actor) {
     const canRead = await readScope(actor)
     if (!canRead(building)) throw ApiError.notFound('Building not found')
-    throw ApiError.badRequest('Change photos from Edit details')
-  }
-
-  /** An approved society is locked for its executive: visit notes only. */
-  function refuseLockedSociety(building, actor) {
-    if (building?.source === 'PERMISSION' && actor?.role === 'PERMISSION_EXECUTIVE') {
-      throw ApiError.badRequest("Approved societies can't be edited")
-    }
+    if (!isVisibleBuilding(building)) throw ApiError.badRequest('Change photos from Edit details')
+    if (type === 'PERMISSION_LETTER') throw ApiError.badRequest('Change the permission letter from Edit details')
+    if (actor?.role === 'PERMISSION_EXECUTIVE') throw ApiError.badRequest("Approved societies can't be edited")
   }
 
   /**
@@ -863,8 +859,7 @@ export function createBuildingService({ buildingRepository, storage, userReposit
 
     async addPhoto(buildingId, { type, url }, user) {
       const building = await buildingRepository.findById(buildingId)
-      if (building && !isVisibleBuilding(building)) await refusePermissionPhotoRoute(building, user)
-      refuseLockedSociety(building, user)
+      if (building?.source === 'PERMISSION') await guardSocietyPhoto(building, type, user)
       // Permission letters feed the legal permission record — surveyors may not set them.
       if (type === 'PERMISSION_LETTER' && !['ADMIN', 'MANAGER', 'SUPERVISOR'].includes(user?.role)) {
         throw ApiError.forbidden('Only admins or managers can upload permission letters')
@@ -896,8 +891,7 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       // this the delete also destroys the file in object storage.
       const building = await buildingRepository.findById(buildingId)
       if (!building) throw ApiError.notFound('Photo not found')
-      if (!isVisibleBuilding(building)) await refusePermissionPhotoRoute(building, user)
-      refuseLockedSociety(building, user)
+      if (building.source === 'PERMISSION') await guardSocietyPhoto(building, photo.type, user)
       await assertMayModify(building, user)
 
       await buildingRepository.deletePhoto(photoId)

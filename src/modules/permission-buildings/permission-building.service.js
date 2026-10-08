@@ -132,6 +132,15 @@ export function createPermissionBuildingService({ repo, storage, zoneRepository 
       await repo.decide({
         buildingId: id,
         notPending,
+        // Under the lock: the zone must not already hold this society (the
+        // per-zone Place index would otherwise fail as a bare 409, and a
+        // missing / different placeId would slip a duplicate through).
+        beforeWrite: async (fresh, tx) => {
+          const clash = await repo.findClashInZone(tx, { ...fresh, zoneId: zone.id })
+          if (clash) {
+            throw ApiError.conflict(`This society is already in ${zone.name} as '${clash.buildingName}'`)
+          }
+        },
         data: {
           permissionApproval: 'APPROVED',
           approvalReason: null,
