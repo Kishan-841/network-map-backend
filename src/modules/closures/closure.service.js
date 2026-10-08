@@ -7,6 +7,7 @@ import { fiberPointRepository } from '../fibers/fiber.repository.js'
 import { RATIO_PORTS } from './closure.schemas.js'
 import { nextClosureCode, nextSplitterCode } from '../../lib/sequences.js'
 import { canSeeFiber, closureScope, splitterScope } from '../../lib/visibility.js'
+import { isVisibleBuilding } from '../../lib/building-source.js'
 
 export function createClosureService({ closureRepository, fiberPointRepository, sequences, prisma, storage }) {
   /**
@@ -206,6 +207,12 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
       const splitter = await closureRepository.findSplitterVisible(splitterId, splitterScope(actor))
       if (!splitter || !splitter.outputs.some((o) => o.portNo === portNo)) {
         throw ApiError.notFound('Output not found')
+      }
+      // Same rule as a fibre's BUILDING point: an unknown id and a society not
+      // yet approved are both "no such building".
+      if (data.toBuildingId) {
+        const b = await closureRepository.findBuildingForOutput(data.toBuildingId)
+        if (!b || !isVisibleBuilding(b)) throw ApiError.badRequest('Building does not exist')
       }
       return closureRepository.updateOutput(splitterId, portNo, data)
     },

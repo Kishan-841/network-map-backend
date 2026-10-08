@@ -28,6 +28,7 @@ const U = {
 const as = (key) => auth(U[key].id, U[key].role)
 let OP = null
 let ZONE = null
+let SPLITTER = null
 
 const society = (extra = {}) => ({
   buildingName: `${S} Society ${Math.random().toString(36).slice(2, 8)}`,
@@ -85,6 +86,7 @@ afterAll(async () => {
   const ids = Object.values(U).map((u) => u.id)
   // A fibre point RESTRICTs its building's delete — fibres go first.
   await prisma.fiber.deleteMany({ where: { zoneId: ZONE } })
+  if (SPLITTER) await prisma.splitter.deleteMany({ where: { id: SPLITTER } })
   await prisma.building.deleteMany({ where: { buildingName: { startsWith: S } } })
   await prisma.systemLog.deleteMany({ where: { userId: { in: ids } } })
   await prisma.user.updateMany({ where: { id: { in: ids } }, data: { managerId: null } })
@@ -649,5 +651,45 @@ describe('fix round 1', () => {
     expect(refused.body.error.message).toBe('Building does not exist')
     const fine = await fibre(ok.id)
     expect(fine.status).toBe(201)
+  })
+})
+
+describe('fix round 2: splitter outputs', () => {
+  it('refuse an unknown building or a society not yet approved; take an approved one', async () => {
+    const created = await request(app)
+      .post('/api/v1/fibers')
+      .set(...as('ADMIN'))
+      .send({
+        zoneId: ZONE,
+        coreCount: 4,
+        points: [
+          { type: 'WAYPOINT', latitude: 18.6, longitude: 73.9 },
+          { type: 'SPLITTER', newSplitter: { ratio: 'R1_6', fiberType: 'SUB', location: 'S2' }, latitude: 18.601, longitude: 73.901 },
+          { type: 'WAYPOINT', latitude: 18.602, longitude: 73.902 },
+        ],
+      })
+    expect(created.status).toBe(201)
+    SPLITTER = created.body.data.points[1].splitterId
+    expect(SPLITTER).toBeTruthy()
+
+    const waiting = await addAs('PE')
+    const ok = await addAs('PE')
+    expect((await approve(ok.id, { zoneId: ZONE })).status).toBe(200)
+    const setOutput = (toBuildingId) =>
+      request(app).patch(`/api/v1/splitters/${SPLITTER}/outputs/1`).set(...as('ADMIN')).send({ toBuildingId })
+
+    for (const id of [waiting.id, 'no-such-building']) {
+      const res = await setOutput(id)
+      expect(res.status).toBe(400)
+      expect(res.body.error.message).toBe('Building does not exist')
+    }
+    expect((await prisma.splitterOutput.findFirst({ where: { splitterId: SPLITTER, portNo: 1 } })).toBuildingId).toBeNull()
+    expect((await setOutput(ok.id)).status).toBe(200)
+    expect((await prisma.splitterOutput.findFirst({ where: { splitterId: SPLITTER, portNo: 1 } })).toBuildingId).toBe(ok.id)
+  })
+
+  it('the closure repository has the building lookup the service uses', async () => {
+    const { closureRepository } = await import('../src/modules/closures/closure.repository.js')
+    expect(typeof closureRepository.findBuildingForOutput).toBe('function')
   })
 })

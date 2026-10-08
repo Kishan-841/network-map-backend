@@ -105,6 +105,9 @@ export const closureRepository = {
         createdBy: { select: { id: true, name: true } },
       },
     }),
+  // Just enough to decide whether a splitter output may point at this building.
+  findBuildingForOutput: (id) =>
+    prisma.building.findUnique({ where: { id }, select: { id: true, source: true, permissionApproval: true } }),
   updateOutput: (splitterId, portNo, data, tx = prisma) =>
     tx.splitterOutput.update({ where: { splitterId_portNo: { splitterId, portNo } }, data }),
 
