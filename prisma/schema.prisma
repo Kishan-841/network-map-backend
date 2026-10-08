@@ -158,6 +158,7 @@ model User {
   paymentsRecorded   PartnerPayment[]  @relation("PaymentRecordedBy")
   appReleases        AppRelease[]      @relation("AppReleaseCreatedBy")
   permissionVisits   PermissionVisit[] @relation("PermissionVisitBy")
+  societiesDecided   Building[]        @relation("BuildingApprovalDecidedBy")
 }
 
 /// One row per pincode an acquisition agent covers (within one city).
@@ -519,6 +520,16 @@ model Building {
   oltId            String?
   olt              Olt?             @relation(fields: [oltId], references: [id], onDelete: SetNull)
   ponPorts         Int[]            @default([])
+  /// Society permissions, phase 2 (PERMISSION rows only): 'PENDING' |
+  /// 'APPROVED' | 'REJECTED' | null. An APPROVED society shows in every staff
+  /// view like any building (src/lib/building-source.js).
+  permissionApproval  String?
+  /// The last reject reason — kept until the society is approved.
+  approvalReason      String?
+  approvalSubmittedAt DateTime?
+  approvalDecidedAt   DateTime?
+  approvalDecidedById String?
+  approvalDecidedBy   User?     @relation("BuildingApprovalDecidedBy", fields: [approvalDecidedById], references: [id], onDelete: SetNull)
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
   details          BuildingDetails?
@@ -536,6 +547,7 @@ model Building {
 
   @@index([latitude, longitude])
   @@index([source, createdById])
+  @@index([source, permissionApproval])
 }
 
 /// A building handed to a sales user. The single ACTIVE row per building is its
@@ -714,7 +726,7 @@ model PermissionVisit {
   statusAfter  String?
   /// Fields a details edit changed, e.g. contact, offer, photos.
   changes      String[] @default([])
-  /// 'ADDED' | 'VISIT' | 'EDIT'
+  /// 'ADDED' | 'VISIT' | 'EDIT' | 'SUBMITTED' | 'WITHDRAWN' | 'APPROVED' | 'REJECTED'
   kind         String
   createdAt    DateTime @default(now())
 
