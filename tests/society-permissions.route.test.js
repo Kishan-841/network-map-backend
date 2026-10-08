@@ -419,12 +419,19 @@ describe('PATCH /buildings/:id on a PERMISSION building', () => {
     expect(res.status).toBe(400)
   })
 
-  it('another executive is refused; a manager / supervisor gets a 404', async () => {
+  it('a permission executive may not mark their society live', async () => {
+    const res = await request(app).patch(`/api/v1/buildings/${b.id}`).set(...as('PE')).send({ isLive: true, remark: 'x' })
+    expect(res.status).toBe(403)
+  })
+
+  it('another executive, a manager and a supervisor all get a 404', async () => {
     const body = { formattedAddress: 'Hijack', remark: 'x' }
-    expect((await request(app).patch(`/api/v1/buildings/${b.id}`).set(...as('PE2')).send(body)).status).toBe(403)
+    expect((await request(app).patch(`/api/v1/buildings/${b.id}`).set(...as('PE2')).send(body)).status).toBe(404)
     expect((await request(app).patch(`/api/v1/buildings/${b.id}`).set(...as('MANAGER')).send(body)).status).toBe(404)
     expect((await request(app).patch(`/api/v1/buildings/${b.id}`).set(...as('SUPERVISOR')).send(body)).status).toBe(404)
     expect((await request(app).patch(`/api/v1/buildings/${b.id}/status`).set(...as('MANAGER')).send({ isLive: true })).status).toBe(404)
+    // No coverage status on a society, not even for an admin.
+    expect((await request(app).patch(`/api/v1/buildings/${b.id}/status`).set(...as('ADMIN')).send({ isLive: true })).status).toBe(404)
   })
 
   it('contact stays refused on a coverage building', async () => {
@@ -436,5 +443,72 @@ describe('PATCH /buildings/:id on a PERMISSION building', () => {
       .set(...as('ADMIN'))
       .send({ contact: { contactName: 'X', contactPhone: '9876543210', designation: 'OWNER' } })
     expect(res.status).toBe(400)
+  })
+})
+
+// URLs the active storage provider recognises as ours, under a test-only key
+// prefix (nothing is uploaded; a removed one's best-effort delete is a no-op).
+const storageBase = () => (env.storageDriver === 'r2' ? env.r2.publicUrl : `${env.appUrl}/uploads`)
+const fileUrl = (name) => `${storageBase()}/${S}/${name}`
+
+describe('photos on a PERMISSION building', () => {
+  let b = null
+  let photos = null
+  beforeAll(async () => {
+    b = await addAs('PE', {
+      buildingName: `${S} PHOTOS`,
+      photos: [
+        { type: 'ENTRANCE', url: fileUrl('entrance.jpg') },
+        { type: 'PERMISSION_LETTER', url: fileUrl('letter.pdf') },
+      ],
+      permission: { permissionStatus: 'ACCEPTED', documentUrl: fileUrl('letter.pdf') },
+    })
+    photos = await prisma.photo.findMany({ where: { buildingId: b.id } })
+  })
+
+  it('the single-photo routes are closed: owner / admin 400, anyone else 404', async () => {
+    const add = (key) =>
+      request(app).post(`/api/v1/buildings/${b.id}/photos`).set(...as(key)).send({ type: 'ADDITIONAL', url: fileUrl('x.jpg') })
+    for (const key of ['PE', 'ADMIN']) {
+      const res = await add(key)
+      expect(res.status).toBe(400)
+      expect(res.body.error.message).toBe('Change photos from Edit details')
+    }
+    expect((await add('PE2')).status).toBe(404)
+    expect((await add('MANAGER')).status).toBe(404)
+    const letter = await request(app)
+      .post(`/api/v1/buildings/${b.id}/photos`)
+      .set(...as('PE'))
+      .send({ type: 'PERMISSION_LETTER', url: fileUrl('l2.pdf') })
+    expect(letter.status).toBe(400)
+
+    const del = (key) => request(app).delete(`/api/v1/buildings/${b.id}/photos/${photos[0].id}`).set(...as(key))
+    expect((await del('PE')).status).toBe(400)
+    expect((await del('ADMIN')).status).toBe(400)
+    expect((await del('PE2')).status).toBe(404)
+    expect((await del('SUPERVISOR')).status).toBe(404)
+    expect(await prisma.photo.count({ where: { buildingId: b.id } })).toBe(2)
+  })
+
+  it('echoing back the served (signed) photo URLs is no change', async () => {
+    const detail = await request(app).get(`/api/v1/permission-buildings/${b.id}`).set(...as('PE'))
+    const served = detail.body.data.photos.map((p) => ({ type: p.type, url: p.url }))
+    expect(served).toHaveLength(2)
+    const res = await request(app).patch(`/api/v1/buildings/${b.id}`).set(...as('PE')).send({ photos: served, remark: 'Same photos' })
+    expect(res.status).toBe(400)
+    expect(res.body.error.message).toMatch(/nothing changed/i)
+  })
+
+  it('removing the letter through PATCH clears the permission document and is logged', async () => {
+    const detail = await request(app).get(`/api/v1/permission-buildings/${b.id}`).set(...as('PE'))
+    const keep = detail.body.data.photos.filter((p) => p.type === 'ENTRANCE').map((p) => ({ type: p.type, url: p.url }))
+    const res = await request(app).patch(`/api/v1/buildings/${b.id}`).set(...as('PE')).send({ photos: keep, remark: 'Letter was the wrong society' })
+    expect(res.status).toBe(200)
+    const rows = await prisma.photo.findMany({ where: { buildingId: b.id } })
+    expect(rows.map((p) => p.type)).toEqual(['ENTRANCE'])
+    expect(rows[0].url).toBe(fileUrl('entrance.jpg'))
+    expect((await prisma.permission.findUnique({ where: { buildingId: b.id } })).documentUrl).toBeNull()
+    const [edit] = await prisma.permissionVisit.findMany({ where: { buildingId: b.id, kind: 'EDIT' } })
+    expect(edit).toMatchObject({ changes: ['photos'], remark: 'Letter was the wrong society' })
   })
 })

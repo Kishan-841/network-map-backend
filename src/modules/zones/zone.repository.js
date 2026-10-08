@@ -21,6 +21,9 @@ export const zoneRepository = {
   clearOperator: (operatorId) =>
     prisma.zone.updateMany({ where: { operatorId }, data: { operatorId: null } }),
   countBuildings: (zoneId) => prisma.building.count({ where: { zoneId } }),
+  // Society-permission buildings are hidden from the Buildings tab, so a
+  // blocked zone delete has to say they are part of the count.
+  countPermissionBuildings: (zoneId) => prisma.building.count({ where: { zoneId, source: 'PERMISSION' } }),
   countByIds: (ids) => prisma.zone.count({ where: { id: { in: ids } } }),
   paged: ({ where, skip, take }) =>
     prisma.zone.findMany({ where, orderBy: { name: 'asc' }, skip, take, include: withOperator }),

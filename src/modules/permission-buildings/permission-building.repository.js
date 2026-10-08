@@ -87,23 +87,37 @@ export const permissionBuildingRepository = {
     }),
 
   /**
-   * One visit update, atomically: the status change (creating the Permission
-   * row if the society has none) and its history row.
+   * One visit update, atomically and under a row lock on the building: the
+   * current status is read INSIDE the lock, so "before" can't be stale against
+   * a concurrent visit or edit; then the status change (creating the
+   * Permission row if the society has none) and the history row.
+   * `permissionStatus` undefined = no status given. Returns { visit, status }.
    */
-  async recordVisit({ buildingId, userId, remark, statusBefore, statusAfter }) {
-    const visit = prisma.permissionVisit.create({
-      data: { buildingId, userId, remark, kind: 'VISIT', statusBefore, statusAfter },
-      include: visitInclude,
-    })
-    if (statusAfter === null) return visit
-    const [, created] = await prisma.$transaction([
-      prisma.permission.upsert({
-        where: { buildingId },
-        update: { permissionStatus: statusAfter },
-        create: { buildingId, permissionStatus: statusAfter },
-      }),
-      visit,
-    ])
-    return created
-  },
+  recordVisit: ({ buildingId, userId, remark, permissionStatus }) =>
+    prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Building" WHERE id = ${buildingId} FOR UPDATE`
+      const current =
+        (await tx.permission.findUnique({ where: { buildingId }, select: { permissionStatus: true } }))
+          ?.permissionStatus ?? null
+      const changed = permissionStatus !== undefined && permissionStatus !== current
+      if (changed) {
+        await tx.permission.upsert({
+          where: { buildingId },
+          update: { permissionStatus },
+          create: { buildingId, permissionStatus },
+        })
+      }
+      const visit = await tx.permissionVisit.create({
+        data: {
+          buildingId,
+          userId,
+          remark,
+          kind: 'VISIT',
+          statusBefore: changed ? current : null,
+          statusAfter: changed ? permissionStatus : null,
+        },
+        include: visitInclude,
+      })
+      return { visit, status: changed ? permissionStatus : current }
+    }),
 }

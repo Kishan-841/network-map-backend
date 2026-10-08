@@ -68,8 +68,12 @@ export function createZoneService({ zoneRepository }) {
 
       const buildingCount = await zoneRepository.countBuildings(id)
       if (buildingCount > 0) {
+        const societies = await zoneRepository.countPermissionBuildings(id)
         throw ApiError.conflict(
-          `Cannot delete: ${buildingCount} building(s) are assigned to this zone`,
+          `Cannot delete: ${buildingCount} building(s) are assigned to this zone` +
+            (societies > 0
+              ? ` (including ${societies} society-permission building(s), which the Buildings tab does not show)`
+              : ''),
         )
       }
       await zoneRepository.delete(id)

@@ -156,6 +156,18 @@ export const buildingRepository = {
     }),
   findById: (id) => prisma.building.findUnique({ where: { id }, include: fullInclude }),
   update: (id, data) => prisma.building.update({ where: { id }, data, include: fullInclude }),
+  /**
+   * Read-then-write under a row lock: `build(fresh)` gets the building as it
+   * stands once locked and returns the update data (or throws to abort), so a
+   * history row's "before" can never be stale against a concurrent edit.
+   */
+  updateWithLock: (id, build) =>
+    prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Building" WHERE id = ${id} FOR UPDATE`
+      const fresh = await tx.building.findUnique({ where: { id }, include: fullInclude })
+      const data = await build(fresh)
+      return tx.building.update({ where: { id }, data, include: fullInclude })
+    }),
   delete: (id) => prisma.building.delete({ where: { id } }),
   /**
    * Fiber names still touching this building via a FiberPoint — the delete
@@ -187,10 +199,14 @@ export const buildingRepository = {
     prisma.building.findFirst({
       where: { zoneId, buildingName: { equals: buildingName, mode: 'insensitive' } },
     }),
+  // findFirst, not findUnique: placeId stopped being unique in
+  // 20260903090000_place_unique_per_zone (one row per place PER ZONE), and
+  // findUnique on it threw. A shared place resolves to the live building first.
   findByPlaceId: (placeId, { includePermission = false } = {}) =>
     prisma.building.findFirst({
       where: { placeId, ...(!includePermission && NOT_PERMISSION) },
       include: listInclude,
+      orderBy: [{ isLive: 'desc' }, { createdAt: 'asc' }],
     }),
   createPhoto: (data) => prisma.photo.create({ data }),
   findPhotoById: (id) => prisma.photo.findUnique({ where: { id } }),

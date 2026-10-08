@@ -286,6 +286,19 @@ export function createBuildingService({ buildingRepository, storage, userReposit
   }
 
   /**
+   * The single-photo routes would change a society with no remark and no
+   * history row (and a letter rewrites the permission document), so they are
+   * closed for PERMISSION rows: the owner / an admin is sent to Edit details,
+   * whose PATCH carries the full photo set and logs it; anyone else gets the
+   * same 404 a read gives them.
+   */
+  async function refusePermissionPhotoRoute(building, actor) {
+    const canRead = await readScope(actor)
+    if (!canRead(building)) throw ApiError.notFound('Building not found')
+    throw ApiError.badRequest('Change photos from Edit details')
+  }
+
+  /**
    * A details edit on a society (PERMISSION building). Only its executive or
    * an ADMIN; a remark is compulsory; the fields that actually changed are
    * written to its history in the same statement as the edit, and an edit
@@ -293,9 +306,8 @@ export function createBuildingService({ buildingRepository, storage, userReposit
    */
   async function updatePermissionBuilding(existing, { details, permission, contact, photos, remark, building }, actor) {
     if (actor?.role === 'PERMISSION_EXECUTIVE') {
-      if (existing.createdById !== actor.id) {
-        throw ApiError.forbidden('You can only edit societies you added')
-      }
+      // Out of scope is a 404, like every read of another executive's society.
+      if (existing.createdById !== actor.id) throw ApiError.notFound('Building not found')
       if (building.isLive !== undefined) {
         throw ApiError.forbidden('Only admins or managers can mark a building live')
       }
@@ -316,17 +328,32 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       return { type: photo.type, url: canonical(photo.url) }
     })
 
-    const { changes, statusBefore, statusAfter, photoPlan } = diffPermissionEdit(existing, {
-      building,
-      details,
-      permission,
-      contact,
-      photos: nextPhotos,
+    // The diff runs against the row as it stands once locked, so the history
+    // row's "before" (and the photo plan) cannot be stale against a
+    // concurrent edit or visit; throwing inside rolls the whole edit back.
+    let photoPlan = null
+    const updated = await buildingRepository.updateWithLock(existing.id, (fresh) => {
+      const diff = diffPermissionEdit(fresh, { building, details, permission, contact, photos: nextPhotos })
+      if (diff.changes.length === 0) {
+        throw ApiError.badRequest('Nothing changed — use Add visit update to record a visit')
+      }
+      photoPlan = diff.photoPlan
+      return editData(diff)
     })
-    if (changes.length === 0) {
-      throw ApiError.badRequest('Nothing changed — use Add visit update to record a visit')
-    }
 
+    // Files of removed photos go after the row change — best-effort, as elsewhere.
+    for (const url of photoPlan?.removeUrls ?? []) {
+      const key = storage?.keyFromUrl(url)
+      if (!key) continue
+      try {
+        await storage.delete({ key })
+      } catch (err) {
+        console.error('File deletion failed (row removed):', err.message)
+      }
+    }
+    return signUrls(updated)
+
+    function editData({ changes, statusBefore, statusAfter, photoPlan }) {
     const data = { ...building }
     if (details) data.details = { upsert: { create: details, update: details } }
     const patch = permission ? { ...permission } : {}
@@ -358,19 +385,8 @@ export function createBuildingService({ buildingRepository, storage, userReposit
     data.permissionVisits = {
       create: { userId: actor.id, remark: note, kind: 'EDIT', changes, statusBefore, statusAfter },
     }
-    const updated = await buildingRepository.update(existing.id, data)
-
-    // Files of removed photos go after the row change — best-effort, as elsewhere.
-    for (const url of photoPlan?.removeUrls ?? []) {
-      const key = storage?.keyFromUrl(url)
-      if (!key) continue
-      try {
-        await storage.delete({ key })
-      } catch (err) {
-        console.error('File deletion failed (row removed):', err.message)
-      }
+    return data
     }
-    return signUrls(updated)
   }
 
   return {
@@ -714,10 +730,9 @@ export function createBuildingService({ buildingRepository, storage, userReposit
     async updateStatus(id, { feasibleStatus, surveyStatus, isLive }, actor) {
       const building = await buildingRepository.findById(id)
       if (!building) throw ApiError.notFound('Building not found')
-      // Society-permission rows are hidden from the coverage roles (phase 1).
-      if (building.source === 'PERMISSION' && actor?.role !== 'ADMIN') {
-        throw ApiError.notFound('Building not found')
-      }
+      // Society-permission rows have no coverage status to set (phase 1) —
+      // not even for an admin; their status lives in the permission record.
+      if (building.source === 'PERMISSION') throw ApiError.notFound('Building not found')
       return buildingRepository.update(id, {
         ...(feasibleStatus && { feasibleStatus }),
         ...(surveyStatus && { surveyStatus }),
@@ -786,11 +801,12 @@ export function createBuildingService({ buildingRepository, storage, userReposit
     },
 
     async addPhoto(buildingId, { type, url }, user) {
+      const building = await buildingRepository.findById(buildingId)
+      if (building?.source === 'PERMISSION') await refusePermissionPhotoRoute(building, user)
       // Permission letters feed the legal permission record — surveyors may not set them.
       if (type === 'PERMISSION_LETTER' && !['ADMIN', 'MANAGER', 'SUPERVISOR'].includes(user?.role)) {
         throw ApiError.forbidden('Only admins or managers can upload permission letters')
       }
-      const building = await buildingRepository.findById(buildingId)
       if (!building) throw ApiError.notFound('Building not found')
       await assertMayModify(building, user)
       // A building has exactly one entrance photo and one permission letter;
@@ -818,6 +834,7 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       // this the delete also destroys the file in object storage.
       const building = await buildingRepository.findById(buildingId)
       if (!building) throw ApiError.notFound('Photo not found')
+      if (building.source === 'PERMISSION') await refusePermissionPhotoRoute(building, user)
       await assertMayModify(building, user)
 
       await buildingRepository.deletePhoto(photoId)

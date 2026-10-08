@@ -90,18 +90,15 @@ export function createPermissionBuildingService({ repo, storage }) {
     },
 
     async addVisit(id, { remark, permissionStatus }, actor) {
-      const row = await loadInScope(id, actor)
+      await loadInScope(id, actor)
       const note = requireRemark(remark)
-      const current = row.permission?.permissionStatus ?? null
-      const changed = permissionStatus !== undefined && permissionStatus !== current
-      const visit = await repo.recordVisit({
+      const { visit, status } = await repo.recordVisit({
         buildingId: id,
         userId: actor.id,
         remark: note,
-        statusBefore: changed ? current : null,
-        statusAfter: changed ? permissionStatus : null,
+        permissionStatus,
       })
-      return { visit: visitShape(visit), permissionStatus: changed ? permissionStatus : current }
+      return { visit: visitShape(visit), permissionStatus: status }
     },
   }
 }

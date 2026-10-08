@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createZoneService } from '../src/modules/zones/zone.service.js'
 
-function fakeZoneRepository({ zones = [], buildingCount = 0 } = {}) {
+function fakeZoneRepository({ zones = [], buildingCount = 0, permissionCount = 0 } = {}) {
   const store = [...zones]
   return {
     store,
@@ -21,6 +21,7 @@ function fakeZoneRepository({ zones = [], buildingCount = 0 } = {}) {
       store.splice(store.findIndex((z) => z.id === id), 1)
     }),
     countBuildings: vi.fn(async () => buildingCount),
+    countPermissionBuildings: vi.fn(async () => permissionCount),
   }
 }
 
@@ -80,5 +81,19 @@ describe('zone service', () => {
     const service = createZoneService({ zoneRepository: repo })
     await expect(service.deleteZone('z1')).rejects.toMatchObject({ status: 409 })
     expect(repo.delete).not.toHaveBeenCalled()
+  })
+
+  it('says when the blocking count includes society-permission buildings', async () => {
+    const repo = fakeZoneRepository({ zones: [{ id: 'z1', name: 'Zone A', city: 'X' }], buildingCount: 3, permissionCount: 2 })
+    const service = createZoneService({ zoneRepository: repo })
+    await expect(service.deleteZone('z1')).rejects.toMatchObject({
+      status: 409,
+      message: expect.stringMatching(/including 2 society-permission building/),
+    })
+  })
+
+  it('the fake matches the real repository', async () => {
+    const { zoneRepository } = await import('../src/modules/zones/zone.repository.js')
+    expect(typeof zoneRepository.countPermissionBuildings).toBe('function')
   })
 })

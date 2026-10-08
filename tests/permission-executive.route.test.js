@@ -90,7 +90,8 @@ describe('a permission executive edits their own society', () => {
 
   it('refuses to edit a society another executive added', async () => {
     const res = await request(app).patch(`/api/v1/buildings/${theirsId}`).set(...auth(PE, 'PERMISSION_EXECUTIVE')).send({ permission: { permissionStatus: 'DENIED' }, remark: 'x' })
-    expect(res.status).toBe(403)
+    // Out of scope is a 404 (society permissions, fix round 1).
+    expect(res.status).toBe(404)
   })
 
   it('may not mark a society live', async () => {
