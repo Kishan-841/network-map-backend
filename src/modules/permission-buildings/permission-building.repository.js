@@ -4,12 +4,29 @@ import { approvalTransition, transitionData, transitionVisit } from './approval.
 
 const userLite = { select: { id: true, name: true } }
 const visitInclude = { user: userLite }
+const surveyInclude = { submittedBy: userLite, decidedBy: userLite }
 
 // The filters as SQL — the list orders by latest activity (the newest history
 // row), which Prisma cannot express, so the page of ids comes from SQL and the
 // rows themselves from Prisma.
-function whereSql({ createdById, status, approval, search }) {
+const STAGE_SQL = {
+  APPROVAL_PENDING: Prisma.sql`b."permissionApproval" = 'PENDING'`,
+  APPROVED_NO_SURVEY: Prisma.sql`b."permissionApproval" = 'APPROVED' AND NOT b."isLive" AND (s."status" IS NULL OR s."status" IN ('DRAFT', 'REJECTED'))`,
+  SURVEY_SUBMITTED: Prisma.sql`b."permissionApproval" = 'APPROVED' AND NOT b."isLive" AND s."status" = 'SUBMITTED'`,
+  MATERIALS_APPROVED: Prisma.sql`b."permissionApproval" = 'APPROVED' AND NOT b."isLive" AND s."status" = 'APPROVED'`,
+  LIVE: Prisma.sql`b."permissionApproval" = 'APPROVED' AND b."isLive"`,
+}
+
+// `approvedOnly` / `zoneIds` are the role scope (phase 3: surveyors, managers,
+// supervisors read approved societies only; a surveyor only in their zones —
+// no zones = nothing, fail closed).
+function whereSql({ createdById, status, approval, search, stage, approvedOnly, zoneIds }) {
   const conds = [Prisma.sql`b."source" = 'PERMISSION'`]
+  if (approvedOnly) conds.push(Prisma.sql`b."permissionApproval" = 'APPROVED'`)
+  if (zoneIds) {
+    conds.push(zoneIds.length ? Prisma.sql`b."zoneId" IN (${Prisma.join(zoneIds)})` : Prisma.sql`FALSE`)
+  }
+  if (stage) conds.push(STAGE_SQL[stage])
   if (createdById) conds.push(Prisma.sql`b."createdById" = ${createdById}`)
   if (status) conds.push(Prisma.sql`p."permissionStatus" = ${status}`)
   if (approval) conds.push(Prisma.sql`b."permissionApproval" = ${approval}`)
@@ -28,6 +45,7 @@ export const permissionBuildingRepository = {
         SELECT b.id
         FROM "Building" b
         LEFT JOIN "Permission" p ON p."buildingId" = b.id
+        LEFT JOIN "SocietySurvey" s ON s."buildingId" = b.id
         WHERE ${where}
         ORDER BY COALESCE(
           (SELECT MAX(v."createdAt") FROM "PermissionVisit" v WHERE v."buildingId" = b.id),
@@ -38,6 +56,7 @@ export const permissionBuildingRepository = {
         SELECT COUNT(*)::int AS total
         FROM "Building" b
         LEFT JOIN "Permission" p ON p."buildingId" = b.id
+        LEFT JOIN "SocietySurvey" s ON s."buildingId" = b.id
         WHERE ${where}`,
     ])
     return { ids: rows.map((r) => r.id), total }
@@ -53,7 +72,9 @@ export const permissionBuildingRepository = {
         latitude: true,
         longitude: true,
         createdAt: true,
+        isLive: true,
         zone: { select: { id: true, name: true } },
+        societySurvey: { select: { status: true, submittedAt: true, decidedAt: true } },
         permissionApproval: true,
         approvalReason: true,
         approvalSubmittedAt: true,
@@ -81,6 +102,7 @@ export const permissionBuildingRepository = {
         id: true,
         source: true,
         createdById: true,
+        zoneId: true,
         permissionApproval: true,
         permission: { select: { permissionStatus: true } },
       },
@@ -97,6 +119,7 @@ export const permissionBuildingRepository = {
         photos: { orderBy: { createdAt: 'asc' } },
         createdBy: userLite,
         approvalDecidedBy: userLite,
+        societySurvey: { select: { status: true, submittedAt: true, decidedAt: true } },
         permissionVisits: { orderBy: [{ createdAt: 'desc' }], include: visitInclude },
       },
     }),
@@ -189,5 +212,43 @@ export const permissionBuildingRepository = {
         where: { id: buildingId },
         data: { ...data, permissionVisits: { create: visit } },
       })
+    }),
+
+  // ---- Phase 3: site survey + material request ----
+
+  findSurvey: (buildingId) => prisma.societySurvey.findUnique({ where: { buildingId }, include: surveyInclude }),
+
+  surveyPendingCount: () =>
+    prisma.societySurvey.count({
+      where: { status: 'SUBMITTED', building: { source: 'PERMISSION', permissionApproval: 'APPROVED' } },
+    }),
+
+  /**
+   * One survey / live change under the building's row lock (the phase-2
+   * pattern): `fn({ fresh, tx, write })` gets the building and its survey as
+   * they stand once locked and may throw to refuse; `write.survey(data)`
+   * upserts the survey, `write.building(data)` updates the building and
+   * `write.visit(row)` adds a history row — all in the same transaction.
+   * Returns whatever `fn` returns.
+   */
+  withSurveyLock: (buildingId, fn) =>
+    prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "Building" WHERE id = ${buildingId} FOR UPDATE`
+      const fresh = await tx.building.findUnique({
+        where: { id: buildingId },
+        select: { id: true, source: true, permissionApproval: true, isLive: true, societySurvey: true },
+      })
+      const write = {
+        survey: (data) =>
+          tx.societySurvey.upsert({
+            where: { buildingId },
+            create: { buildingId, ...data },
+            update: data,
+            include: surveyInclude,
+          }),
+        building: (data) => tx.building.update({ where: { id: buildingId }, data, select: { id: true } }),
+        visit: (row) => tx.permissionVisit.create({ data: { buildingId, changes: [], ...row } }),
+      }
+      return fn({ fresh, tx, write })
     }),
 }

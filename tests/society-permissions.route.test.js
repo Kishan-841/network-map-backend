@@ -252,9 +252,19 @@ describe('GET /permission-buildings', () => {
     expect((await request(app).get('/api/v1/permission-buildings?status=MAYBE').set(...as('ADMIN'))).status).toBe(400)
   })
 
-  for (const key of ['MANAGER', 'SURVEYOR', 'SUPERVISOR', 'SALES_MANAGER', 'TEAM_LEADER']) {
+  for (const key of ['SALES_MANAGER', 'TEAM_LEADER']) {
     it(`is a 403 for ${key}`, async () => {
       expect((await request(app).get('/api/v1/permission-buildings').set(...as(key))).status).toBe(403)
+    })
+  }
+
+  // Phase 3 (society survey): these roles read APPROVED societies only, so a
+  // society that was never approved is not in their list.
+  for (const key of ['MANAGER', 'SURVEYOR', 'SUPERVISOR']) {
+    it(`${key} gets 200 without the never-approved societies`, async () => {
+      const res = await request(app).get('/api/v1/permission-buildings?pageSize=100').set(...as(key))
+      expect(res.status).toBe(200)
+      expect(res.body.data.items.filter((i) => i.buildingName.startsWith(S))).toEqual([])
     })
   }
 })
@@ -282,9 +292,10 @@ describe('GET /permission-buildings/:id and POST /:id/visits', () => {
     expect(res.body.data.visits.map((v) => v.kind)).toEqual(['SUBMITTED', 'ADDED'])
   })
 
-  it('another executive gets a 404, other roles a 403, an admin a 200', async () => {
+  it('another executive gets a 404, a manager 404 (not approved — phase 3), sales 403, an admin a 200', async () => {
     expect((await request(app).get(`/api/v1/permission-buildings/${b.id}`).set(...as('PE2'))).status).toBe(404)
-    expect((await request(app).get(`/api/v1/permission-buildings/${b.id}`).set(...as('MANAGER'))).status).toBe(403)
+    expect((await request(app).get(`/api/v1/permission-buildings/${b.id}`).set(...as('MANAGER'))).status).toBe(404)
+    expect((await request(app).get(`/api/v1/permission-buildings/${b.id}`).set(...as('SALES_MANAGER'))).status).toBe(403)
     expect((await request(app).get(`/api/v1/permission-buildings/${b.id}`).set(...as('ADMIN'))).status).toBe(200)
   })
 

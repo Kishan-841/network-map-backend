@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken'
 import { createApp } from '../src/app.js'
 import { env } from '../src/config/env.js'
 import { prisma } from '../src/lib/prisma.js'
+import { COVERAGE_REGISTRY } from '../src/lib/building-source.js'
 
 const tokenFor = (user) =>
   jwt.sign({ sub: user.id, role: user.role }, env.jwtSecret, { audience: 'staff', expiresIn: '1h' })
@@ -109,8 +110,9 @@ describe('GET /buildings/markers', () => {
     expect(ids).toContain(ownBuilding.id)
     expect(ids).toContain(otherBuilding.id)
 
-    // The count the map draws must equal the count the list reports.
-    const total = await prisma.building.count({ where: { source: 'COVERAGE' } })
+    // The count the map draws must equal the count the list reports — the
+    // coverage registry, which includes approved societies (phase 2).
+    const total = await prisma.building.count({ where: COVERAGE_REGISTRY })
     expect(res.body.data).toHaveLength(total)
     expect(total).toBeGreaterThan(0)
   })
