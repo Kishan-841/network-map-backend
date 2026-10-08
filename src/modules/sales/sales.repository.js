@@ -1,7 +1,7 @@
 import { prisma } from '../../lib/prisma.js'
 import { ApiError } from '../../lib/api-error.js'
 import { releaseStrandedTasks } from '../../lib/handover-tasks.js'
-import { NOT_PERMISSION, withoutPermission } from '../../lib/building-source.js'
+import { VISIBLE_BUILDING, visibleOnly, andWhere } from '../../lib/building-source.js'
 
 // What a scoped building row returns to the field team — enough to list and map
 // it, plus its current holder. Never the whole registry shape.
@@ -15,6 +15,8 @@ const buildingCard = {
   isLive: true,
   feasibleStatus: true,
   surveyStatus: true,
+  // An approved society (source PERMISSION) gets its own marker on the sales map.
+  source: true,
   salesAssignments: {
     where: { status: 'ACTIVE' },
     take: 1,
@@ -87,31 +89,33 @@ export const salesRepository = {
       .then((r) => r.map((u) => u.id)),
 
   listBuildings: (scopeWhere) =>
-    prisma.building.findMany({ where: withoutPermission(scopeWhere), select: buildingCard, orderBy: { buildingName: 'asc' } }),
+    prisma.building.findMany({ where: visibleOnly(scopeWhere), select: buildingCard, orderBy: { buildingName: 'asc' } }),
 
   // Every building in the registry, for the sales map a manager / admin sees.
   // Carries the ACTIVE holder (via buildingCard) so the caller can flag which
   // ones are assigned within their team.
   listAllBuildings: () =>
-    // Society-permission rows stay out of the sales views (phase 1).
-    prisma.building.findMany({ where: NOT_PERMISSION, select: buildingCard, orderBy: { buildingName: 'asc' } }),
+    // Societies stay out of the sales views until an ADMIN approves them.
+    prisma.building.findMany({ where: VISIBLE_BUILDING, select: buildingCard, orderBy: { buildingName: 'asc' } }),
 
   // Registry search for assignment — name or address, with the current holder.
   searchBuildings: (q) =>
     prisma.building.findMany({
-      where: {
-        ...NOT_PERMISSION,
-        OR: [
-          { buildingName: { contains: q, mode: 'insensitive' } },
-          { formattedAddress: { contains: q, mode: 'insensitive' } },
-        ],
-      },
+      where: andWhere(
+        {
+          OR: [
+            { buildingName: { contains: q, mode: 'insensitive' } },
+            { formattedAddress: { contains: q, mode: 'insensitive' } },
+          ],
+        },
+        VISIBLE_BUILDING,
+      ),
       select: buildingCard,
       orderBy: { buildingName: 'asc' },
       take: 30,
     }),
 
-  countExisting: (ids) => prisma.building.count({ where: { id: { in: ids }, ...NOT_PERMISSION } }),
+  countExisting: (ids) => prisma.building.count({ where: visibleOnly({ id: { in: ids } }) }),
 
   // Of these building ids, the ones whose ACTIVE holder is in the scope set
   // (null scope = admin = every id that has an active assignment).
@@ -134,7 +138,7 @@ export const salesRepository = {
       include: { assignedTo: holder, assignedBy: holder },
     }),
 
-  buildingExists: (id) => prisma.building.findFirst({ where: { id, ...NOT_PERMISSION }, select: { id: true } }),
+  buildingExists: (id) => prisma.building.findFirst({ where: visibleOnly({ id }), select: { id: true } }),
 
   buildingBasic: (id) =>
     prisma.building.findUnique({ where: { id }, select: { id: true, buildingName: true, formattedAddress: true } }),

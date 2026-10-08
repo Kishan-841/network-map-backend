@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import { VISIBLE_BUILDING, COVERAGE_REGISTRY } from '../src/lib/building-source.js'
 import { createBuildingService } from '../src/modules/buildings/building.service.js'
 
 /**
@@ -125,7 +126,7 @@ describe('what the export is allowed to see', () => {
     const { buildingRepository, service } = build()
     await service.exportBuildings({ zoneId: 'z1' }, ADMIN)
     expect(buildingRepository.listForExport.mock.calls[0][0]).toMatchObject({
-      source: 'COVERAGE',
+      AND: [COVERAGE_REGISTRY],
       zoneId: 'z1',
     })
   })
@@ -134,7 +135,7 @@ describe('what the export is allowed to see', () => {
     const { buildingRepository, service } = build(['z1'])
     await service.exportBuildings({}, SURVEYOR)
     const where = buildingRepository.listForExport.mock.calls[0][0]
-    expect(where.AND).toEqual([{ OR: [{ zoneId: { in: ['z1'] } }, { createdById: 's1' }] }])
+    expect(where.AND).toEqual([COVERAGE_REGISTRY, { OR: [{ zoneId: { in: ['z1'] } }, { createdById: 's1' }] }])
   })
 
   it('carries the search term through', async () => {
@@ -236,7 +237,7 @@ describe('the live filter', () => {
     const { buildingRepository, service } = build()
     await service.exportBuildings({ isLive: true }, ADMIN)
     expect(buildingRepository.listForExport.mock.calls[0][0]).toMatchObject({
-      source: 'COVERAGE',
+      AND: [COVERAGE_REGISTRY],
       isLive: true,
     })
   })

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { VISIBLE_BUILDING, COVERAGE_REGISTRY } from '../src/lib/building-source.js'
 import { createBuildingService } from '../src/modules/buildings/building.service.js'
 
 function captureRepo(result = [], total = result.length) {
@@ -20,7 +21,7 @@ describe('building service listBuildings filters', () => {
   it('passes an empty where when no filters given', async () => {
     const repo = captureRepo()
     await createBuildingService({ buildingRepository: repo }).listBuildings({})
-    expect(repo.calls.find((c) => c.where).where).toEqual({ source: { not: 'PERMISSION' } })
+    expect(repo.calls.find((c) => c.where).where).toEqual({ AND: [VISIBLE_BUILDING] })
   })
 
   it('builds zone/status/surveyor filters', async () => {
@@ -34,17 +35,17 @@ describe('building service listBuildings filters', () => {
       zoneId: 'z1',
       feasibleStatus: 'FEASIBLE',
       createdById: 'u1',
-      source: { not: 'PERMISSION' },
+      AND: [VISIBLE_BUILDING],
     })
   })
 
   it('filters by live status when isLive is given', async () => {
     const repo = captureRepo()
     await createBuildingService({ buildingRepository: repo }).listBuildings({ isLive: true })
-    expect(repo.calls.find((c) => c.where).where).toEqual({ isLive: true, source: { not: 'PERMISSION' } })
+    expect(repo.calls.find((c) => c.where).where).toEqual({ isLive: true, AND: [VISIBLE_BUILDING] })
     const repo2 = captureRepo()
     await createBuildingService({ buildingRepository: repo2 }).listBuildings({ isLive: false })
-    expect(repo2.calls.find((c) => c.where).where).toEqual({ isLive: false, source: { not: 'PERMISSION' } })
+    expect(repo2.calls.find((c) => c.where).where).toEqual({ isLive: false, AND: [VISIBLE_BUILDING] })
   })
 
   it('filters by cityId through the zone operator', async () => {

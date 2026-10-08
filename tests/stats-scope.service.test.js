@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createStatsService } from '../src/modules/stats/stats.service.js'
+import { COVERAGE_REGISTRY } from '../src/lib/building-source.js'
 
 function fakeStatsRepo() {
   const wheres = {}
@@ -31,12 +32,13 @@ function fakeStatsRepo() {
 
 const fakeUserRepo = (zones = ['z1']) => ({ assignedZoneIds: async () => zones })
 
+// Both ORs sit inside AND, so the surveyor scope never overwrites the registry.
 const SURVEYOR_SCOPE = {
-  source: 'COVERAGE',
-  OR: [{ zoneId: { in: ['z1'] } }, { createdById: 'u-surv' }],
+  AND: [COVERAGE_REGISTRY, { OR: [{ zoneId: { in: ['z1'] } }, { createdById: 'u-surv' }] }],
 }
-// Coverage KPIs never count acquisition-team buildings.
-const COVERAGE_ONLY = { source: 'COVERAGE' }
+// Coverage KPIs never count acquisition-team buildings; approved societies
+// are part of the coverage registry (phase 2).
+const COVERAGE_ONLY = { AND: [COVERAGE_REGISTRY] }
 
 describe('dashboard stats scoping', () => {
   it('passes no building filter for admins and computes charts', async () => {

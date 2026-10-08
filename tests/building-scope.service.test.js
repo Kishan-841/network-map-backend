@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { VISIBLE_BUILDING, COVERAGE_REGISTRY } from '../src/lib/building-source.js'
 import { createBuildingService } from '../src/modules/buildings/building.service.js'
 
 const own = {
@@ -61,6 +62,7 @@ describe('building scoping', () => {
     await service.listBuildings({}, surveyor)
     expect(whereUsed().createdById).toBeUndefined()
     expect(whereUsed().AND).toEqual([
+      COVERAGE_REGISTRY,
       { OR: [{ zoneId: { in: ['z1'] } }, { createdById: 'u-surv' }] },
     ])
   })
@@ -69,7 +71,7 @@ describe('building scoping', () => {
     const { service, whereUsed } = makeService({ assigned: ['z1'] })
     await service.listBuildings({ search: 'abc' }, surveyor)
     expect(whereUsed().OR).toHaveLength(3) // name/address/zone search clauses
-    expect(whereUsed().AND[0].OR).toEqual([
+    expect(whereUsed().AND[1].OR).toEqual([
       { zoneId: { in: ['z1'] } },
       { createdById: 'u-surv' },
     ])

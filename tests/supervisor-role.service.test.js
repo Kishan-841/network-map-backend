@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import { VISIBLE_BUILDING, COVERAGE_REGISTRY } from '../src/lib/building-source.js'
 import { createBuildingService } from '../src/modules/buildings/building.service.js'
 
 /**
@@ -62,17 +63,18 @@ const build = (buildings) => {
 }
 
 describe('SUPERVISOR sees both registries', () => {
-  // Both registries — but never the societies (society permissions, phase 1).
-  it('applies no registry filter beyond hiding PERMISSION societies', async () => {
+  // Both registries — but never a society an ADMIN has not approved (phase 2).
+  it('applies no registry filter beyond hiding not-yet-approved societies', async () => {
     const { repo, service } = build()
     await service.listBuildings({}, SUPERVISOR)
-    expect(repo.calls[0].source).toEqual({ not: 'PERMISSION' })
+    expect(repo.calls[0].source).toBeUndefined()
+    expect(repo.calls[0].AND).toEqual([VISIBLE_BUILDING])
   })
 
   it('still scopes a manager to the coverage registry', async () => {
     const { repo, service } = build()
     await service.listBuildings({}, MANAGER)
-    expect(repo.calls[0].source).toBe('COVERAGE')
+    expect(repo.calls[0].AND).toEqual([COVERAGE_REGISTRY])
   })
 
   it('matches a city through either mapping, since both registries are in view', async () => {
@@ -81,6 +83,7 @@ describe('SUPERVISOR sees both registries', () => {
     // Acquisition rows carry cityId directly; coverage rows reach it through
     // zone → operator. Picking one would silently hide the other half.
     expect(repo.calls[0].AND).toEqual([
+      VISIBLE_BUILDING,
       { OR: [{ cityId: 'c1' }, { zone: { operator: { cityId: 'c1' } } }] },
     ])
   })
@@ -89,7 +92,7 @@ describe('SUPERVISOR sees both registries', () => {
     const { repo, service } = build()
     await service.listBuildings({ cityId: 'c1' }, MANAGER)
     expect(repo.calls[0].zone).toEqual({ operator: { cityId: 'c1' } })
-    expect(repo.calls[0].AND).toBeUndefined()
+    expect(repo.calls[0].AND).toEqual([COVERAGE_REGISTRY])
   })
 
   it('opens any building regardless of who logged it', async () => {
@@ -142,6 +145,6 @@ describe('SUPERVISOR may edit anything it can see', () => {
   it('marks buildings live in bulk across both registries', async () => {
     const { repo, service } = build()
     await service.bulkSetLive({ filter: {}, isLive: true }, SUPERVISOR)
-    expect(repo.updateMany.mock.calls[0][0].source).toEqual({ not: 'PERMISSION' })
+    expect(repo.updateMany.mock.calls[0][0].AND).toEqual([VISIBLE_BUILDING])
   })
 })

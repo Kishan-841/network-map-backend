@@ -1,4 +1,5 @@
 import { HOME_PASS_TIERS } from '../../lib/home-pass-tier.js'
+import { COVERAGE_REGISTRY } from '../../lib/building-source.js'
 
 const FEASIBLE_STATUSES = ['FEASIBLE', 'PERMISSION_PENDING', 'REJECTED', 'SURVEY_PENDING']
 const OVER_TIME_DAYS = 30
@@ -13,11 +14,13 @@ export function createStatsService({ statsRepository, userRepository }) {
       // Coverage KPIs count coverage buildings. Without this the acquisition
       // team's rows inflate every total here while the buildings list (which
       // defaults to COVERAGE) shows a different number.
-      const buildingWhere = { source: 'COVERAGE' }
+      // The coverage registry includes societies an ADMIN approved (phase 2);
+      // both ORs sit inside AND so neither overwrites the other.
+      const buildingWhere = { AND: [COVERAGE_REGISTRY] }
       if (scoped) {
         // Same zone-or-own read scope the buildings list uses (spec 2026-08-14).
         const assigned = await userRepository.assignedZoneIds(actor.id)
-        buildingWhere.OR = [{ zoneId: { in: assigned } }, { createdById: actor.id }]
+        buildingWhere.AND.push({ OR: [{ zoneId: { in: assigned } }, { createdById: actor.id }] })
       }
       if (operatorId) buildingWhere.zone = { operatorId }
       if (cityId) buildingWhere.zone = { ...buildingWhere.zone, operator: { cityId } }

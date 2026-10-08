@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { COVERAGE_REGISTRY } from '../src/lib/building-source.js'
 import { createPlanScope } from '../src/modules/visit-tasks/plan-scope.js'
 
 const users = [
@@ -37,7 +38,7 @@ describe('plan scope', () => {
     expect(await scope.readableUserIds({ id: 'x', role: 'SURVEYOR' })).toEqual([])
   })
   it('buildings: manager/admin the coverage registry; a TL their pool', async () => {
-    expect(await scope.assignableBuildingsWhere({ id: 'm1', role: 'SALES_MANAGER' })).toEqual({ source: 'COVERAGE' })
+    expect(await scope.assignableBuildingsWhere({ id: 'm1', role: 'SALES_MANAGER' })).toEqual(COVERAGE_REGISTRY)
     const tl = await scope.assignableBuildingsWhere({ id: 't1', role: 'TEAM_LEADER', zoneIds: ['z1'] })
     expect(JSON.stringify(tl)).toContain('z1')
   })

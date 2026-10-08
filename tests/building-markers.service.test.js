@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { VISIBLE_BUILDING, COVERAGE_REGISTRY } from '../src/lib/building-source.js'
 import { createBuildingService } from '../src/modules/buildings/building.service.js'
 
 function captureRepo(result = []) {
@@ -32,7 +33,7 @@ describe('building service listMarkers', () => {
       zoneId: 'z1',
       feasibleStatus: 'FEASIBLE',
       createdById: 'u1',
-      source: { not: 'PERMISSION' },
+      AND: [VISIBLE_BUILDING],
     })
   })
 
@@ -67,9 +68,10 @@ describe('building service listMarkers', () => {
       { id: 'surv-1', role: 'SURVEYOR' },
     )
     expect(repo.calls[0].where.AND).toEqual([
+      COVERAGE_REGISTRY,
       { OR: [{ zoneId: { in: ['z-assigned'] } }, { createdById: 'surv-1' }] },
     ])
-    expect(repo.calls[0].where.source).toBe('COVERAGE')
+    expect(repo.calls[0].where.source).toBeUndefined()
   })
 
   it('ignores page/pageSize — the map is not paginated', async () => {
@@ -78,7 +80,7 @@ describe('building service listMarkers', () => {
       page: 3,
       pageSize: 500,
     })
-    expect(repo.calls[0].where).toEqual({ source: { not: 'PERMISSION' } })
+    expect(repo.calls[0].where).toEqual({ AND: [VISIBLE_BUILDING] })
   })
 
   it('returns the repository rows unchanged', async () => {

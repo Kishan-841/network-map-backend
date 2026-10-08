@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js'
+import { HIDDEN_SOCIETY } from '../../lib/building-source.js'
 
 // Operator name travels with every zone read so the UI can label + narrow.
 const withOperator = { operator: { select: { id: true, name: true } } }
@@ -23,7 +24,8 @@ export const zoneRepository = {
   countBuildings: (zoneId) => prisma.building.count({ where: { zoneId } }),
   // Society-permission buildings are hidden from the Buildings tab, so a
   // blocked zone delete has to say they are part of the count.
-  countPermissionBuildings: (zoneId) => prisma.building.count({ where: { zoneId, source: 'PERMISSION' } }),
+  // Societies not yet approved — the ones the Buildings tab does not show.
+  countPermissionBuildings: (zoneId) => prisma.building.count({ where: { zoneId, ...HIDDEN_SOCIETY } }),
   countByIds: (ids) => prisma.zone.count({ where: { id: { in: ids } } }),
   paged: ({ where, skip, take }) =>
     prisma.zone.findMany({ where, orderBy: { name: 'asc' }, skip, take, include: withOperator }),

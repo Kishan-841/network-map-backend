@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import { VISIBLE_BUILDING, COVERAGE_REGISTRY } from '../src/lib/building-source.js'
 import { createBuildingService } from '../src/modules/buildings/building.service.js'
 
 const AGENT = { id: 'ag1', role: 'ACQUISITION_AGENT' }
@@ -123,7 +124,9 @@ describe('acquisition visibility', () => {
   it('coverage roles never receive acquisition rows by default', async () => {
     const { service, whereUsed } = makeService()
     await service.listBuildings({}, ADMIN)
-    expect(whereUsed().source).toBe('COVERAGE')
+    // The coverage registry = COVERAGE rows + approved societies (phase 2).
+    expect(whereUsed().source).toBeUndefined()
+    expect(whereUsed().AND).toEqual([COVERAGE_REGISTRY])
   })
 
   it('agent may open only their own building; lead only acquisition ones', async () => {

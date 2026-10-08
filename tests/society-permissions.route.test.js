@@ -89,8 +89,9 @@ describe('POST /buildings by a permission executive', () => {
   it('creates a PERMISSION building with one ADDED history row', async () => {
     const b = await addAs('PE')
     expect(b.source).toBe('PERMISSION')
-    const visits = await prisma.permissionVisit.findMany({ where: { buildingId: b.id } })
-    expect(visits).toHaveLength(1)
+    // Added as ACCEPTED, so phase 2 also sends it for approval (a SUBMITTED row).
+    const visits = await prisma.permissionVisit.findMany({ where: { buildingId: b.id }, orderBy: { createdAt: 'asc' } })
+    expect(visits.map((v) => v.kind)).toEqual(['ADDED', 'SUBMITTED'])
     expect(visits[0]).toMatchObject({
       kind: 'ADDED',
       userId: U.PE.id,
@@ -277,7 +278,8 @@ describe('GET /permission-buildings/:id and POST /:id/visits', () => {
       createdBy: { id: U.PE.id },
       photos: [],
     })
-    expect(res.body.data.visits).toHaveLength(1)
+    // ADDED + the phase-2 SUBMITTED row (it was added as ACCEPTED).
+    expect(res.body.data.visits.map((v) => v.kind)).toEqual(['SUBMITTED', 'ADDED'])
   })
 
   it('another executive gets a 404, other roles a 403, an admin a 200', async () => {
@@ -330,7 +332,16 @@ describe('GET /permission-buildings/:id and POST /:id/visits', () => {
   it('the detail lists visits newest first', async () => {
     const res = await request(app).get(`/api/v1/permission-buildings/${b.id}`).set(...as('PE'))
     const remarks = res.body.data.visits.map((v) => v.remark)
-    expect(remarks).toEqual(['Still thinking', 'Chairman wants a demo first', 'Met the secretary, agreed in principle'])
+    // Phase 2: leaving ACCEPTED while waiting withdrew the approval request
+    // (WITHDRAWN, carrying the visit's remark) — it sent on add (SUBMITTED).
+    expect(remarks).toEqual([
+      'Still thinking',
+      'Chairman wants a demo first',
+      'Chairman wants a demo first',
+      'Sent for approval',
+      'Met the secretary, agreed in principle',
+    ])
+    expect(res.body.data.visits.map((v) => v.kind)).toEqual(['VISIT', 'WITHDRAWN', 'VISIT', 'SUBMITTED', 'ADDED'])
     expect(res.body.data.visits[0].user).toEqual({ id: U.ADMIN.id, name: `${S} ADMIN` })
   })
 

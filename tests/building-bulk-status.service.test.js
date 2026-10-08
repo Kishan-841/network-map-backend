@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import { VISIBLE_BUILDING, COVERAGE_REGISTRY } from '../src/lib/building-source.js'
 import { createBuildingService } from '../src/modules/buildings/building.service.js'
 
 /**
@@ -37,7 +38,7 @@ describe('bulkSetLive', () => {
     const { repo, service } = build()
     const result = await service.bulkSetLive({ filter: { zoneId: 'z1' }, isLive: true }, ADMIN)
     expect(repo.updateMany).toHaveBeenCalledWith(
-      { source: 'COVERAGE', zoneId: 'z1' },
+      { zoneId: 'z1', AND: [COVERAGE_REGISTRY] },
       { isLive: true },
     )
     expect(result).toEqual({ count: 3, isLive: true })
@@ -47,7 +48,7 @@ describe('bulkSetLive', () => {
     const { repo, service } = build()
     await service.bulkSetLive({ filter: { operatorId: 'op1' }, isLive: true }, ADMIN)
     expect(repo.updateMany).toHaveBeenCalledWith(
-      { source: 'COVERAGE', zone: { operatorId: 'op1' } },
+      { zone: { operatorId: 'op1' }, AND: [COVERAGE_REGISTRY] },
       { isLive: true },
     )
   })
@@ -55,7 +56,7 @@ describe('bulkSetLive', () => {
   it('never touches acquisition rows when no source is asked for', async () => {
     const { repo, service } = build()
     await service.bulkSetLive({ filter: {}, isLive: true }, ADMIN)
-    expect(repo.updateMany.mock.calls[0][0]).toMatchObject({ source: 'COVERAGE' })
+    expect(repo.updateMany.mock.calls[0][0]).toMatchObject({ AND: [COVERAGE_REGISTRY] })
   })
 
   it('confines an explicit id list to the actor’s scope', async () => {
@@ -66,9 +67,9 @@ describe('bulkSetLive', () => {
     // id from someone else's zone cannot flip it.
     expect(where.AND[1]).toEqual({ id: { in: ['b1', 'b2'] } })
     expect(where.AND[0].AND).toEqual([
+      COVERAGE_REGISTRY,
       { OR: [{ zoneId: { in: ['z1'] } }, { createdById: 's1' }] },
     ])
-    expect(where.AND[0].source).toBe('COVERAGE')
   })
 
   it('carries the search term through, so a filtered view marks what it shows', async () => {
@@ -99,18 +100,21 @@ describe('tier filter', () => {
 
   it('turns a tier into its home-pass range', async () => {
     expect((await whereFor({ tier: 'SILVER' })).AND).toEqual([
+      COVERAGE_REGISTRY,
       { details: { homePass: { gte: 201, lte: 500 } } },
     ])
   })
 
   it('leaves the top tier open-ended', async () => {
     expect((await whereFor({ tier: 'PLATINUM' })).AND).toEqual([
+      COVERAGE_REGISTRY,
       { details: { homePass: { gte: 1001 } } },
     ])
   })
 
   it('matches unrated buildings with or without a details row', async () => {
     expect((await whereFor({ tier: 'UNRATED' })).AND).toEqual([
+      COVERAGE_REGISTRY,
       { OR: [{ details: { is: null } }, { details: { homePass: null } }] },
     ])
   })
@@ -118,7 +122,7 @@ describe('tier filter', () => {
   it('composes with a zone filter rather than replacing it', async () => {
     const where = await whereFor({ tier: 'GOLD', zoneId: 'z1' })
     expect(where.zoneId).toBe('z1')
-    expect(where.AND).toEqual([{ details: { homePass: { gte: 501, lte: 1000 } } }])
+    expect(where.AND).toEqual([COVERAGE_REGISTRY, { details: { homePass: { gte: 501, lte: 1000 } } }])
   })
 
   it('composes with the surveyor scope instead of overwriting it', async () => {
@@ -133,6 +137,6 @@ describe('tier filter', () => {
         { details: { homePass: { gte: 1, lte: 200 } } },
       ]),
     )
-    expect(repo.updateMany.mock.calls[0][0].AND).toHaveLength(2)
+    expect(repo.updateMany.mock.calls[0][0].AND).toHaveLength(3) // + the coverage registry
   })
 })

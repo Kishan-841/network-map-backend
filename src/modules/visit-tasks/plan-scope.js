@@ -1,4 +1,5 @@
 import { poolWhere, scopedUserIds } from '../../lib/sales-visibility.js'
+import { COVERAGE_REGISTRY } from '../../lib/building-source.js'
 
 const PLANNERS = ['ADMIN', 'SALES_MANAGER', 'TEAM_LEADER']
 const ASSIGNEE_ROLES = ['SALES_EXECUTIVE', 'TEAM_LEADER']
@@ -41,7 +42,7 @@ export function createPlanScope({ repo, salesRepo }) {
     // narrow a team leader's pool to what their team holds.
     async assignableBuildingsWhere(actor) {
       if (!actor?.id) return { id: '__none__' }
-      if (actor.role === 'ADMIN' || actor.role === 'SALES_MANAGER') return { source: 'COVERAGE' }
+      if (actor.role === 'ADMIN' || actor.role === 'SALES_MANAGER') return COVERAGE_REGISTRY
       if (actor.role === 'TEAM_LEADER') return poolWhere(actor, scopedUserIds(actor, await teamUnder(actor)))
       return { id: '__none__' }
     },

@@ -72,7 +72,7 @@ export const bulkStatusSchema = z
     ids: z.array(z.string().min(1)).min(1).max(1000).optional(),
     filter: z
       .object({
-        source: z.enum(['COVERAGE', 'ACQUISITION']).optional(),
+        source: z.enum(['COVERAGE', 'ACQUISITION', 'PERMISSION']).optional(), // PERMISSION = approved societies
         pincode: z.string().optional(),
         zoneId: z.string().optional(),
         operatorId: z.string().optional(),
@@ -116,7 +116,7 @@ export const bulkOltSchema = z.preprocess(
 )
 
 export const listQuerySchema = z.object({
-  source: z.enum(['COVERAGE', 'ACQUISITION']).optional(),
+  source: z.enum(['COVERAGE', 'ACQUISITION', 'PERMISSION']).optional(), // PERMISSION = approved societies
   pincode: z.string().optional(),
   zoneId: z.string().optional(),
   operatorId: z.string().optional(),

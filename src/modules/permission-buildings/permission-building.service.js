@@ -1,5 +1,6 @@
 import { ApiError } from '../../lib/api-error.js'
 import { requireRemark } from '../buildings/building.service.js'
+import { approvalShape, assertStatusUnlocked } from './approval.js'
 
 /**
  * Society permissions (phase 1) — the Permission Executive's own registry of
@@ -18,7 +19,9 @@ export const visitShape = (v) => ({
   user: v.user ? { id: v.user.id, name: v.user.name } : null,
 })
 
-export function createPermissionBuildingService({ repo, storage }) {
+const notPending = () => ApiError.conflict('Not waiting for approval')
+
+export function createPermissionBuildingService({ repo, storage, zoneRepository }) {
   const sign = async (url) => (storage?.readUrl && url ? storage.readUrl(url) : url)
 
   async function loadInScope(id, actor) {
@@ -32,12 +35,12 @@ export function createPermissionBuildingService({ repo, storage }) {
 
   return {
     async list(filters = {}, actor) {
-      const { status, search, page = 1, pageSize = 20 } = filters
+      const { status, approval, search, page = 1, pageSize = 20 } = filters
       // The executive's own scope is spread LAST — a forged createdById cannot widen it.
       const createdById = actor?.role === 'ADMIN' ? filters.createdById : actor?.id
       if (!createdById && actor?.role !== 'ADMIN') throw ApiError.forbidden()
       const { ids, total } = await repo.pageIds(
-        { status, search: search || undefined, createdById },
+        { status, approval, search: search || undefined, createdById },
         { skip: (page - 1) * pageSize, take: pageSize },
       )
       const rows = ids.length ? await repo.listRows(ids) : []
@@ -64,6 +67,8 @@ export function createPermissionBuildingService({ repo, storage }) {
               : null,
             createdBy: b.createdBy,
             createdAt: b.createdAt,
+            zone: b.zone ?? null,
+            approval: approvalShape(b),
             visitCount: b._count.permissionVisits,
             lastVisit: last
               ? { createdAt: last.createdAt, remark: last.remark, kind: last.kind, user: last.user ?? null }
@@ -80,9 +85,10 @@ export function createPermissionBuildingService({ repo, storage }) {
       await loadInScope(id, actor)
       const b = await repo.findDetail(id)
       if (!b) throw ApiError.notFound('Society not found')
-      const { permissionVisits, photos, permission, ...rest } = b
+      const { permissionVisits, photos, permission, approvalDecidedBy, ...rest } = b
       return {
         ...rest,
+        approval: approvalShape(b),
         permission: permission ? { ...permission, documentUrl: await sign(permission.documentUrl) } : null,
         photos: await Promise.all(photos.map(async (p) => ({ ...p, url: await sign(p.url) }))),
         visits: permissionVisits.map(visitShape),
@@ -97,8 +103,66 @@ export function createPermissionBuildingService({ repo, storage }) {
         userId: actor.id,
         remark: note,
         permissionStatus,
+        // An approved society keeps its Accepted status (phase 2).
+        guard: ({ approval, current }) =>
+          assertStatusUnlocked({
+            approval,
+            current,
+            next: permissionStatus,
+            isExecutive: actor?.role === 'PERMISSION_EXECUTIVE',
+          }),
       })
       return { visit: visitShape(visit), permissionStatus: status }
+    },
+
+    /** Societies waiting for an ADMIN — the nav badge. */
+    async pendingCount() {
+      return { count: await repo.pendingCount() }
+    },
+
+    /**
+     * ADMIN approves a waiting society into a zone: it becomes a FEASIBLE
+     * building in that zone and appears in every staff view (phase 2).
+     */
+    async approve(id, { zoneId, note }, actor) {
+      await loadInScope(id, actor)
+      const zone = zoneId ? await zoneRepository.findById(zoneId) : null
+      if (!zone) throw ApiError.badRequest('Pick a zone')
+      const at = new Date()
+      await repo.decide({
+        buildingId: id,
+        notPending,
+        data: {
+          permissionApproval: 'APPROVED',
+          approvalReason: null,
+          approvalDecidedAt: at,
+          approvalDecidedById: actor.id,
+          zoneId: zone.id,
+          feasibleStatus: 'FEASIBLE',
+        },
+        visit: { userId: actor.id, kind: 'APPROVED', remark: note?.trim() || 'Approved', createdAt: at },
+      })
+      return this.get(id, actor)
+    },
+
+    /** ADMIN sends a waiting society back with a reason the executive sees. */
+    async reject(id, { reason }, actor) {
+      await loadInScope(id, actor)
+      const text = typeof reason === 'string' ? reason.trim() : ''
+      if (!text) throw ApiError.badRequest('A reason is required — tell the executive what to fix')
+      const at = new Date()
+      await repo.decide({
+        buildingId: id,
+        notPending,
+        data: {
+          permissionApproval: 'REJECTED',
+          approvalReason: text,
+          approvalDecidedAt: at,
+          approvalDecidedById: actor.id,
+        },
+        visit: { userId: actor.id, kind: 'REJECTED', remark: text, createdAt: at },
+      })
+      return this.get(id, actor)
     },
   }
 }

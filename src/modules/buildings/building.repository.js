@@ -1,5 +1,5 @@
 import { prisma } from '../../lib/prisma.js'
-import { NOT_PERMISSION } from '../../lib/building-source.js'
+import { VISIBLE_BUILDING, COVERAGE_REGISTRY, visibleOnly, andWhere } from '../../lib/building-source.js'
 
 const fullInclude = {
   contact: true,
@@ -139,17 +139,21 @@ export const buildingRepository = {
    * deliberately narrow select — partner rows must never carry survey data.
    * `id` fetches one exact building for the server-side serviceability check.
    */
+  // Approved societies are part of the coverage registry (phase 2) — composed
+  // with AND, since the search owns an OR of its own.
   searchForPartner: (query, take = 10, id = null) =>
     prisma.building.findMany({
       where: id
-        ? { id, source: 'COVERAGE' }
-        : {
-            source: 'COVERAGE',
-            OR: [
-              { buildingName: { contains: query, mode: 'insensitive' } },
-              { formattedAddress: { contains: query, mode: 'insensitive' } },
-            ],
-          },
+        ? andWhere({ id }, COVERAGE_REGISTRY)
+        : andWhere(
+            {
+              OR: [
+                { buildingName: { contains: query, mode: 'insensitive' } },
+                { formattedAddress: { contains: query, mode: 'insensitive' } },
+              ],
+            },
+            COVERAGE_REGISTRY,
+          ),
       select: { id: true, buildingName: true, formattedAddress: true, isLive: true },
       orderBy: [{ isLive: 'desc' }, { buildingName: 'asc' }],
       take,
@@ -183,15 +187,17 @@ export const buildingRepository = {
   },
   // Capped so a large/degenerate box can't pull the whole table into memory.
   // The nearby check only needs enough candidates to flag a duplicate.
-  // Society-permission rows are left out (partner matching, coverage
+  // Societies not yet approved are left out (partner matching, coverage
   // duplicates) unless the caller asks — the PE's own duplicate check does.
   findWithinBounds: ({ minLat, maxLat, minLon, maxLon }, { includePermission = false } = {}) =>
     prisma.building.findMany({
-      where: {
-        latitude: { gte: minLat, lte: maxLat },
-        longitude: { gte: minLon, lte: maxLon },
-        ...(!includePermission && NOT_PERMISSION),
-      },
+      where: andWhere(
+        {
+          latitude: { gte: minLat, lte: maxLat },
+          longitude: { gte: minLon, lte: maxLon },
+        },
+        includePermission ? {} : VISIBLE_BUILDING,
+      ),
       include: listInclude,
       take: 200,
     }),
@@ -204,7 +210,7 @@ export const buildingRepository = {
   // findUnique on it threw. A shared place resolves to the live building first.
   findByPlaceId: (placeId, { includePermission = false } = {}) =>
     prisma.building.findFirst({
-      where: { placeId, ...(!includePermission && NOT_PERMISSION) },
+      where: includePermission ? { placeId } : visibleOnly({ placeId }),
       include: listInclude,
       orderBy: [{ isLive: 'desc' }, { createdAt: 'asc' }],
     }),
