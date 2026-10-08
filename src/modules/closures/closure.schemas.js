@@ -12,6 +12,9 @@ export const CLOSURE_KINDS = ['Jumbo', 'Tiffin', 'Compass', 'FDC', 'PatchPanel']
 /** Tubes in the cable a closure sits on. 0 is a real answer. */
 export const TUBE_COUNTS = [0, 1, 2, 3, 4]
 
+/** Same shape and cap as Fiber.images / Pop.images. Shared with the draw-time newClosure. */
+export const closureImagesSchema = z.array(z.string()).max(20).nullish()
+
 const coord = { latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180) }
 
 // A count that arrives as '' from a form means "not recorded", not zero.
@@ -33,6 +36,8 @@ export const createClosureSchema = z.object({
   outCoreCount: count(CORE_COUNTS, 'Cores must be one of 2, 4, 6, 12, 24, 48'),
   buildingId: z.string().nullish(),
   notes: z.string().trim().max(500).nullish(),
+  // Photos of the box — upload-API URLs only (the service checks they are ours).
+  images: closureImagesSchema,
 })
 export const updateClosureSchema = createClosureSchema.partial()
 

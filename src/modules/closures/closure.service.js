@@ -1,4 +1,6 @@
+import { Prisma } from '@prisma/client'
 import { ApiError } from '../../lib/api-error.js'
+import { getStorageProvider } from '../../lib/storage/index.js'
 import { prisma } from '../../lib/prisma.js'
 import { closureRepository } from './closure.repository.js'
 import { fiberPointRepository } from '../fibers/fiber.repository.js'
@@ -6,7 +8,30 @@ import { RATIO_PORTS } from './closure.schemas.js'
 import { nextClosureCode, nextSplitterCode } from '../../lib/sequences.js'
 import { canSeeFiber, closureScope, splitterScope } from '../../lib/visibility.js'
 
-export function createClosureService({ closureRepository, fiberPointRepository, sequences, prisma }) {
+export function createClosureService({ closureRepository, fiberPointRepository, sequences, prisma, storage }) {
+  /**
+   * Closure photos follow the fibre/POP rule: only our own uploads may be
+   * stored, the stored URL is the object's identity (canonical), and the link
+   * handed to a browser is short-lived and signed.
+   */
+  function assertOwnedImages(images) {
+    for (const url of images ?? []) {
+      if (!storage?.keyFromUrl(url)) {
+        throw ApiError.badRequest('Image URL must come from the uploads API')
+      }
+    }
+  }
+  function canonicalImages(data) {
+    // Prisma needs DbNull (not JS null) to clear a Json? column to SQL NULL.
+    if (data.images === null) return { ...data, images: Prisma.DbNull }
+    if (!data.images || !storage?.canonicalUrl) return data
+    return { ...data, images: data.images.map((url) => storage.canonicalUrl(url)) }
+  }
+  async function signImages(closure) {
+    if (!closure?.images?.length || !storage?.readUrl) return closure
+    return { ...closure, images: await Promise.all(closure.images.map((u) => storage.readUrl(u))) }
+  }
+
   // Out of the reader's zones reads exactly like one that does not exist.
   async function mustFind(id, actor) {
     const closure = await closureRepository.findVisible(id, closureScope(actor))
@@ -45,7 +70,7 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
   }
 
   return {
-    listClosures: (actor) => closureRepository.list(closureScope(actor)),
+    listClosures: async (actor) => Promise.all((await closureRepository.list(closureScope(actor))).map(signImages)),
 
     /** The Splitters page — every splitter in the reader's zones (or their own). */
     async listSplitters(actor) {
@@ -79,20 +104,24 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
         ...fiber,
         role: pointSeq === maxSeq ? 'in' : pointSeq === 0 ? 'out' : 'through',
       }))
-      return { ...closure, fibers }
+      return signImages({ ...closure, fibers })
     },
 
-    createClosure: (data, actor) =>
-      prisma.$transaction(async (tx) =>
+    async createClosure(data, actor) {
+      assertOwnedImages(data.images)
+      const closure = await prisma.$transaction(async (tx) =>
         closureRepository.create(
-          { ...data, code: await sequences.nextClosureCode(tx), createdById: actor.id },
+          { ...canonicalImages(data), code: await sequences.nextClosureCode(tx), createdById: actor.id },
           tx,
         ),
-      ),
+      )
+      return signImages(closure)
+    },
 
     async updateClosure(id, data, actor) {
       await mustFind(id, actor)
-      const closure = await closureRepository.update(id, data)
+      assertOwnedImages(data.images)
+      const closure = await signImages(await closureRepository.update(id, canonicalImages(data)))
       if (data.latitude != null && data.longitude != null) {
         await fiberPointRepository.updatePositionForClosure(id, {
           latitude: data.latitude,
@@ -188,4 +217,5 @@ export const closureService = createClosureService({
   fiberPointRepository,
   sequences: { nextClosureCode, nextSplitterCode },
   prisma,
+  storage: getStorageProvider(),
 })
