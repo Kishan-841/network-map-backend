@@ -84,6 +84,9 @@ enum PhotoType {
 enum BuildingSource {
   COVERAGE
   ACQUISITION
+  /// A Permission Executive's society (society permissions, phase 1) — hidden
+  /// from the coverage registry, map, stats and sales views.
+  PERMISSION
 }
 
 enum ContactDesignation {
@@ -154,6 +157,7 @@ model User {
   earningsMarkedPaid PartnerEarning[]  @relation("EarningPaidBy")
   paymentsRecorded   PartnerPayment[]  @relation("PaymentRecordedBy")
   appReleases        AppRelease[]      @relation("AppReleaseCreatedBy")
+  permissionVisits   PermissionVisit[] @relation("PermissionVisitBy")
 }
 
 /// One row per pincode an acquisition agent covers (within one city).
@@ -526,6 +530,7 @@ model Building {
   salesAssignments BuildingAssignment[]
   salesVisits      BuildingVisit[]
   salesInquiries   CustomerInquiry[]
+  permissionVisits PermissionVisit[]
 
   @@index([latitude, longitude])
   @@index([source, createdById])
@@ -691,6 +696,27 @@ model Permission {
   paymentType      String?
   /// Demo connections offered (when societyOffer is DEMO).
   demoCount        Int?
+}
+
+/// One entry in a PERMISSION building's history: the first add, a visit
+/// update, or a details edit. Append-only; the remark is compulsory.
+model PermissionVisit {
+  id           String   @id @default(cuid())
+  buildingId   String
+  building     Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  userId       String?
+  user         User?    @relation("PermissionVisitBy", fields: [userId], references: [id], onDelete: SetNull)
+  remark       String
+  /// Permission status before / after, when this entry changed it.
+  statusBefore String?
+  statusAfter  String?
+  /// Fields a details edit changed, e.g. contact, offer, photos.
+  changes      String[] @default([])
+  /// 'ADDED' | 'VISIT' | 'EDIT'
+  kind         String
+  createdAt    DateTime @default(now())
+
+  @@index([buildingId, createdAt])
 }
 
 /// The decision-maker an acquisition agent met at the building.
