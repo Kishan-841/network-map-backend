@@ -107,21 +107,37 @@ export function mergeSurvey(current, body) {
     links: body.links !== undefined ? normaliseLinks(body.links) : current?.links ?? [],
     materials: body.materials !== undefined ? normaliseMaterials(body.materials) : current?.materials ?? {},
   }
+  next.links = resolveLinks(next)
   const changes = SURVEY_PARTS.filter((part) => canon(next[part]) !== canon(current?.[part] ?? (part === 'wings' || part === 'links' ? [] : {})))
   return { next, changes }
 }
 
-/** Every link joins two different wings that exist (names compared case-insensitively). */
-export function assertLinksMatchWings({ wings, links }) {
-  const names = new Set(wings.map((w) => w.name.trim().toLowerCase()))
-  for (const link of links) {
-    const from = link.from.trim().toLowerCase()
-    const to = link.to.trim().toLowerCase()
-    if (!names.has(from) || !names.has(to)) {
+/**
+ * Every link joins two different wings that exist (names matched
+ * case-insensitively) and is rewritten to the wings' own spelling. The same
+ * two wings joined by the same method twice — either direction — is refused.
+ * Returns the resolved links.
+ */
+export function resolveLinks({ wings, links }) {
+  const byKey = new Map(wings.map((w) => [w.name.trim().toLowerCase(), w.name]))
+  const seen = new Set()
+  return links.map((link) => {
+    const from = byKey.get(link.from.trim().toLowerCase())
+    const to = byKey.get(link.to.trim().toLowerCase())
+    if (!from || !to) {
       throw ApiError.badRequest(`Link ${link.from} → ${link.to} names a wing that is not in the wings list`)
     }
     if (from === to) throw ApiError.badRequest('A link must join two different wings')
-  }
+    const key = `${[from, to].sort().join('\u0000')}\u0000${link.method}`
+    if (seen.has(key)) throw ApiError.badRequest('That link is already listed')
+    seen.add(key)
+    return { ...link, from, to }
+  })
+}
+
+/** Throws unless the links are valid against the wings (see resolveLinks). */
+export const assertLinksMatchWings = (survey) => {
+  resolveLinks(survey)
 }
 
 /** What a submit needs: at least one wing and one material with a quantity. */

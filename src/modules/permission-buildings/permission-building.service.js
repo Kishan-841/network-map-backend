@@ -9,7 +9,6 @@ import {
   surveySummary,
   surveyShape,
   mergeSurvey,
-  assertLinksMatchWings,
   assertSubmittable,
 } from './survey.js'
 
@@ -80,6 +79,21 @@ export function createPermissionBuildingService({ repo, storage, zoneRepository 
     const row = await loadInScope(id, actor)
     if (!maySurvey(actor)) throw ApiError.forbidden(message)
     return row
+  }
+
+  /**
+   * Under the row lock: the society must still be readable by this actor (a
+   * zone change or a withdrawn approval since the first check is a 404), and
+   * approved (409 for an ADMIN, who can read it either way).
+   */
+  const lockedInScope = (fresh, actor) => {
+    if (!readsSociety(fresh, actor)) throw ApiError.notFound('Society not found')
+    approveSocietyFirst(fresh)
+  }
+
+  /** A live society's survey is closed to the surveyor (an ADMIN may still correct it). */
+  const notLiveForSurveyor = (fresh, actor) => {
+    if (fresh.isLive && actor?.role !== 'ADMIN') throw ApiError.conflict('Already live')
   }
 
   const approveSocietyFirst = (fresh) => {
@@ -255,7 +269,8 @@ export function createPermissionBuildingService({ repo, storage, zoneRepository 
     async saveSurvey(id, { remark, ...body }, actor) {
       await loadForSurvey(id, actor, 'Only the zone surveyor or an admin can fill the survey')
       const survey = await repo.withSurveyLock(id, async ({ fresh, write }) => {
-        approveSocietyFirst(fresh)
+        lockedInScope(fresh, actor)
+        notLiveForSurveyor(fresh, actor)
         const current = fresh.societySurvey
         const approved = current?.status === 'APPROVED'
         let note = typeof remark === 'string' && remark.trim() ? remark.trim() : null
@@ -266,7 +281,6 @@ export function createPermissionBuildingService({ repo, storage, zoneRepository 
           if (!note) throw ApiError.badRequest('A remark is required — say why the approved survey changes')
         }
         const { next, changes } = mergeSurvey(current, body)
-        assertLinksMatchWings(next)
         if (approved && changes.length === 0) throw ApiError.badRequest('Nothing changed')
         const status = !current || current.status === 'REJECTED' ? 'DRAFT' : current.status
         const saved = await write.survey({ ...next, status })
@@ -282,7 +296,8 @@ export function createPermissionBuildingService({ repo, storage, zoneRepository 
     async submitSurvey(id, { note } = {}, actor) {
       await loadForSurvey(id, actor, 'Only the zone surveyor or an admin can submit the survey')
       const survey = await repo.withSurveyLock(id, async ({ fresh, write }) => {
-        approveSocietyFirst(fresh)
+        lockedInScope(fresh, actor)
+        notLiveForSurveyor(fresh, actor)
         const current = fresh.societySurvey
         if (!current) throw ApiError.conflict('Save the survey first')
         if (current.status === 'SUBMITTED') throw ApiError.conflict('Already waiting for approval')
@@ -335,7 +350,7 @@ export function createPermissionBuildingService({ repo, storage, zoneRepository 
     async markLive(id, { note } = {}, actor) {
       await loadForSurvey(id, actor, 'Only the zone surveyor or an admin can mark it live')
       await repo.withSurveyLock(id, async ({ fresh, write }) => {
-        approveSocietyFirst(fresh)
+        lockedInScope(fresh, actor)
         if (fresh.societySurvey?.status !== 'APPROVED') throw ApiError.conflict('Materials are not approved yet')
         if (fresh.isLive) throw ApiError.conflict('Already live')
         await write.building({ isLive: true })

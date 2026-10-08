@@ -318,6 +318,31 @@ describe('saving a survey', () => {
       await bad({ ...goodSurvey(), status: 'APPROVED' })
       await bad(goodSurvey({ checks: { nameOk: true, wingsOk: true, homePassOk: true, extra: 1 } }))
     })
+    it('a duplicate link (same wings + method, either direction) is refused', async () => {
+      const dup = (links) => bad(goodSurvey({ links }))
+      const r1 = await dup([
+        { from: 'A', to: 'B', method: 'AERIAL' },
+        { from: 'a', to: 'b', method: 'AERIAL', meters: 5 },
+      ])
+      expect(r1.body.error.message).toBe('That link is already listed')
+      const r2 = await dup([
+        { from: 'A', to: 'B', method: 'TRAY' },
+        { from: 'B', to: 'A', method: 'TRAY' },
+      ])
+      expect(r2.body.error.message).toBe('That link is already listed')
+    })
+    it('the same wings by two different methods is fine', async () => {
+      const res = await putSurvey(
+        b.id,
+        goodSurvey({ links: [{ from: 'A', to: 'B', method: 'AERIAL' }, { from: 'B', to: 'A', method: 'UNDERGROUND' }] }),
+      )
+      expect(res.status).toBe(200)
+    })
+    it('link names are stored in the wing’s own spelling', async () => {
+      const res = await putSurvey(b.id, goodSurvey({ links: [{ from: ' a ', to: 'b', method: 'TRAY', meters: 12 }] }))
+      expect(res.status).toBe(200)
+      expect(res.body.data.links).toEqual([{ from: 'A', to: 'B', method: 'TRAY', meters: 12 }])
+    })
     it('removing a wing a stored link uses is refused', () =>
       bad({ wings: [{ name: 'A', floors: 5, flatsPerFloor: 4, shafts: 1, homePass: 20 }] }))
   })
@@ -480,6 +505,26 @@ describe('marking live', () => {
       if (!log) await new Promise((r) => setTimeout(r, 50))
     }
     expect(log).toBeTruthy()
+  })
+
+  it('once live the surveyor can no longer save or submit (409); an ADMIN still can', async () => {
+    const b = await approvedMaterials()
+    expect((await markLive(b.id)).status).toBe(200)
+    const save = await putSurvey(b.id, goodSurvey({ materials: { FIBER_12F: 1 } }))
+    expect(save.status).toBe(409)
+    expect(save.body.error.message).toBe('Already live')
+    const sub = await submit(b.id)
+    expect(sub.status).toBe(409)
+    expect(sub.body.error.message).toBe('Already live')
+    const admin = await putSurvey(b.id, { materials: { FIBER_12F: 100, FAT_BOX: 2 }, remark: 'Actual use' }, 'ADMIN')
+    expect(admin.status).toBe(200)
+  })
+
+  it('a society moved to another zone is out of the old surveyor’s reach (404)', async () => {
+    const b = await approvedMaterials()
+    await prisma.building.update({ where: { id: b.id }, data: { zoneId: Z2 } })
+    expect((await markLive(b.id)).status).toBe(404)
+    expect((await putSurvey(b.id, goodSurvey())).status).toBe(404)
   })
 
   it('an ADMIN may mark live too (no body at all is fine)', async () => {

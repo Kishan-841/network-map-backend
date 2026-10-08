@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { mergeSurvey, stageOf, assertLinksMatchWings, assertSubmittable } from '../src/modules/permission-buildings/survey.js'
 import { MATERIAL_KEYS, SOCIETY_MATERIALS } from '../src/lib/society-materials.js'
+import { createPermissionBuildingService } from '../src/modules/permission-buildings/permission-building.service.js'
 import { permissionBuildingRepository } from '../src/modules/permission-buildings/permission-building.repository.js'
 
 describe('society survey rules', () => {
@@ -25,7 +26,8 @@ describe('society survey rules', () => {
 
   it('mergeSurvey lists exactly the parts that changed', () => {
     expect(mergeSurvey(stored, { materials: { FAT_BOX: 3 } }).changes).toEqual(['materials'])
-    expect(mergeSurvey(stored, { links: [{ from: 'A', to: 'B', method: 'TRAY', meters: null }] }).next.links).toEqual([
+    const two = { ...stored, wings: [...stored.wings, { name: 'B', floors: 1, flatsPerFloor: 1, shafts: 0, homePass: 1 }] }
+    expect(mergeSurvey(two, { links: [{ from: 'a', to: 'b', method: 'TRAY', meters: null }] }).next.links).toEqual([
       { from: 'A', to: 'B', method: 'TRAY' },
     ])
   })
@@ -57,5 +59,18 @@ describe('society survey rules', () => {
     for (const m of ['findSurvey', 'surveyPendingCount', 'withSurveyLock', 'findScopeRow', 'findDetail', 'pageIds', 'listRows']) {
       expect(typeof permissionBuildingRepository[m]).toBe('function')
     }
+  })
+  it('save / submit / mark-live re-check the zone under the lock (404 when it moved)', async () => {
+    const before = { id: 'b1', source: 'PERMISSION', createdById: 'pe', zoneId: 'z1', permissionApproval: 'APPROVED' }
+    const fresh = { ...before, zoneId: 'z2', isLive: false, societySurvey: { status: 'APPROVED', wings: [], links: [], materials: {} } }
+    const repo = {
+      findScopeRow: async () => before,
+      withSurveyLock: async (id, fn) => fn({ fresh, write: { survey: async () => ({}), building: async () => ({}), visit: async () => ({}) } }),
+    }
+    const service = createPermissionBuildingService({ repo })
+    const actor = { id: 's', role: 'SURVEYOR', zoneIds: ['z1'] }
+    await expect(service.saveSurvey('b1', {}, actor)).rejects.toMatchObject({ status: 404 })
+    await expect(service.submitSurvey('b1', {}, actor)).rejects.toMatchObject({ status: 404 })
+    await expect(service.markLive('b1', {}, actor)).rejects.toMatchObject({ status: 404 })
   })
 })

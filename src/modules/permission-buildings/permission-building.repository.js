@@ -236,7 +236,15 @@ export const permissionBuildingRepository = {
       await tx.$queryRaw`SELECT id FROM "Building" WHERE id = ${buildingId} FOR UPDATE`
       const fresh = await tx.building.findUnique({
         where: { id: buildingId },
-        select: { id: true, source: true, permissionApproval: true, isLive: true, societySurvey: true },
+        select: {
+          id: true,
+          source: true,
+          createdById: true,
+          zoneId: true,
+          permissionApproval: true,
+          isLive: true,
+          societySurvey: true,
+        },
       })
       const write = {
         survey: (data) =>
