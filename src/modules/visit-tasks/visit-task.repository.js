@@ -25,9 +25,10 @@ async function handOver(tx, { buildingId, assigneeId, actorId, allowedHolderIds,
     })
     if (held) throw ApiError.badRequest(`${held.building.buildingName} is held by another team`)
   }
-  await releaseStrandedTasks(tx, { buildingIds: [buildingId], newHolderId: assigneeId, now })
+  const released = await releaseStrandedTasks(tx, { buildingIds: [buildingId], newHolderId: assigneeId, now })
   await tx.buildingAssignment.updateMany({ where: { buildingId, status: 'ACTIVE' }, data: { status: 'REASSIGNED', endedAt: new Date() } })
   await tx.buildingAssignment.create({ data: { buildingId, assignedToId: assigneeId, assignedById: actorId } })
+  return released
 }
 
 const CHANGED = 'The plan changed while you were editing — reload and try again'
@@ -114,13 +115,16 @@ export const visitTaskRepository = {
    * never catches a task this edit just moved to the new holder.
    * `updates`: [{ id, updatedAt, data }] — the first one is returned.
    * `handovers`: [{ buildingId, assigneeId }].
+   * Returns { task, released } — `released` = the previous holders' tasks the
+   * hand-overs dropped.
    */
   updateSeries: ({ updates, handovers, actorId, allowedHolderIds, now = new Date() }) =>
     prisma.$transaction(async (tx) => {
       await lockUnchanged(tx, updates)
       for (const { id, data } of updates) await tx.visitTask.update({ where: { id }, data })
-      for (const h of handovers) await handOver(tx, { ...h, actorId, allowedHolderIds, now })
-      return tx.visitTask.findUnique({ where: { id: updates[0].id }, include: taskInclude })
+      let released = 0
+      for (const h of handovers) released += await handOver(tx, { ...h, actorId, allowedHolderIds, now })
+      return { task: await tx.visitTask.findUnique({ where: { id: updates[0].id }, include: taskInclude }), released }
     }, { timeout: 30000 }),
 
   /** Delete exactly these tasks, all or nothing, if none changed since read (`expected`: [{ id, updatedAt }]). */

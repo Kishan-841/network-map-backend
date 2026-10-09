@@ -59,6 +59,15 @@ const imp = (rows, h = MGR_AUTH, fileName = 'weekly.xlsx') => request(app).post(
 const impRow = (o) => ({ rowNumber: 2, assigneeId: SE, buildingId: B1, date: d, startTime: '09:00', endTime: '10:00', repeatWeeks: 4, ...o })
 const tasksOf = (assigneeId) => prisma.visitTask.findMany({ where: { assigneeId }, orderBy: { taskDate: 'asc' } })
 const day = (t) => t.taskDate.toISOString().slice(0, 10)
+// The audit row is written on 'finish', just after the response — poll briefly.
+async function logOf(where) {
+  for (let i = 0; i < 20; i++) {
+    const log = await prisma.systemLog.findFirst({ where, orderBy: { createdAt: 'desc' } })
+    if (log) return log
+    await new Promise((r) => setTimeout(r, 50))
+  }
+  return null
+}
 const patch = (id, body, h = MGR_AUTH) => request(app).patch(`${base}/${id}`).set(h).send(body)
 const del = (id, scope, h = MGR_AUTH) => request(app).delete(`${base}/${id}${scope ? `?scope=${scope}` : ''}`).set(h)
 
@@ -108,6 +117,13 @@ describe('weekly sheet rows', () => {
       expect(r.state).toBe('error')
       expect(r.errors.join(' ')).toMatch(/one template/)
     }
+  })
+
+  it('import refuses a weekly row with a past date sent straight to it', async () => {
+    const res = await imp([impRow({ date: addDays(today, -1) })])
+    expect(res.status).toBe(400)
+    expect(res.body.error.message).toMatch(/passed/)
+    expect(await prisma.visitTask.count({ where: { assigneeId: SE } })).toBe(0)
   })
 
   it('import refuses a bad repeat even when hand-crafted', async () => {
@@ -171,9 +187,13 @@ describe('series edits', () => {
   it('FOLLOWING: a time change lands on this and every later task, not earlier ones', async () => {
     const res = await patch(ids[1], { startTime: '11:00', endTime: '12:00', scope: 'FOLLOWING' })
     expect(res.status).toBe(200)
-    expect(res.body.data).toMatchObject({ id: ids[1], startTime: '11:00', changed: 3, skipped: 0 })
+    expect(res.body.data).toMatchObject({ id: ids[1], startTime: '11:00', changed: 3, skipped: 0, outOfScope: 0, released: 0 })
     const tasks = await tasksOf(SE3)
     expect(tasks.map((t) => t.startTime)).toEqual(['09:00', '11:00', '11:00', '11:00'])
+    // The audit log names every touched task with its date + assignee before the edit.
+    const log = await logOf({ userId: MGR, action: 'TaskUpdate', recordId: ids[1] })
+    expect(log.newValue).toMatchObject({ scope: 'FOLLOWING', changed: 3 })
+    expect(log.newValue.tasks).toEqual(tasks.slice(1).map((t) => ({ id: t.id, taskDate: day(t), assigneeId: SE3 })))
   })
 
   it('FOLLOWING: a date move shifts each later task by the same days', async () => {
@@ -214,8 +234,10 @@ describe('series edits', () => {
   it('DELETE FOLLOWING removes this and the later ones', async () => {
     const res = await del(ids[2], 'FOLLOWING')
     expect(res.status).toBe(200)
-    expect(res.body.data).toEqual({ deleted: true, removed: 2, skipped: 0 })
+    expect(res.body.data).toEqual({ deleted: true, removed: 2, skipped: 0, outOfScope: 0 })
     expect((await tasksOf(SE3)).map((t) => t.id)).toEqual([ids[0], ids[1]])
+    const log = await logOf({ userId: MGR, action: 'TaskDelete', recordId: ids[2] })
+    expect(log.newValue.taskIds.sort()).toEqual([ids[2], ids[3]].sort())
   })
 
   it('FOLLOWING reassignment moves the tasks and hands the building over in one go', async () => {
@@ -223,15 +245,45 @@ describe('series edits', () => {
     expect(await holder()).toBe(SE3)
     const res = await patch(ids[0], { assigneeId: SE4, scope: 'FOLLOWING' })
     expect(res.status).toBe(200)
-    expect(res.body.data).toMatchObject({ assigneeId: SE4, changed: 2, skipped: 0 })
+    expect(res.body.data).toMatchObject({ assigneeId: SE4, changed: 2, skipped: 0, released: 0 })
     expect((await prisma.visitTask.findMany({ where: { id: { in: [ids[0], ids[1]] } } })).map((t) => t.assigneeId)).toEqual([SE4, SE4])
     expect(await holder()).toBe(SE4)
   })
 
-  it('ONE reassignment of a task at a building its assignee holds keeps the task', async () => {
+  it('ONE reassignment of a task at a building its assignee holds keeps the task; the old holder\'s other task there is released', async () => {
     const res = await patch(ids[1], { assigneeId: SE3 })
     expect(res.status).toBe(200)
-    expect(res.body.data).toMatchObject({ id: ids[1], assigneeId: SE3, changed: 1 })
+    expect(res.body.data).toMatchObject({ id: ids[1], assigneeId: SE3, changed: 1, released: 1 })
+    expect(res.body.data.outOfScope).toBeUndefined()
+    expect(await prisma.visitTask.findUnique({ where: { id: ids[0] } })).toBeNull()
+  })
+
+  it('FOLLOWING: a shifted date landing on another series\' identical task → 409, nothing changed', async () => {
+    const t = (date, seriesId) => prisma.visitTask.create({ data: { assigneeId: SE4, buildingId: B6, taskDate: dateOnly(date), seriesId, createdById: MGR } })
+    const a1 = await t(addDays(d, 40), `${S}-series-a`)
+    const a2 = await t(addDays(d, 47), `${S}-series-a`)
+    await t(addDays(d, 48), `${S}-series-b`)
+    const res = await patch(a1.id, { taskDate: addDays(d, 41), scope: 'FOLLOWING' })
+    expect(res.status).toBe(409)
+    expect(day(await prisma.visitTask.findUnique({ where: { id: a1.id } }))).toBe(addDays(d, 40))
+    expect(day(await prisma.visitTask.findUnique({ where: { id: a2.id } }))).toBe(addDays(d, 47))
+  })
+
+  it("FOLLOWING over a series partly reassigned to another team's executive leaves those alone and counts them", async () => {
+    const seriesId = `${S}-series-mixed`
+    const t = (assigneeId, date) => prisma.visitTask.create({ data: { assigneeId, buildingId: B8, taskDate: dateOnly(date), seriesId, createdById: MGR } })
+    const first = await t(SE, addDays(d, 30))
+    const other = await t(SE2, addDays(d, 37))
+    const last = await t(SE, addDays(d, 44))
+    const h = auth(TL, 'TEAM_LEADER')
+    const res = await patch(first.id, { startTime: '14:00', endTime: '15:00', scope: 'FOLLOWING' }, h)
+    expect(res.status).toBe(200)
+    expect(res.body.data).toMatchObject({ changed: 2, skipped: 0, outOfScope: 1 })
+    expect((await prisma.visitTask.findUnique({ where: { id: other.id } })).startTime).toBeNull()
+    expect((await prisma.visitTask.findUnique({ where: { id: last.id } })).startTime).toBe('14:00')
+    const gone = await del(first.id, 'FOLLOWING', h)
+    expect(gone.body.data).toEqual({ deleted: true, removed: 2, skipped: 0, outOfScope: 1 })
+    expect(await prisma.visitTask.findUnique({ where: { id: other.id } })).not.toBeNull()
   })
 
   it('a visited later task is skipped and counted (PATCH)', async () => {
@@ -249,7 +301,7 @@ describe('series edits', () => {
     expect(day(await prisma.visitTask.findUnique({ where: { id: later.id } }))).toBe(addDays(today, 15))
     // Now dated tomorrow: today's visited task is no longer "later".
     const delRes = await del(missed.id, 'FOLLOWING')
-    expect(delRes.body.data).toEqual({ deleted: true, removed: 2, skipped: 0 })
+    expect(delRes.body.data).toEqual({ deleted: true, removed: 2, skipped: 0, outOfScope: 0 })
     expect(await prisma.visitTask.findUnique({ where: { id: visited.id } })).not.toBeNull()
   })
 
@@ -260,7 +312,7 @@ describe('series edits', () => {
     expect(res.status).toBe(200)
     expect(res.body.data).toMatchObject({ seriesId: null, changed: 1, skipped: 0 })
     expect((await prisma.visitTask.findUnique({ where: { id: b.id } })).startTime).toBeNull()
-    expect((await del(a.id, 'FOLLOWING')).body.data).toEqual({ deleted: true, removed: 1, skipped: 0 })
+    expect((await del(a.id, 'FOLLOWING')).body.data).toEqual({ deleted: true, removed: 1, skipped: 0, outOfScope: 0 })
     expect(await prisma.visitTask.findUnique({ where: { id: b.id } })).not.toBeNull()
   })
 })
@@ -308,8 +360,9 @@ describe('uploads: list and remove', () => {
     expect(res.body.data).toEqual({ removed: 2, kept: 2 })
     const left = await prisma.visitTask.findMany({ where: { uploadId: mgrUpload } })
     expect(left.map((t) => t.id).sort()).toEqual([ids.missed, ids.visited].sort())
-    const log = await prisma.systemLog.findFirst({ where: { userId: MGR, action: 'RemoveTaskUpload', recordId: mgrUpload } })
-    expect(log).not.toBeNull()
+    const log = await logOf({ userId: MGR, action: 'RemoveTaskUpload', recordId: mgrUpload })
+    expect(log.newValue).toMatchObject({ removed: 2, kept: 2 })
+    expect(log.newValue.taskIds.sort()).toEqual([ids.up1, ids.up2].sort())
     const again = await request(app).get(`${base}/uploads`).set(MGR_AUTH)
     expect(again.body.data.find((u) => u.id === mgrUpload)).toMatchObject({ taskCount: 2, upcomingCount: 0, visitedCount: 1 })
   })

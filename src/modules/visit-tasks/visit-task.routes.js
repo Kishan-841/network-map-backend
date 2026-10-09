@@ -5,7 +5,7 @@ import { audit } from '../system-logs/audit.js'
 import { salesRepository } from '../sales/sales.repository.js'
 import { visitTaskRepository } from './visit-task.repository.js'
 import { createPlanScope } from './plan-scope.js'
-import { createVisitTaskService } from './visit-task.service.js'
+import { AUDIT_DETAIL, createVisitTaskService } from './visit-task.service.js'
 import { importSchema, previewSchema, rangeQuerySchema, taskDeleteQuerySchema, taskPatchSchema, taskSchema } from './visit-task.schemas.js'
 
 const scope = createPlanScope({ repo: visitTaskRepository, salesRepo: salesRepository })
@@ -13,11 +13,16 @@ export const visitTaskService = createVisitTaskService({ repo: visitTaskReposito
 
 const handle = (fn) => async (req, res, next) => {
   try {
-    res.json({ success: true, data: await fn(req) })
+    const data = await fn(req)
+    // Detail only the audit log sees (touched task ids) — symbol keys never reach JSON.
+    req.auditDetail = data?.[AUDIT_DETAIL] ?? null
+    res.json({ success: true, data })
   } catch (err) {
     next(err)
   }
 }
+/** The response data plus the service's audit-only detail. */
+const withDetail = (req, body) => (body?.data ? { ...body.data, ...(req.auditDetail ?? {}) } : null)
 const PLANNER = requireRole('ADMIN', 'SALES_MANAGER', 'TEAM_LEADER')
 const SALES_ANY = requireRole('ADMIN', 'SALES_MANAGER', 'TEAM_LEADER', 'SALES_EXECUTIVE')
 
@@ -35,7 +40,7 @@ visitTaskRoutes.delete(
   PLANNER,
   audit('VisitTask', 'RemoveTaskUpload', {
     describe: (req) => `Visit plan upload ${req.params.id} removed`,
-    newValue: (req, body) => body?.data ?? null,
+    newValue: withDetail,
   }),
   handle((req) => visitTaskService.removeUpload(req.params.id, req.user)),
 )
@@ -74,6 +79,12 @@ visitTaskRoutes.patch(
   audit('VisitTask', 'TaskUpdate', {
     load: loadTask,
     describe: (req) => `Visit task ${req.params.id} changed${req.body?.scope === 'FOLLOWING' ? ' (and its later repeats)' : ''}`,
+    // The patch, the counts, and for FOLLOWING each touched task's old date + assignee.
+    newValue: (req, body) => ({
+      ...req.body,
+      ...(body?.data ? { changed: body.data.changed, skipped: body.data.skipped, outOfScope: body.data.outOfScope, released: body.data.released } : {}),
+      ...(req.auditDetail ?? {}),
+    }),
   }),
   validateBody(taskPatchSchema),
   handle((req) => visitTaskService.updateTask(req.params.id, req.body, req.user)),
@@ -84,7 +95,7 @@ visitTaskRoutes.delete(
   audit('VisitTask', 'TaskDelete', {
     load: loadTask,
     describe: (req) => `Visit task ${req.params.id} deleted${req.query?.scope === 'FOLLOWING' ? ' (and its later repeats)' : ''}`,
-    newValue: (req, body) => body?.data ?? null,
+    newValue: withDetail,
   }),
   validateQuery(taskDeleteQuerySchema),
   handle((req) => visitTaskService.deleteTask(req.params.id, req.user, new Date(), req.validatedQuery.scope)),

@@ -11,6 +11,9 @@ const OVERDUE_DAYS = 30
 const byDayThenStart = (a, b) => a.taskDate.localeCompare(b.taskDate) || (a.startTime ?? '99').localeCompare(b.startTime ?? '99')
 
 const MAX_TASKS = 15000
+/** Audit detail a route logs but never sends (JSON drops symbol keys). */
+export const AUDIT_DETAIL = Symbol('auditDetail')
+const withAudit = (data, detail) => Object.assign(data, { [AUDIT_DETAIL]: detail })
 const pick = (b) => ({ id: b.id, buildingName: b.buildingName, formattedAddress: b.formattedAddress })
 const holderOf = (b) => b.salesAssignments?.[0]?.assignedToId ?? null
 
@@ -403,19 +406,23 @@ export function createVisitTaskService({ repo, scope }) {
   /**
    * The tasks a FOLLOWING edit also covers: the same series, dated after this
    * task AND today or later (a missed day stays missed), planned for someone
-   * the actor plans for. Split into `open` (changed) and `visited` (skipped).
-   * A task with no series (made before 9 Oct, or added by hand) has none.
+   * the actor plans for. Split into `open` (changed) and `visited` (skipped);
+   * `outOfScope` counts later ones left alone because the actor doesn't plan
+   * for their assignee. A task with no series (made before 9 Oct, or added by
+   * hand) has none.
    */
   async function laterInSeries(current, actor, now) {
-    if (!current.seriesId) return { open: [], visited: [] }
+    if (!current.seriesId) return { open: [], visited: [], outOfScope: 0 }
     const today = istToday(now)
     const day = dayOf(current.taskDate)
     const mine = new Set((await scope.assignees(actor)).map((u) => u.id))
-    const later = (await repo.seriesTasks({ seriesIds: [current.seriesId], from: day > today ? day : today }))
-      .filter((t) => t.id !== current.id && dayOf(t.taskDate) > day && mine.has(t.assigneeId))
+    const all = (await repo.seriesTasks({ seriesIds: [current.seriesId], from: day > today ? day : today }))
+      .filter((t) => t.id !== current.id && dayOf(t.taskDate) > day)
+    const later = all.filter((t) => mine.has(t.assigneeId))
     const v = await visitedIds(later, now)
-    return { open: later.filter((t) => !v.has(t.id)), visited: later.filter((t) => v.has(t.id)) }
+    return { open: later.filter((t) => !v.has(t.id)), visited: later.filter((t) => v.has(t.id)), outOfScope: all.length - later.length }
   }
+  const NO_LATER = { open: [], visited: [], outOfScope: 0 }
 
   const daysBetween = (a, b) => Math.round((dateOnly(b) - dateOnly(a)) / 86400000)
 
@@ -456,14 +463,14 @@ export function createVisitTaskService({ repo, scope }) {
       handovers.set(building.id, who.id)
     }
     const mine = actor.role === 'TEAM_LEADER' ? await scope.readableUserIds(actor) : null
-    const updated = await repo.updateSeries({
+    const { task: updated, released } = await repo.updateSeries({
       updates: landing.map(({ id, taskDate, ...rest }, i) => ({ id, updatedAt: targets[i].from.updatedAt, data: { ...rest, taskDate: dateOnly(taskDate) } })),
       handovers: [...handovers].map(([buildingId, assigneeId]) => ({ buildingId, assigneeId })),
       actorId: actor.id,
       allowedHolderIds: mine ?? undefined,
       now,
     })
-    return shape(updated)
+    return { task: shape(updated), released }
   }
 
   /** Hands the building over (and drops the previous holder's planned tasks there from today on). */
@@ -495,9 +502,16 @@ export function createVisitTaskService({ repo, scope }) {
       if (!scope.isPlanner(actor.role)) throw ApiError.forbidden()
       const current = await mustFindEditable(id, actor, now)
       // FOLLOWING: this task and its series' later unvisited ones; visited ones are skipped and counted.
-      const { open, visited } = which === 'FOLLOWING' ? await laterInSeries(current, actor, now) : { open: [], visited: [] }
+      const later = which === 'FOLLOWING' ? await laterInSeries(current, actor, now) : NO_LATER
+      const { open, visited, outOfScope } = later
+      const counts = { skipped: visited.length, ...(which === 'FOLLOWING' ? { outOfScope } : {}) }
+      // Compact audit: every touched task with its date + assignee before the edit.
+      const audit = (tasks) => (which === 'FOLLOWING'
+        ? { scope: which, tasks: tasks.map((t) => ({ id: t.id, taskDate: dayOf(t.taskDate), assigneeId: t.assigneeId })) }
+        : null)
       if (open.length) {
-        return { ...(await updateSeries(current, open, patch, actor, now)), changed: open.length + 1, skipped: visited.length }
+        const { task, released } = await updateSeries(current, open, patch, actor, now)
+        return withAudit({ ...task, changed: open.length + 1, ...counts, released }, audit([current, ...open]))
       }
       const next = {
         assigneeId: patch.assigneeId ?? current.assigneeId,
@@ -516,23 +530,27 @@ export function createVisitTaskService({ repo, scope }) {
       const handOver = (who.id !== current.assigneeId || building.id !== current.buildingId) &&
         who.role === 'SALES_EXECUTIVE' && holderOf(building) !== who.id
       const data = { ...task, taskDate: dateOnly(task.taskDate) }
-      const saved = handOver
+      const { task: saved, released } = handOver
         ? await repo.updateSeries({
           updates: [{ id, updatedAt: current.updatedAt, data }],
           handovers: [{ buildingId: building.id, assigneeId: who.id }],
           actorId: actor.id, allowedHolderIds: mine ?? undefined, now,
         })
-        : await repo.updateTask(id, data)
-      return { ...shape(saved), changed: 1, skipped: visited.length }
+        : { task: await repo.updateTask(id, data), released: 0 }
+      return withAudit({ ...shape(saved), changed: 1, ...counts, released }, audit([current]))
     },
 
     /** ONE (default) or FOLLOWING — the same series rules as updateTask; unvisited only. */
     async deleteTask(id, actor, now = new Date(), which = 'ONE') {
       if (!scope.isPlanner(actor.role)) throw ApiError.forbidden()
       const current = await mustFindEditable(id, actor, now)
-      const { open, visited } = which === 'FOLLOWING' ? await laterInSeries(current, actor, now) : { open: [], visited: [] }
-      const removed = await repo.deleteTasksChecked([current, ...open].map((t) => ({ id: t.id, updatedAt: t.updatedAt })))
-      return { deleted: true, removed, skipped: visited.length }
+      const { open, visited, outOfScope } = which === 'FOLLOWING' ? await laterInSeries(current, actor, now) : NO_LATER
+      const gone = [current, ...open]
+      const removed = await repo.deleteTasksChecked(gone.map((t) => ({ id: t.id, updatedAt: t.updatedAt })))
+      return withAudit(
+        { deleted: true, removed, skipped: visited.length, ...(which === 'FOLLOWING' ? { outOfScope } : {}) },
+        which === 'FOLLOWING' ? { scope: which, taskIds: gone.map((t) => t.id) } : null,
+      )
     },
 
     /** Missed tasks from the last 30 days, newest first. */
@@ -766,7 +784,7 @@ export function createVisitTaskService({ repo, scope }) {
       const visited = await visitedIds(upcoming, now)
       const gone = upcoming.filter((t) => !visited.has(t.id))
       const removed = gone.length ? await repo.deleteTasksChecked(gone.map((t) => ({ id: t.id, updatedAt: t.updatedAt }))) : 0
-      return { removed, kept: tasks.length - removed }
+      return withAudit({ removed, kept: tasks.length - removed }, { taskIds: gone.map((t) => t.id) })
     },
   }
 }
