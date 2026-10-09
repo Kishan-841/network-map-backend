@@ -2,6 +2,9 @@ import { z } from 'zod'
 import { parseSheetDate } from '../../lib/visit-plan.js'
 
 const weekdays = z.array(z.boolean()).length(7)
+// Present (even blank / null) only on weekly-template rows; validated 1–13 in the
+// service so a bad cell is a row error in preview and a 400 on import.
+const repeatWeeks = z.union([z.number(), z.string().max(20)]).nullable().optional()
 
 export const previewSchema = z.object({
   rows: z.array(z.object({
@@ -15,7 +18,9 @@ export const previewSchema = z.object({
     startTime: z.string().max(20).default(''),
     endTime: z.string().max(20).default(''),
     until: z.string().max(40).default(''),
-    weekdays,
+    weekdays: weekdays.optional(),
+    // Weekly template: the raw "Repeat (weeks)" cell — checked per row (1–13) by the service.
+    repeatWeeks,
   })).min(1).max(3000),
 }).strict()
 
@@ -28,8 +33,9 @@ export const importSchema = z.object({
     date: z.string().max(40),
     startTime: z.string().max(20).nullable(),
     endTime: z.string().max(20).nullable(),
-    until: z.string().max(40).nullable(),
-    weekdays,
+    until: z.string().max(40).nullable().optional(),
+    weekdays: weekdays.optional(),
+    repeatWeeks,
   })).min(1).max(3000),
 }).strict()
 // A real calendar day: '2026-02-30' must be refused here, not by Prisma later.
@@ -51,5 +57,9 @@ const taskFields = {
   endTime: hhmm,
 }
 export const taskSchema = z.object(taskFields).strict()
-export const taskPatchSchema = z.object(taskFields).partial().strict()
-  .refine((b) => Object.keys(b).length > 0, 'Nothing to change')
+// ONE (default) = this task; FOLLOWING = this and the later unvisited tasks of its series.
+export const SERIES_SCOPES = ['ONE', 'FOLLOWING']
+const seriesScope = z.enum(SERIES_SCOPES)
+export const taskPatchSchema = z.object({ ...taskFields, scope: seriesScope.optional() }).partial().strict()
+  .refine((b) => Object.keys(b).some((k) => k !== 'scope'), 'Nothing to change')
+export const taskDeleteQuerySchema = z.object({ scope: seriesScope.optional() })

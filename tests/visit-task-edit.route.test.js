@@ -126,7 +126,8 @@ describe('visit plan single-task edits', () => {
   it('an unvisited task is deleted — 200', async () => {
     const res = await del(addedId)
     expect(res.status).toBe(200)
-    expect(res.body.data).toEqual({ deleted: true })
+    // 9 Oct: series counts were added (removed / skipped) — the shape only grew.
+    expect(res.body.data).toMatchObject({ deleted: true, removed: 1, skipped: 0 })
     expect(await prisma.visitTask.findUnique({ where: { id: addedId } })).toBeNull()
   })
 

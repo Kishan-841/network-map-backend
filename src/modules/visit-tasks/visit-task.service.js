@@ -1,6 +1,8 @@
 import { ApiError } from '../../lib/api-error.js'
+import { randomUUID } from 'node:crypto'
 import {
-  MAX_UNTIL_DAYS, addDays, dateOnly, expandDates, istDay, istToday, normalizeName, parseSheetDate, parseSheetTime, toMinutes,
+  MAX_UNTIL_DAYS, REPEAT_WEEKS_ERROR, addDays, dateOnly, expandDates, istDay, istToday, normalizeName, parseRepeatWeeks,
+  parseSheetDate, parseSheetTime, toMinutes, weeklyAsMonthly,
 } from '../../lib/visit-plan.js'
 import { matchDay } from '../../lib/visit-task-status.js'
 
@@ -12,10 +14,36 @@ const MAX_TASKS = 15000
 const pick = (b) => ({ id: b.id, buildingName: b.buildingName, formattedAddress: b.formattedAddress })
 const holderOf = (b) => b.salesAssignments?.[0]?.assignedToId ?? null
 
+const NO_DAYS = [false, false, false, false, false, false, false]
+const blank = (v) => v === null || v === undefined || String(v).trim() === ''
+
+/**
+ * Which template a row came from. A weekly row carries `repeatWeeks` (the
+ * key, even blank); a monthly one carries `until` / `weekdays`. A row with a
+ * Repeat (weeks) value AND a Repeat until / ticked weekday is both → error.
+ */
+function rowKind(row) {
+  const monthly = !blank(row.until) || (row.weekdays ?? NO_DAYS).some(Boolean)
+  if (row.repeatWeeks === undefined) return 'MONTHLY'
+  if (blank(row.repeatWeeks)) return monthly ? 'MONTHLY' : 'WEEKLY'
+  return monthly ? 'BOTH' : 'WEEKLY'
+}
+
 /** Parse one sheet row's own values (no lookups). */
 function parseRow(row, today) {
+  const kind = rowKind(row)
+  if (kind === 'WEEKLY') return parseWeekly(row, today)
+  const parsed = parseMonthly({ ...row, weekdays: row.weekdays ?? NO_DAYS }, today)
+  if (kind === 'BOTH') {
+    parsed.errors.unshift('This row has both Repeat (weeks) and Repeat until / weekdays — use one template')
+    Object.assign(parsed, { dates: [], warnings: [], skippedPast: 0 })
+  }
+  return { ...parsed, kind, repeatWeeks: null }
+}
+
+/** Date, times — shared by both templates. */
+function parseWhen(row) {
   const errors = []
-  const warnings = []
   const date = parseSheetDate(row.date)
   if (!date) errors.push('Date is missing or not DD-MM-YYYY')
   const s = row.startTime?.trim() ? parseSheetTime(row.startTime) : null
@@ -24,6 +52,29 @@ function parseRow(row, today) {
   if (row.endTime?.trim() && !e) errors.push('End time is not a time')
   if (Boolean(s) !== Boolean(e) && !errors.length) errors.push('Give both a start and an end time, or neither')
   if (s && e && toMinutes(e) <= toMinutes(s)) errors.push('End time must be after start time')
+  return { date, startTime: s, endTime: e, errors }
+}
+
+/**
+ * Weekly template: Date plus the same weekday for N weeks in all. Normalised
+ * to the monthly shape (until + one ticked weekday) so expansion is one path.
+ * Every day must be today or later — a past Date is a row error.
+ */
+function parseWeekly(row, today) {
+  const { date, startTime, endTime, errors } = parseWhen(row)
+  const weeks = parseRepeatWeeks(row.repeatWeeks)
+  if (weeks === null) errors.push(REPEAT_WEEKS_ERROR)
+  if (date && date < today) errors.push('Date has passed — use today or a later day')
+  const { until, weekdays } = date && weeks ? weeklyAsMonthly(date, weeks) : { until: null, weekdays: NO_DAYS }
+  if (until && until > addDays(today, MAX_UNTIL_DAYS)) errors.push(`The last repeat is more than ${MAX_UNTIL_DAYS} days ahead`)
+  const dates = errors.length ? [] : expandDates({ date, until, weekdays })
+  return { kind: 'WEEKLY', repeatWeeks: weeks, date, until, startTime, endTime, dates, errors, warnings: [], skippedPast: 0 }
+}
+
+/** Monthly template (unchanged rules): Date alone, or ticked weekdays Date..Repeat until. */
+function parseMonthly(row, today) {
+  const { date, startTime: s, endTime: e, errors } = parseWhen(row)
+  const warnings = []
   const repeats = row.weekdays.some(Boolean)
   const until = row.until?.trim() ? parseSheetDate(row.until) : null
   if (row.until?.trim() && !until) errors.push('Repeat until is not a date')
@@ -206,7 +257,25 @@ export function createVisitTaskService({ repo, scope }) {
     }
     out.tasks.sort(byDayThenStart)
     out.offPlan.sort((a, b) => a.visitedAt - b.visitedAt)
+    await addSeriesCounts(out.tasks, actor, now)
     return out
+  }
+
+  /**
+   * `seriesLaterCount` on each task: how many later tasks a FOLLOWING edit
+   * would also change (laterInSeries's rule) — 0 means "don't ask".
+   */
+  async function addSeriesCounts(tasks, actor, now) {
+    const ids = [...new Set(tasks.map((t) => t.seriesId).filter(Boolean))]
+    for (const t of tasks) t.seriesLaterCount = 0
+    if (!ids.length) return
+    const today = istToday(now)
+    const mine = scope.isPlanner(actor.role) ? new Set((await scope.assignees(actor)).map((u) => u.id)) : null
+    const rest = (await repo.seriesTasks({ seriesIds: ids, from: today })).filter((t) => !mine || mine.has(t.assigneeId))
+    const visited = await visitedIds(rest, now)
+    const days = new Map()
+    for (const t of rest) if (!visited.has(t.id)) days.set(t.seriesId, [...(days.get(t.seriesId) ?? []), dayOf(t.taskDate)])
+    for (const t of tasks) if (t.seriesId) t.seriesLaterCount = (days.get(t.seriesId) ?? []).filter((d) => d > t.taskDate).length
   }
 
   // ---- single-task edits (phase 3) ----------------------------------------
@@ -232,10 +301,8 @@ export function createVisitTaskService({ repo, scope }) {
     return task
   }
 
-  /** Person, building and window for a task the actor wants to save. */
-  async function checkEdit({ assigneeId, buildingId, taskDate, startTime, endTime }, actor, now) {
-    const who = (await scope.assignees(actor)).find((u) => u.id === assigneeId)
-    if (!who) throw ApiError.notFound('Person not found')
+  /** Day and window of a task the actor wants to save. */
+  function checkWhen({ taskDate, startTime, endTime }, now) {
     if (parseSheetDate(taskDate) !== taskDate) throw ApiError.badRequest('Pick a valid date')
     // Nothing is planned backwards: a past-dated task on top of an off-plan
     // visit would relabel it as planned. A past task can still be moved
@@ -244,6 +311,13 @@ export function createVisitTaskService({ repo, scope }) {
     if (taskDate > addDays(istToday(now), MAX_UNTIL_DAYS)) throw ApiError.badRequest(`Plan at most ${MAX_UNTIL_DAYS} days ahead`)
     if (Boolean(startTime) !== Boolean(endTime)) throw ApiError.badRequest('Give both a start and an end time, or neither')
     if (startTime && toMinutes(endTime) <= toMinutes(startTime)) throw ApiError.badRequest('End time must be after start time')
+  }
+
+  /** Person, building and window for a task the actor wants to save. */
+  async function checkEdit({ assigneeId, buildingId, taskDate, startTime, endTime }, actor, now) {
+    const who = (await scope.assignees(actor)).find((u) => u.id === assigneeId)
+    if (!who) throw ApiError.notFound('Person not found')
+    checkWhen({ taskDate, startTime, endTime }, now)
     const [building] = await repo.listBuildingsLite({ AND: [await scope.assignableBuildingsWhere(actor), { id: buildingId }] })
     if (!building) throw ApiError.notFound('Building not found')
     if (!(await scope.canWorkBuilding(who, building))) {
@@ -259,16 +333,137 @@ export function createVisitTaskService({ repo, scope }) {
    * task must not take the visit of a task that is already visited (that task
    * is locked, and losing its visit would turn it into a miss).
    */
-  async function checkTargetDay(task, exceptId, now) {
-    const { tasks, visits } = await dayOfPerson(task.assigneeId, task.taskDate)
-    const others = tasks.filter((t) => t.id !== exceptId)
-    if (others.some((t) => keyOf(t) === keyOf(task))) throw ApiError.conflict('That task is already in the plan')
-    const before = matchDay({ tasks: others, visits, now }).tasks.filter((t) => t.visit).map((t) => t.id)
-    if (!before.length) return
-    const after = new Map(matchDay({ tasks: [...others, { ...task, id: '__candidate__' }], visits, now }).tasks.map((t) => [t.id, t]))
-    if (before.some((id) => !after.get(id).visit)) {
-      throw ApiError.conflict('That would take the visit of a task already visited that day')
+  const checkTargetDay = (task, exceptId, now) => checkTargetDays([task], exceptId ? [exceptId] : [], now)
+
+  /**
+   * The same rule for several tasks written together (a series edit): each
+   * person-day is checked once with every task moving away taken out and
+   * every task landing there put in.
+   */
+  async function checkTargetDays(landing, movingIds, now) {
+    const moving = new Set(movingIds)
+    const groups = new Map()
+    for (const t of landing) {
+      const k = `${t.assigneeId}|${t.taskDate}`
+      groups.set(k, [...(groups.get(k) ?? []), t])
     }
+    for (const group of groups.values()) {
+      const { tasks, visits } = await dayOfPerson(group[0].assigneeId, group[0].taskDate)
+      const others = tasks.filter((t) => !moving.has(t.id))
+      const keys = new Set(others.map((t) => keyOf(t)))
+      for (const t of group) {
+        if (keys.has(keyOf(t))) throw ApiError.conflict('That task is already in the plan')
+        keys.add(keyOf(t))
+      }
+      const before = matchDay({ tasks: others, visits, now }).tasks.filter((t) => t.visit).map((t) => t.id)
+      if (!before.length) continue
+      const candidates = group.map((t, i) => ({ ...t, id: `__candidate_${i}__` }))
+      const after = new Map(matchDay({ tasks: [...others, ...candidates], visits, now }).tasks.map((t) => [t.id, t]))
+      if (before.some((id) => !after.get(id).visit)) {
+        throw ApiError.conflict('That would take the visit of a task already visited that day')
+      }
+    }
+  }
+
+  /**
+   * Ids of `tasks` that have a matching visit. Only a day up to today can, and
+   * matching needs each person-day's full task list (visits are shared out).
+   */
+  async function visitedIds(tasks, now) {
+    const today = istToday(now)
+    const due = tasks.filter((t) => dayOf(t.taskDate) <= today)
+    if (!due.length) return new Set()
+    const people = [...new Set(due.map((t) => t.assigneeId))]
+    const days = due.map((t) => dayOf(t.taskDate)).sort()
+    const [from, to] = [days[0], days.at(-1)]
+    const want = new Set(due.map((t) => `${t.assigneeId}|${dayOf(t.taskDate)}`))
+    const buckets = new Map()
+    const bucket = (k) => {
+      if (!buckets.has(k)) buckets.set(k, { tasks: [], visits: [] })
+      return buckets.get(k)
+    }
+    for (const t of await repo.tasksInRange({ assigneeIds: people, from, to })) {
+      const k = `${t.assigneeId}|${dayOf(t.taskDate)}`
+      if (want.has(k)) bucket(k).tasks.push(shape(t))
+    }
+    const visits = await repo.visitsInRange({
+      userIds: people, from: new Date(`${from}T00:00:00+05:30`), to: new Date(`${addDays(to, 1)}T00:00:00+05:30`),
+    })
+    for (const v of visits) {
+      const k = `${v.userId}|${istDay(v.visitedAt)}`
+      if (want.has(k)) bucket(k).visits.push(v)
+    }
+    const out = new Set()
+    for (const b of buckets.values()) {
+      for (const t of matchDay({ ...b, now }).tasks) if (t.visit) out.add(t.id)
+    }
+    return out
+  }
+
+  /**
+   * The tasks a FOLLOWING edit also covers: the same series, dated after this
+   * task AND today or later (a missed day stays missed), planned for someone
+   * the actor plans for. Split into `open` (changed) and `visited` (skipped).
+   * A task with no series (made before 9 Oct, or added by hand) has none.
+   */
+  async function laterInSeries(current, actor, now) {
+    if (!current.seriesId) return { open: [], visited: [] }
+    const today = istToday(now)
+    const day = dayOf(current.taskDate)
+    const mine = new Set((await scope.assignees(actor)).map((u) => u.id))
+    const later = (await repo.seriesTasks({ seriesIds: [current.seriesId], from: day > today ? day : today }))
+      .filter((t) => t.id !== current.id && dayOf(t.taskDate) > day && mine.has(t.assigneeId))
+    const v = await visitedIds(later, now)
+    return { open: later.filter((t) => !v.has(t.id)), visited: later.filter((t) => v.has(t.id)) }
+  }
+
+  const daysBetween = (a, b) => Math.round((dateOnly(b) - dateOnly(a)) / 86400000)
+
+  /** FOLLOWING with later tasks to change: every check per task, then one transaction. */
+  async function updateSeries(current, open, fields, actor, now) {
+    const delta = fields.taskDate ? daysBetween(dayOf(current.taskDate), fields.taskDate) : 0
+    const targets = [current, ...open].map((t) => ({
+      from: t,
+      next: {
+        assigneeId: fields.assigneeId ?? t.assigneeId,
+        buildingId: fields.buildingId ?? t.buildingId,
+        taskDate: t === current ? fields.taskDate ?? dayOf(t.taskDate) : addDays(dayOf(t.taskDate), delta),
+        startTime: 'startTime' in fields ? fields.startTime : t.startTime,
+        endTime: 'endTime' in fields ? fields.endTime : t.endTime,
+      },
+    }))
+    for (const { next } of targets) checkWhen(next, now)
+    // Person + building checks once per pair (a series nearly always has one).
+    const pairs = new Map()
+    for (const { next } of targets) {
+      const k = `${next.assigneeId}|${next.buildingId}`
+      if (!pairs.has(k)) pairs.set(k, await checkEdit({ ...next, taskDate: istToday(now), startTime: null, endTime: null }, actor, now))
+    }
+    const landing = targets.map(({ from, next }) => {
+      const { who, building } = pairs.get(`${next.assigneeId}|${next.buildingId}`)
+      return { id: from.id, assigneeId: who.id, buildingId: building.id, taskDate: next.taskDate,
+        startTime: next.startTime || null, endTime: next.endTime || null }
+    })
+    await checkTargetDays(landing, targets.map((t) => t.from.id), now)
+    // Only a change of person or building hands a building over (as the single edit).
+    const handovers = new Map()
+    for (const [i, { from }] of targets.entries()) {
+      const t = landing[i]
+      if (t.assigneeId === from.assigneeId && t.buildingId === from.buildingId) continue
+      const { who, building } = pairs.get(`${t.assigneeId}|${t.buildingId}`)
+      if (who.role !== 'SALES_EXECUTIVE' || holderOf(building) === who.id) continue
+      if (handovers.has(building.id) && handovers.get(building.id) !== who.id) throw ApiError.badRequest(CONTESTED(building.buildingName))
+      handovers.set(building.id, who.id)
+    }
+    const mine = actor.role === 'TEAM_LEADER' ? await scope.readableUserIds(actor) : null
+    const updated = await repo.updateSeries({
+      updates: landing.map(({ id, taskDate, ...rest }, i) => ({ id, updatedAt: targets[i].from.updatedAt, data: { ...rest, taskDate: dateOnly(taskDate) } })),
+      handovers: [...handovers].map(([buildingId, assigneeId]) => ({ buildingId, assigneeId })),
+      actorId: actor.id,
+      allowedHolderIds: mine ?? undefined,
+      now,
+    })
+    return shape(updated)
   }
 
   /** Hands the building over (and drops the previous holder's planned tasks there from today on). */
@@ -296,9 +491,14 @@ export function createVisitTaskService({ repo, scope }) {
      * placed in the past. The actor must plan for both the current and the new
      * assignee.
      */
-    async updateTask(id, patch, actor, now = new Date()) {
+    async updateTask(id, { scope: which = 'ONE', ...patch }, actor, now = new Date()) {
       if (!scope.isPlanner(actor.role)) throw ApiError.forbidden()
       const current = await mustFindEditable(id, actor, now)
+      // FOLLOWING: this task and its series' later unvisited ones; visited ones are skipped and counted.
+      const { open, visited } = which === 'FOLLOWING' ? await laterInSeries(current, actor, now) : { open: [], visited: [] }
+      if (open.length) {
+        return { ...(await updateSeries(current, open, patch, actor, now)), changed: open.length + 1, skipped: visited.length }
+      }
       const next = {
         assigneeId: patch.assigneeId ?? current.assigneeId,
         buildingId: patch.buildingId ?? current.buildingId,
@@ -311,15 +511,28 @@ export function createVisitTaskService({ repo, scope }) {
       await checkTargetDay(task, id, now)
       // Only a change of person or building hands the building over — moving a
       // day or a window must not take a building back from its new holder.
-      if (who.id !== current.assigneeId || building.id !== current.buildingId) await assignIfNeeded(who, building, mine, actor, now)
-      return shape(await repo.updateTask(id, { ...task, taskDate: dateOnly(task.taskDate) }))
+      // Task first, hand-over second, one transaction: handing over first
+      // dropped this very task as the previous holder's (fixed 9 Oct).
+      const handOver = (who.id !== current.assigneeId || building.id !== current.buildingId) &&
+        who.role === 'SALES_EXECUTIVE' && holderOf(building) !== who.id
+      const data = { ...task, taskDate: dateOnly(task.taskDate) }
+      const saved = handOver
+        ? await repo.updateSeries({
+          updates: [{ id, updatedAt: current.updatedAt, data }],
+          handovers: [{ buildingId: building.id, assigneeId: who.id }],
+          actorId: actor.id, allowedHolderIds: mine ?? undefined, now,
+        })
+        : await repo.updateTask(id, data)
+      return { ...shape(saved), changed: 1, skipped: visited.length }
     },
 
-    async deleteTask(id, actor, now = new Date()) {
+    /** ONE (default) or FOLLOWING — the same series rules as updateTask; unvisited only. */
+    async deleteTask(id, actor, now = new Date(), which = 'ONE') {
       if (!scope.isPlanner(actor.role)) throw ApiError.forbidden()
-      await mustFindEditable(id, actor, now)
-      await repo.deleteTask(id)
-      return { deleted: true }
+      const current = await mustFindEditable(id, actor, now)
+      const { open, visited } = which === 'FOLLOWING' ? await laterInSeries(current, actor, now) : { open: [], visited: [] }
+      const removed = await repo.deleteTasksChecked([current, ...open].map((t) => ({ id: t.id, updatedAt: t.updatedAt })))
+      return { deleted: true, removed, skipped: visited.length }
     },
 
     /** Missed tasks from the last 30 days, newest first. */
@@ -371,6 +584,9 @@ export function createVisitTaskService({ repo, scope }) {
           employee: { match: emp.match && { id: emp.match.id, name: emp.match.name }, candidates: emp.candidates.map((u) => ({ id: u.id, name: u.name })) },
           building: { match: bld.match && pick(bld.match), candidates: bld.candidates.map(pick) },
           dates: parsed.dates, startTime: parsed.startTime, endTime: parsed.endTime,
+          // Weekly rows: the repeat count; the web shows "N visits · first → last".
+          kind: parsed.kind, repeatWeeks: parsed.repeatWeeks,
+          visitCount: parsed.dates.length, firstDate: parsed.dates[0] ?? null, lastDate: parsed.dates.at(-1) ?? null,
         }
         out.push(item)
         // A row whose every day has passed saves nothing and assigns nothing.
@@ -451,8 +667,11 @@ export function createVisitTaskService({ repo, scope }) {
         // Every day passed: the row contributes nothing — no tasks, no assignment.
         if (!parsed.dates.length) continue
         checked.push({ assigneeId: who.id, role: who.role, building: b })
+        // One sheet row = one series. A day two rows both ask for is made once,
+        // by the FIRST row (sheet order), and belongs to that row's series.
+        const seriesId = randomUUID()
         for (const d of parsed.dates) {
-          const task = { assigneeId: r.assigneeId, buildingId: r.buildingId, taskDate: d, startTime: parsed.startTime, endTime: parsed.endTime }
+          const task = { assigneeId: r.assigneeId, buildingId: r.buildingId, taskDate: d, startTime: parsed.startTime, endTime: parsed.endTime, seriesId }
           const key = keyOf(task)
           if (seen.has(key)) continue
           seen.add(key)
@@ -506,9 +725,48 @@ export function createVisitTaskService({ repo, scope }) {
       })
     },
 
-    async listUploads(actor) {
+    /**
+     * Uploads the actor may see: ADMIN every one; a manager theirs and their
+     * team leaders'; a team leader their own. Counts are live: `taskCount`
+     * tasks still linked, `upcomingCount` unvisited today or later,
+     * `visitedCount` with a matching visit.
+     */
+    async listUploads(actor, now = new Date()) {
       if (!scope.isPlanner(actor.role)) throw ApiError.forbidden()
-      return repo.listUploads(actor.role === 'ADMIN' ? {} : { uploadedById: actor.id })
+      const readable = await scope.readableUserIds(actor)
+      const uploads = await repo.listUploads(readable === null ? {} : { uploadedById: { in: readable } })
+      if (!uploads.length) return []
+      const tasks = await repo.uploadTasks(uploads.map((u) => u.id))
+      const visited = await visitedIds(tasks, now)
+      const today = istToday(now)
+      const counts = new Map(uploads.map((u) => [u.id, { taskCount: 0, upcomingCount: 0, visitedCount: 0 }]))
+      for (const t of tasks) {
+        const c = counts.get(t.uploadId)
+        c.taskCount++
+        if (visited.has(t.id)) c.visitedCount++
+        else if (dayOf(t.taskDate) >= today) c.upcomingCount++
+      }
+      return uploads.map((u) => ({ ...u, createdBy: u.uploadedBy, ...counts.get(u.id) }))
+    },
+
+    /**
+     * Undo an upload: delete its tasks that are unvisited AND dated today or
+     * later, for people the actor plans for. Visited and past (missed) tasks
+     * stay as history; buildings stay assigned. Not visible → 404.
+     */
+    async removeUpload(id, actor, now = new Date()) {
+      if (!scope.isPlanner(actor.role)) throw ApiError.forbidden()
+      const readable = await scope.readableUserIds(actor)
+      const upload = await repo.findUpload(id)
+      if (!upload || (readable !== null && !readable.includes(upload.uploadedById))) throw ApiError.notFound('Upload not found')
+      const tasks = await repo.uploadTasks([id])
+      const today = istToday(now)
+      const mine = actor.role === 'ADMIN' ? null : new Set((await scope.assignees(actor)).map((u) => u.id))
+      const upcoming = tasks.filter((t) => dayOf(t.taskDate) >= today && (!mine || mine.has(t.assigneeId)))
+      const visited = await visitedIds(upcoming, now)
+      const gone = upcoming.filter((t) => !visited.has(t.id))
+      const removed = gone.length ? await repo.deleteTasksChecked(gone.map((t) => ({ id: t.id, updatedAt: t.updatedAt }))) : 0
+      return { removed, kept: tasks.length - removed }
     },
   }
 }

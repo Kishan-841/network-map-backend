@@ -6,7 +6,7 @@ import { salesRepository } from '../sales/sales.repository.js'
 import { visitTaskRepository } from './visit-task.repository.js'
 import { createPlanScope } from './plan-scope.js'
 import { createVisitTaskService } from './visit-task.service.js'
-import { importSchema, previewSchema, rangeQuerySchema, taskPatchSchema, taskSchema } from './visit-task.schemas.js'
+import { importSchema, previewSchema, rangeQuerySchema, taskDeleteQuerySchema, taskPatchSchema, taskSchema } from './visit-task.schemas.js'
 
 const scope = createPlanScope({ repo: visitTaskRepository, salesRepo: salesRepository })
 export const visitTaskService = createVisitTaskService({ repo: visitTaskRepository, scope })
@@ -29,6 +29,16 @@ visitTaskRoutes.get('/overdue', SALES_ANY, validateQuery(rangeQuerySchema), hand
 visitTaskRoutes.get('/assignees', PLANNER, handle((req) => visitTaskService.listAssignees(req.user)))
 visitTaskRoutes.get('/buildings', PLANNER, handle((req) => visitTaskService.searchBuildings(req.query.q, req.user)))
 visitTaskRoutes.get('/uploads', PLANNER, handle((req) => visitTaskService.listUploads(req.user)))
+// Undo an upload: its unvisited tasks from today on go; history and buildings stay.
+visitTaskRoutes.delete(
+  '/uploads/:id',
+  PLANNER,
+  audit('VisitTask', 'RemoveTaskUpload', {
+    describe: (req) => `Visit plan upload ${req.params.id} removed`,
+    newValue: (req, body) => body?.data ?? null,
+  }),
+  handle((req) => visitTaskService.removeUpload(req.params.id, req.user)),
+)
 visitTaskRoutes.post('/preview', PLANNER, validateBody(previewSchema), handle((req) => visitTaskService.preview(req.body, req.user)))
 visitTaskRoutes.post(
   '/import',
@@ -61,13 +71,21 @@ visitTaskRoutes.post(
 visitTaskRoutes.patch(
   '/:id',
   PLANNER,
-  audit('VisitTask', 'TaskUpdate', { load: loadTask, describe: (req) => `Visit task ${req.params.id} changed` }),
+  audit('VisitTask', 'TaskUpdate', {
+    load: loadTask,
+    describe: (req) => `Visit task ${req.params.id} changed${req.body?.scope === 'FOLLOWING' ? ' (and its later repeats)' : ''}`,
+  }),
   validateBody(taskPatchSchema),
   handle((req) => visitTaskService.updateTask(req.params.id, req.body, req.user)),
 )
 visitTaskRoutes.delete(
   '/:id',
   PLANNER,
-  audit('VisitTask', 'TaskDelete', { load: loadTask, describe: (req) => `Visit task ${req.params.id} deleted` }),
-  handle((req) => visitTaskService.deleteTask(req.params.id, req.user)),
+  audit('VisitTask', 'TaskDelete', {
+    load: loadTask,
+    describe: (req) => `Visit task ${req.params.id} deleted${req.query?.scope === 'FOLLOWING' ? ' (and its later repeats)' : ''}`,
+    newValue: (req, body) => body?.data ?? null,
+  }),
+  validateQuery(taskDeleteQuerySchema),
+  handle((req) => visitTaskService.deleteTask(req.params.id, req.user, new Date(), req.validatedQuery.scope)),
 )

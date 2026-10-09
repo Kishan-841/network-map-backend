@@ -6,7 +6,7 @@ describe('visitTaskRepository', () => {
     for (const m of [
       'listUsersForPlanning', 'zoneIdsFor', 'listBuildingsLite', 'searchBuildings', 'tasksInRange',
       'visitsInRange', 'findTask', 'createTask', 'updateTask', 'deleteTask', 'importPlan', 'listUploads',
-      'assignBuilding',
+      'assignBuilding', 'seriesTasks', 'updateSeries', 'deleteTasksChecked', 'findUpload', 'uploadTasks',
     ]) expect(typeof repo[m]).toBe('function')
   })
 })

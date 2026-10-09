@@ -88,3 +88,32 @@ export const normalizeName = (s) =>
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim()
     .replace(/\s+/g, ' ')
+
+export const MAX_REPEAT_WEEKS = 13
+export const REPEAT_WEEKS_ERROR = `Repeat must be a whole number of weeks, 1–${MAX_REPEAT_WEEKS}`
+
+/**
+ * A weekly sheet's "Repeat (weeks)" cell → a count of occurrences.
+ * Blank (or null/undefined) → 1. A whole number 1–13 (as a number or text,
+ * "4" / "4.0" from a spreadsheet) → that number. Anything else → null (row error).
+ */
+export function parseRepeatWeeks(value) {
+  if (value === null || value === undefined) return 1
+  const s = String(value).trim()
+  if (!s) return 1
+  if (!/^\d+(\.0+)?$/.test(s)) return null
+  const n = Number(s)
+  return Number.isInteger(n) && n >= 1 && n <= MAX_REPEAT_WEEKS ? n : null
+}
+
+/**
+ * A weekly row as the monthly shape expandDates already understands: N
+ * occurrences on Date's weekday = Date .. Date + 7·(N−1) with only that
+ * weekday ticked (N = 1 → no weekday, so Date alone).
+ */
+export function weeklyAsMonthly(date, weeks) {
+  if (weeks <= 1) return { until: null, weekdays: [false, false, false, false, false, false, false] }
+  const weekdays = [false, false, false, false, false, false, false]
+  weekdays[weekdayIndex(date)] = true
+  return { until: addDays(date, 7 * (weeks - 1)), weekdays }
+}
