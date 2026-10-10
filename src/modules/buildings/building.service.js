@@ -272,6 +272,13 @@ export function createBuildingService({ buildingRepository, storage, userReposit
     if (!canRead(building)) throw ApiError.forbidden('You cannot change this building')
   }
 
+  // A manager works only in the zones they were given (spec 2026-10-10).
+  async function assertManagerZone(actor, zoneId) {
+    if (actor?.role !== 'MANAGER') return
+    const assigned = await userRepository.assignedZoneIds(actor.id)
+    if (!zoneId || !assigned.includes(zoneId)) throw ApiError.badRequest('Pick one of your zones')
+  }
+
   /**
    * Delete one building — shared by the single delete and the bulk delete.
    * Throws (404 / 409) rather than swallowing, so the single route reports the
@@ -547,6 +554,7 @@ export function createBuildingService({ buildingRepository, storage, userReposit
           throw ApiError.forbidden('You are not assigned to this zone')
         }
       }
+      await assertManagerZone(actor, building.zoneId)
       const created = await buildingRepository.create({
         ...building,
         createdById,
@@ -675,6 +683,12 @@ export function createBuildingService({ buildingRepository, storage, userReposit
     async updateBuilding(id, { details, permission, contact, photos, remark, ...building }, actor) {
       const existing = await buildingRepository.findById(id)
       if (!existing) throw ApiError.notFound('Building not found')
+      // A manager edits only what it can read — its zones plus its own rows;
+      // anything else is the same 404 a read gives (societies included).
+      if (actor?.role === 'MANAGER') {
+        const canRead = await readScope(actor)
+        if (!canRead(existing)) throw ApiError.notFound('Building not found')
+      }
       if (existing.source === 'PERMISSION') {
         return updatePermissionBuilding(existing, { details, permission, contact, photos, remark, building }, actor)
       }
@@ -683,6 +697,10 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       }
       if (Object.keys(building).length === 0 && !details && !permission) {
         throw ApiError.badRequest('Provide at least one field to update')
+      }
+      // ...and may move a building only into one of its own zones.
+      if (actor?.role === 'MANAGER' && building.zoneId && building.zoneId !== existing.zoneId) {
+        await assertManagerZone(actor, building.zoneId)
       }
       // A granted surveyor edits what they logged and nothing else. The route
       // has already checked the grant; this is the row-level half of it, and
@@ -792,6 +810,9 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       // for an admin; its status lives in the permission record. Once approved
       // it is a building like any other.
       if (!isVisibleBuilding(building)) throw ApiError.notFound('Building not found')
+      // Out of the actor's read scope (a manager outside its zones) is a 404.
+      const canRead = await readScope(actor)
+      if (!canRead(building)) throw ApiError.notFound('Building not found')
       return buildingRepository.update(id, {
         ...(feasibleStatus && { feasibleStatus }),
         ...(surveyStatus && { surveyStatus }),

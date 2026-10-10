@@ -89,10 +89,12 @@ describe('building service', () => {
       return building
     }
     const service = createBuildingService({ buildingRepository: repo })
-    const updated = await service.updateStatus('b1', {
-      feasibleStatus: 'FEASIBLE',
-      surveyStatus: 'COMPLETED',
-    })
+    // updateStatus checks the actor's read scope (fails closed without one).
+    const updated = await service.updateStatus(
+      'b1',
+      { feasibleStatus: 'FEASIBLE', surveyStatus: 'COMPLETED' },
+      { id: 'a1', role: 'ADMIN' },
+    )
     expect(updated.feasibleStatus).toBe('FEASIBLE')
     expect(updated.surveyStatus).toBe('COMPLETED')
   })
@@ -129,7 +131,8 @@ describe('building service', () => {
       return building
     }
     const service = createBuildingService({ buildingRepository: repo })
-    expect((await service.updateStatus('b1', { isLive: true })).isLive).toBe(true)
-    expect((await service.updateStatus('b1', { isLive: false })).isLive).toBe(false)
+    const admin = { id: 'a1', role: 'ADMIN' }
+    expect((await service.updateStatus('b1', { isLive: true }, admin)).isLive).toBe(true)
+    expect((await service.updateStatus('b1', { isLive: false }, admin)).isLive).toBe(false)
   })
 })
