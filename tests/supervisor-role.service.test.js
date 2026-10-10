@@ -71,10 +71,11 @@ describe('SUPERVISOR sees both registries', () => {
     expect(repo.calls[0].AND).toEqual([VISIBLE_BUILDING])
   })
 
-  it('still scopes a manager to the coverage registry', async () => {
+  it('still scopes a manager to the coverage registry, zone-scoped', async () => {
     const { repo, service } = build()
     await service.listBuildings({}, MANAGER)
-    expect(repo.calls[0].AND).toEqual([COVERAGE_REGISTRY])
+    // The fake manager holds no zones: own rows only, never everything.
+    expect(repo.calls[0].AND).toEqual([COVERAGE_REGISTRY, { OR: [{ zoneId: { in: [] } }, { createdById: 'mgr1' }] }])
   })
 
   it('matches a city through either mapping, since both registries are in view', async () => {
@@ -88,11 +89,11 @@ describe('SUPERVISOR sees both registries', () => {
     ])
   })
 
-  it('leaves the manager city filter on the coverage path', async () => {
+  it('leaves the zone-scoped manager city filter on the coverage path', async () => {
     const { repo, service } = build()
     await service.listBuildings({ cityId: 'c1' }, MANAGER)
     expect(repo.calls[0].zone).toEqual({ operator: { cityId: 'c1' } })
-    expect(repo.calls[0].AND).toEqual([COVERAGE_REGISTRY])
+    expect(repo.calls[0].AND).toEqual([COVERAGE_REGISTRY, { OR: [{ zoneId: { in: [] } }, { createdById: 'mgr1' }] }])
   })
 
   it('opens any building regardless of who logged it', async () => {

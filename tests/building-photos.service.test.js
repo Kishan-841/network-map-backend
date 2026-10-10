@@ -87,15 +87,32 @@ describe('building service photos', () => {
     })
   })
 
-  it('updates permission.documentUrl when a manager adds a PERMISSION_LETTER', async () => {
-    const repo = fakeRepo()
-    const service = createBuildingService({ buildingRepository: repo, storage: fakeStorage() })
+  it('updates permission.documentUrl when a zone-scoped manager adds a PERMISSION_LETTER in its zone', async () => {
+    const repo = fakeRepo({ building: { id: 'b1', zoneId: 'z1' } })
+    const service = createBuildingService({
+      buildingRepository: repo,
+      storage: fakeStorage(),
+      userRepository: { assignedZoneIds: async () => ['z1'] },
+    })
     await service.addPhoto(
       'b1',
       { type: 'PERMISSION_LETTER', url: '/uploads/letter.pdf' },
       { id: 'u1', role: 'MANAGER' },
     )
     expect(repo.upsertPermissionDocument).toHaveBeenCalledWith('b1', '/uploads/letter.pdf')
+  })
+
+  it('403s a zone-scoped manager adding a photo outside its zones', async () => {
+    const repo = fakeRepo({ building: { id: 'b1', zoneId: 'z2', createdById: 'someone' } })
+    const service = createBuildingService({
+      buildingRepository: repo,
+      storage: fakeStorage(),
+      userRepository: { assignedZoneIds: async () => ['z1'] },
+    })
+    await expect(
+      service.addPhoto('b1', { type: 'ENTRANCE', url: '/uploads/e.jpg' }, { id: 'u1', role: 'MANAGER' }),
+    ).rejects.toMatchObject({ status: 403 })
+    expect(repo.createPhoto).not.toHaveBeenCalled()
   })
 
   it('403s when a surveyor tries to add a PERMISSION_LETTER', async () => {

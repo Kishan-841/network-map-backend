@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import { createStatsService } from '../src/modules/stats/stats.service.js'
 
-// Charts are computed for non-surveyors, so the fake repo needs the chart
-// methods too. A MANAGER actor exercises the full (non-surveyor) path.
-const manager = { id: 'm', role: 'MANAGER' }
+// Charts are computed only for readers that are not zone-scoped, so the fake
+// repo needs the chart methods too. An ADMIN actor exercises the full path
+// (a MANAGER is zone-scoped since 2026-10-10, like a surveyor).
+const admin = { id: 'a', role: 'ADMIN' }
 
 describe('stats service', () => {
   it('assembles dashboard KPIs with zero-defaults for absent statuses', async () => {
@@ -32,7 +33,7 @@ describe('stats service', () => {
       },
     })
 
-    const stats = await service.getDashboardStats(manager)
+    const stats = await service.getDashboardStats(admin)
     expect(stats).toEqual({
       totalBuildings: 3,
       byStatus: { FEASIBLE: 2, PERMISSION_PENDING: 0, REJECTED: 1, SURVEY_PENDING: 0 },
@@ -76,12 +77,40 @@ describe('stats service', () => {
       },
     })
 
-    const stats = await service.getDashboardStats(manager)
+    const stats = await service.getDashboardStats(admin)
     expect(stats.totalBuildings).toBe(0)
     expect(stats.totalHomePass).toBe(0)
     expect(stats.totalPermissionCost).toBe(0)
     expect(stats.byStatus.FEASIBLE).toBe(0)
     expect(stats.operatorCount).toBe(0)
     expect(stats.byOperator).toEqual([])
+  })
+
+  it('a MANAGER is zone-scoped: zone-or-own filter, no company-wide charts', async () => {
+    const seen = []
+    const service = createStatsService({
+      userRepository: { assignedZoneIds: async () => ['z1'] },
+      statsRepository: {
+        countBuildings: async (where) => (seen.push(where), 1),
+        countsByStatus: async () => [],
+        countsByLive: async () => [],
+        sumHomePass: async () => null,
+        sumPermissionCost: async () => null,
+        countOperators: async () => 0,
+        countBuildingsInHomePassRange: async () => 0,
+        sumHomePassInRange: async () => 0,
+        countBuildingsUnrated: async () => 0,
+        countZones: async () => 0,
+        buildingsByOperator: async () => {
+          throw new Error('charts must not run for a zone-scoped reader')
+        },
+        buildingsOverTime: async () => [],
+      },
+    })
+
+    const stats = await service.getDashboardStats({ id: 'm', role: 'MANAGER' })
+    expect(seen[0].AND).toContainEqual({ OR: [{ zoneId: { in: ['z1'] } }, { createdById: 'm' }] })
+    expect(stats.byOperator).toEqual([])
+    expect(stats.overTime).toEqual([])
   })
 })

@@ -18,10 +18,11 @@ import {
  * A Permission Executive sees only what they added; an ADMIN sees everyone's;
  * out of scope is a 404.
  * Phase 3 (site survey): a SURVEYOR also reads the APPROVED societies in the
- * zones assigned to them, and a MANAGER / SUPERVISOR every APPROVED society —
+ * zones assigned to them, a MANAGER the APPROVED societies in its zones
+ * (spec 2026-10-10-zone-manager), and a SUPERVISOR every APPROVED society —
  * read-only except the survey (surveyor) — see readsSociety.
  */
-const READS_APPROVED = ['MANAGER', 'SUPERVISOR']
+const READS_APPROVED = ['SUPERVISOR']
 
 /** Who may read this society through the module (phase 1–3 rules). */
 export function readsSociety(row, actor) {
@@ -32,6 +33,7 @@ export function readsSociety(row, actor) {
     case 'PERMISSION_EXECUTIVE':
       return row.createdById === actor.id
     case 'SURVEYOR':
+    case 'MANAGER':
       return row.permissionApproval === 'APPROVED' && !!row.zoneId && (actor.zoneIds ?? []).includes(row.zoneId)
     default:
       return READS_APPROVED.includes(actor?.role) && row.permissionApproval === 'APPROVED'
@@ -46,6 +48,7 @@ function listScope(filters, actor) {
     case 'PERMISSION_EXECUTIVE':
       return { createdById: actor.id }
     case 'SURVEYOR':
+    case 'MANAGER':
       return { createdById: undefined, approvedOnly: true, zoneIds: actor.zoneIds ?? [] }
     default:
       if (READS_APPROVED.includes(actor?.role)) return { createdById: undefined, approvedOnly: true }

@@ -1,5 +1,6 @@
 import { HOME_PASS_TIERS } from '../../lib/home-pass-tier.js'
 import { COVERAGE_REGISTRY } from '../../lib/building-source.js'
+import { readsByZone } from '../../lib/zone-scope-roles.js'
 
 const FEASIBLE_STATUSES = ['FEASIBLE', 'PERMISSION_PENDING', 'REJECTED', 'SURVEY_PENDING']
 const OVER_TIME_DAYS = 30
@@ -7,7 +8,8 @@ const OVER_TIME_DAYS = 30
 export function createStatsService({ statsRepository, userRepository }) {
   return {
     async getDashboardStats(actor, { operatorId, cityId } = {}) {
-      const scoped = actor?.role === 'SURVEYOR'
+      // Surveyors and managers count only their zones plus their own rows.
+      const scoped = readsByZone(actor?.role)
 
       // KPI where merges surveyor ownership and the operator filter (operator is
       // reached through the building's zone).
@@ -75,7 +77,7 @@ export function createStatsService({ statsRepository, userRepository }) {
         byLive[row.isLive ? 'live' : 'notLive'] = row._count._all
       }
 
-      // Charts are ADMIN/MANAGER only — surveyors never see them.
+      // Company-wide charts are ADMIN only — zone-scoped readers never see them.
       let byOperator = []
       let overTime = []
       if (!scoped) {

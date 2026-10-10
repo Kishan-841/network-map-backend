@@ -18,7 +18,7 @@ const U = {
   PE: { id: `${S}-pe`, role: 'PERMISSION_EXECUTIVE' },
   PE2: { id: `${S}-pe2`, role: 'PERMISSION_EXECUTIVE' },
   ADMIN: { id: `${S}-admin`, role: 'ADMIN' },
-  MANAGER: { id: `${S}-mgr`, role: 'MANAGER' },
+  MANAGER: { id: `${S}-mgr`, role: 'MANAGER' }, // zone-scoped: given the test zone below
   SURVEYOR: { id: `${S}-sur`, role: 'SURVEYOR' },
   SUPERVISOR: { id: `${S}-sup`, role: 'SUPERVISOR' },
   SALES_MANAGER: { id: `${S}-sm`, role: 'SALES_MANAGER' },
@@ -75,7 +75,8 @@ beforeAll(async () => {
         email: `${u.id}@v.local`,
         passwordHash: 'x',
         role: u.role,
-        ...(['SURVEYOR', 'TEAM_LEADER'].includes(u.role) && { assignedZones: { connect: { id: ZONE } } }),
+        // A MANAGER is zone-scoped since 2026-10-10 — it reads the test zone like a surveyor.
+        ...(['SURVEYOR', 'TEAM_LEADER', 'MANAGER'].includes(u.role) && { assignedZones: { connect: { id: ZONE } } }),
         ...(['TEAM_LEADER', 'SALES_EXECUTIVE'].includes(u.role) && { managerId: U.SALES_MANAGER.id }),
       },
     })

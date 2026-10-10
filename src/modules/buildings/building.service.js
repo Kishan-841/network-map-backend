@@ -5,6 +5,7 @@ import { isSimilarName } from '../../lib/name-similarity.js'
 import { PERMISSION_STATUSES } from './building.schemas.js'
 import { diffPermissionEdit } from './permission-edit-diff.js'
 import { COVERAGE_REGISTRY, APPROVED_SOCIETY, VISIBLE_BUILDING, isVisibleBuilding } from '../../lib/building-source.js'
+import { readsByZone } from '../../lib/zone-scope-roles.js'
 import {
   approvalTransition,
   transitionData,
@@ -190,9 +191,10 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         })
       }
     }
-    // Surveyors see their assigned zones plus their own buildings — via AND
-    // because `search` below owns the top-level OR (spec 2026-08-14).
-    if (actor?.role === 'SURVEYOR') {
+    // Surveyors and managers see their assigned zones plus their own buildings
+    // — via AND because `search` below owns the top-level OR (spec 2026-08-14;
+    // managers since 2026-10-10). No zones means own rows only, never everything.
+    if (readsByZone(actor?.role)) {
       const assigned = await userRepository.assignedZoneIds(actor.id)
       andWhere.push({ OR: [{ zoneId: { in: assigned } }, { createdById: actor.id }] })
     }
@@ -223,8 +225,7 @@ export function createBuildingService({ buildingRepository, storage, userReposit
    * an unrecognised role sees nothing.
    */
   async function readScope(actor) {
-    const assignedZoneIds =
-      actor?.role === 'SURVEYOR' ? await userRepository.assignedZoneIds(actor.id) : []
+    const assignedZoneIds = readsByZone(actor?.role) ? await userRepository.assignedZoneIds(actor.id) : []
     return (building) => {
       // A society-permission row is the executive's own and the admin's —
       // hidden from every other role, even ones that read the whole registry —
@@ -235,10 +236,11 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       }
       switch (actor?.role) {
         case 'ADMIN':
-        case 'MANAGER':
         case 'SUPERVISOR':
           return true
+        // A manager works only the zones an admin gave them (spec 2026-10-10).
         case 'SURVEYOR':
+        case 'MANAGER':
           return building.createdById === actor.id || assignedZoneIds.includes(building.zoneId)
         case 'ACQUISITION_AGENT':
           return building.createdById === actor.id

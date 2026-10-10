@@ -18,7 +18,7 @@ const U = {
   PE: { id: `${S}-pe`, role: 'PERMISSION_EXECUTIVE' },
   PE2: { id: `${S}-pe2`, role: 'PERMISSION_EXECUTIVE' },
   ADMIN: { id: `${S}-admin`, role: 'ADMIN' },
-  MANAGER: { id: `${S}-mgr`, role: 'MANAGER' },
+  MANAGER: { id: `${S}-mgr`, role: 'MANAGER' }, // zone Z1 (zone-scoped since 2026-10-10)
   SUPERVISOR: { id: `${S}-sup`, role: 'SUPERVISOR' },
   SURVEYOR: { id: `${S}-sur`, role: 'SURVEYOR' }, // zone Z1
   SURVEYOR2: { id: `${S}-sur2`, role: 'SURVEYOR' }, // zone Z2
@@ -114,7 +114,7 @@ beforeAll(async () => {
         email: `${u.id}@v.local`,
         passwordHash: 'x',
         role: u.role,
-        ...(key === 'SURVEYOR' && { assignedZones: { connect: { id: Z1 } } }),
+        ...(['SURVEYOR', 'MANAGER'].includes(key) && { assignedZones: { connect: { id: Z1 } } }),
         ...(key === 'SURVEYOR2' && { assignedZones: { connect: { id: Z2 } } }),
       },
     })
@@ -202,16 +202,25 @@ describe('the society list for surveyors, managers and supervisors', () => {
     expect((await putSurvey(waiting.id, goodSurvey())).status).toBe(404)
   })
 
-  for (const key of ['MANAGER', 'SUPERVISOR']) {
-    it(`${key} sees every approved society, read-only`, async () => {
-      const ids = await listIds(key)
-      expect(ids).toEqual(expect.arrayContaining([mine.id, other.id]))
-      expect(ids).not.toContain(waiting.id)
-      expect((await request(app).get(`${base}/${waiting.id}`).set(...as(key))).status).toBe(404)
-      expect((await getSurvey(mine.id, key)).status).toBe(200)
-      expect((await putSurvey(mine.id, goodSurvey(), key)).status).toBe(403)
-    })
-  }
+  it('SUPERVISOR sees every approved society, read-only', async () => {
+    const ids = await listIds('SUPERVISOR')
+    expect(ids).toEqual(expect.arrayContaining([mine.id, other.id]))
+    expect(ids).not.toContain(waiting.id)
+    expect((await request(app).get(`${base}/${waiting.id}`).set(...as('SUPERVISOR'))).status).toBe(404)
+    expect((await getSurvey(mine.id, 'SUPERVISOR')).status).toBe(200)
+    expect((await putSurvey(mine.id, goodSurvey(), 'SUPERVISOR')).status).toBe(403)
+  })
+
+  it('MANAGER is zone-scoped: approved societies in its zones only, read-only', async () => {
+    const ids = await listIds('MANAGER')
+    expect(ids).toContain(mine.id)
+    expect(ids).not.toContain(other.id)
+    expect(ids).not.toContain(waiting.id)
+    expect((await request(app).get(`${base}/${waiting.id}`).set(...as('MANAGER'))).status).toBe(404)
+    expect((await request(app).get(`${base}/${other.id}`).set(...as('MANAGER'))).status).toBe(404)
+    expect((await getSurvey(mine.id, 'MANAGER')).status).toBe(200)
+    expect((await putSurvey(mine.id, goodSurvey(), 'MANAGER')).status).toBe(403)
+  })
 
   it('a forged createdById does not widen a surveyor', async () => {
     const ids = await listIds('SURVEYOR', `&createdById=${U.PE.id}`)

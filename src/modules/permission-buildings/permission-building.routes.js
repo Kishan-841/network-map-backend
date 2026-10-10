@@ -30,8 +30,8 @@ const handle = (fn, status = 200) => async (req, res, next) => {
 }
 
 export const permissionBuildingRoutes = Router()
-// Phase 3: SURVEYOR (approved societies in their zones) and MANAGER / SUPERVISOR
-// (every approved society) read too; the service scopes every row (404 outside).
+// Phase 3: SURVEYOR and MANAGER (approved societies in their zones) and
+// SUPERVISOR (every approved society) read too; the service scopes every row (404 outside).
 permissionBuildingRoutes.use(
   requireAuth,
   requireRole('PERMISSION_EXECUTIVE', 'ADMIN', 'SURVEYOR', 'MANAGER', 'SUPERVISOR'),
