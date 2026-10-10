@@ -16,7 +16,7 @@ export const statsRepository = {
       .aggregate({ _sum: { amountPaid: true }, where })
       .then((result) => result._sum.amountPaid),
 
-  countOperators: () => prisma.operator.count(),
+  countOperators: (where) => prisma.operator.count(where ? { where } : undefined),
   countZones: (where) => prisma.zone.count({ where }),
 
   // Buildings + home pass per operator (all operators — the comparison chart).

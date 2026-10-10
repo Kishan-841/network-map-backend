@@ -1,6 +1,7 @@
 import { createAuthService, toPublicUser } from './auth.service.js'
 import { userRepository } from '../users/user.repository.js'
 import { ApiError } from '../../lib/api-error.js'
+import { readsByZone } from '../../lib/zone-scope-roles.js'
 import { systemLogService } from '../system-logs/system-log.service.js'
 import { parseRequestInfo } from '../system-logs/request-info.js'
 
@@ -64,8 +65,8 @@ export const authController = {
     try {
       const user = await userRepository.findById(req.user.id)
       if (!user || !user.isActive) throw ApiError.unauthorized()
-      const assignedZoneIds =
-        user.role === 'SURVEYOR' ? await userRepository.assignedZoneIds(user.id) : []
+      // Zone-scoped readers (surveyors, and managers since 2026-10-10) carry their zones.
+      const assignedZoneIds = readsByZone(user.role) ? await userRepository.assignedZoneIds(user.id) : []
       res.json({ success: true, data: { ...toPublicUser(user), assignedZoneIds } })
     } catch (err) {
       next(err)

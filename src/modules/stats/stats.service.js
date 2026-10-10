@@ -19,11 +19,14 @@ export function createStatsService({ statsRepository, userRepository }) {
       // The coverage registry includes societies an ADMIN approved (phase 2);
       // both ORs sit inside AND so neither overwrites the other.
       const buildingWhere = { AND: [COVERAGE_REGISTRY] }
+      const assigned = scoped ? await userRepository.assignedZoneIds(actor.id) : []
       if (scoped) {
         // Same zone-or-own read scope the buildings list uses (spec 2026-08-14).
-        const assigned = await userRepository.assignedZoneIds(actor.id)
         buildingWhere.AND.push({ OR: [{ zoneId: { in: assigned } }, { createdById: actor.id }] })
       }
+      // A manager's zone / operator tiles count only the zones it was given
+      // (spec 2026-10-10); a surveyor's stay company-wide, as before.
+      const ownZonesOnly = actor?.role === 'MANAGER'
       if (operatorId) buildingWhere.zone = { operatorId }
       if (cityId) buildingWhere.zone = { ...buildingWhere.zone, operator: { cityId } }
       const where = buildingWhere
@@ -46,10 +49,13 @@ export function createStatsService({ statsRepository, userRepository }) {
         statsRepository.countsByLive(where),
         statsRepository.sumHomePass(nestedWhere),
         statsRepository.sumPermissionCost(nestedWhere),
-        statsRepository.countOperators(),
+        ownZonesOnly
+          ? statsRepository.countOperators({ zones: { some: { id: { in: assigned } } } })
+          : statsRepository.countOperators(),
         statsRepository.countZones({
           ...(operatorId && { operatorId }),
           ...(cityId && { operator: { cityId } }),
+          ...(ownZonesOnly && { id: { in: assigned } }),
         }),
         // Size mix: how the estate splits across the home-pass tiers, and how
         // much home pass sits in each — a handful of buildings in the top tier

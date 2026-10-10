@@ -11,7 +11,7 @@ const tokenFor = (u) => jwt.sign({ sub: u.id, role: u.role }, env.jwtSecret, { a
 
 describe('zone manager writes only inside their zones', () => {
   const stamp = Date.now()
-  let zoneA, zoneB, manager, admin, inA, inB
+  let zoneA, zoneB, manager, admin, inA, inB, popA, oltA
   const created = []
   beforeAll(async () => {
     zoneA = await prisma.zone.create({ data: { name: `ZMW-A-${stamp}`, city: 'Aurangabad' } })
@@ -21,10 +21,17 @@ describe('zone manager writes only inside their zones', () => {
     const base = { formattedAddress: '1 ZM St', latitude: 19.87, longitude: 75.34, source: 'COVERAGE', createdById: admin.id, isLive: false }
     inA = await prisma.building.create({ data: { ...base, buildingName: `ZMW-inA-${stamp}`, zoneId: zoneA.id } })
     inB = await prisma.building.create({ data: { ...base, buildingName: `ZMW-inB-${stamp}`, latitude: 19.88, zoneId: zoneB.id } })
+    // One POP serving zone A, with one OLT — the target for the bulk OLT mapping.
+    popA = await prisma.pop.create({
+      data: { name: `ZMW POP-A ${stamp}`, latitude: 19.87, longitude: 75.34, createdById: admin.id, zones: { connect: { id: zoneA.id } } },
+    })
+    oltA = await prisma.olt.create({ data: { popId: popA.id, name: `ZMW OLT-A ${stamp}`, ponPortCount: 8 } })
   })
   afterAll(async () => {
     const ids = [inA, inB].filter(Boolean).map((b) => b.id).concat(created)
     await prisma.building.deleteMany({ where: { OR: [{ id: { in: ids } }, { buildingName: { startsWith: `ZMW-new-${stamp}` } }] } })
+    if (oltA) await prisma.olt.deleteMany({ where: { id: oltA.id } })
+    if (popA) await prisma.pop.deleteMany({ where: { id: popA.id } })
     await prisma.systemLog.deleteMany({ where: { userId: { in: [manager, admin].filter(Boolean).map((u) => u.id) } } })
     await prisma.user.deleteMany({ where: { id: { in: [manager, admin].filter(Boolean).map((u) => u.id) } } })
     await prisma.zone.deleteMany({ where: { id: { in: [zoneA, zoneB].filter(Boolean).map((z) => z.id) } } })
@@ -74,5 +81,20 @@ describe('zone manager writes only inside their zones', () => {
     expect(res.status).toBe(201)
     created.push(res.body.data.id)
     expect(res.body.data.zoneId).toBe(zoneA.id)
+  })
+
+  it('cannot OLT-assign a zone-B building', async () => {
+    const res = await send('patch', manager, '/api/v1/buildings/bulk-olt', { ids: [inB.id], oltId: oltA.id, ponPorts: [1] })
+    expect(res.status).toBe(400)
+    expect(res.body.error.message).toBe('None of those buildings are available to you')
+    expect((await prisma.building.findUnique({ where: { id: inB.id } })).oltId).toBeNull()
+  })
+
+  it('a mixed OLT assignment maps only the zone-A building', async () => {
+    const res = await send('patch', manager, '/api/v1/buildings/bulk-olt', { ids: [inA.id, inB.id], oltId: oltA.id, ponPorts: [2] })
+    expect(res.status).toBe(200)
+    expect(res.body.data.count).toBe(1)
+    expect((await prisma.building.findUnique({ where: { id: inA.id } })).oltId).toBe(oltA.id)
+    expect((await prisma.building.findUnique({ where: { id: inB.id } })).oltId).toBeNull()
   })
 })

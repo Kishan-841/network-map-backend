@@ -93,6 +93,23 @@ describe('zone manager reads only their zones', () => {
     expect(res.body.data.totalHomePass).toBe(0)
   })
 
+  it('dashboard zone / operator tiles count only the manager\'s zones', async () => {
+    const mine = await get(manager, '/api/v1/stats/dashboard')
+    expect(mine.status).toBe(200)
+    expect(mine.body.data.zoneCount).toBe(1)
+    expect(mine.body.data.operatorCount).toBe(1)
+    const none = await get(emptyManager, '/api/v1/stats/dashboard')
+    expect(none.body.data.zoneCount).toBe(0)
+    expect(none.body.data.operatorCount).toBe(0)
+  })
+
+  it('/auth/me carries a manager\'s assigned zone ids', async () => {
+    const res = await get(manager, '/api/v1/auth/me')
+    expect(res.status).toBe(200)
+    expect(res.body.data.assignedZoneIds).toEqual([zoneA.id])
+    expect((await get(emptyManager, '/api/v1/auth/me')).body.data.assignedZoneIds).toEqual([])
+  })
+
   it('reads the approved society in zone A, 404s the one in zone B', async () => {
     expect((await get(manager, `/api/v1/permission-buildings/${societyA.id}`)).status).toBe(200)
     expect((await get(manager, `/api/v1/permission-buildings/${societyB.id}`)).status).toBe(404)
