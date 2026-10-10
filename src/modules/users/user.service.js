@@ -45,13 +45,29 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
     }
   }
 
-  // The field-sales chain, sanitised: a non-sales role (and a SALES_MANAGER, who
-  // reports to the admin) carries no manager/leader; a TEAM_LEADER's manager
-  // must be a SALES_MANAGER; a SALES_EXECUTIVE's manager a SALES_MANAGER and its
-  // leader a TEAM_LEADER. Always returns both keys so a role change clears stale
-  // links.
+  // A zone manager runs their own Surveyors and nobody else (spec 2026-10-10).
+  async function managerZoneIds(actor) {
+    return actor?.role === 'MANAGER' ? userRepository.assignedZoneIds(actor.id) : null
+  }
+  function assertOwnZones(zoneIds, mine) {
+    if (zoneIds?.some((id) => !mine.includes(id))) throw ApiError.badRequest('You can only give zones you manage')
+  }
+
+  // Who a user reports to, sanitised. Sales: a non-sales role (and a
+  // SALES_MANAGER, who reports to the admin) carries no manager/leader; a
+  // TEAM_LEADER's manager must be a SALES_MANAGER; a SALES_EXECUTIVE's manager a
+  // SALES_MANAGER and its leader a TEAM_LEADER. Coverage (spec 2026-10-10): a
+  // SURVEYOR's manager must be a MANAGER. Every other role carries no links.
+  // Always returns both keys so a role change clears stale links.
   const SALES_ROLES = ['SALES_MANAGER', 'TEAM_LEADER', 'SALES_EXECUTIVE']
-  async function salesHierarchy(role, managerId, teamLeaderId) {
+  async function reportingLinks(role, managerId, teamLeaderId) {
+    if (role === 'SURVEYOR') {
+      if (managerId) {
+        const m = await userRepository.findById(managerId)
+        if (!m || m.role !== 'MANAGER') throw ApiError.badRequest('Reports to must be a manager')
+      }
+      return { managerId: managerId ?? null, teamLeaderId: null }
+    }
     if (!SALES_ROLES.includes(role) || role === 'SALES_MANAGER') {
       return { managerId: null, teamLeaderId: null }
     }
@@ -101,13 +117,19 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
   return {
     async createUser({ password, zoneIds, cityId, pincodes, managerId, teamLeaderId, ...data }, actor) {
       assertMayManage(actor, data.role)
+      if (actor?.role === 'MANAGER') {
+        if (data.role !== 'SURVEYOR') throw ApiError.forbidden('Managers can only add surveyors')
+        assertOwnZones(zoneIds, await managerZoneIds(actor))
+        managerId = actor.id
+        teamLeaderId = undefined
+      }
       const existing = await userRepository.findByEmail(data.email)
       if (existing) throw ApiError.conflict('A user with this email already exists')
 
       const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS)
       const assignedZones = await zoneAssignment(zoneIds, data.role, 'connect')
       const pin = await pincodeAssignment({ cityId, pincodes, role: data.role })
-      const hierarchy = await salesHierarchy(data.role, managerId, teamLeaderId)
+      const hierarchy = await reportingLinks(data.role, managerId, teamLeaderId)
       const user = await userRepository.create({
         ...data,
         ...hierarchy,
@@ -254,7 +276,9 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
       const scoped =
         actor?.role === 'ACQUISITION_LEAD'
           ? users.filter((u) => u.role === 'ACQUISITION_AGENT')
-          : users
+          : actor?.role === 'MANAGER'
+            ? users.filter((u) => u.role === 'SURVEYOR' && u.managerId === actor.id)
+            : users
       return scoped.map(toPublicUser)
     },
 
@@ -294,9 +318,16 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
     },
 
     async listUsersPaged({ page, pageSize, search, role }, actor) {
+      // A lead's or a zone manager's directory is their own team, nobody else
+      // (a role query param cannot widen it).
+      const teamScope =
+        actor?.role === 'ACQUISITION_LEAD'
+          ? { role: 'ACQUISITION_AGENT' }
+          : actor?.role === 'MANAGER'
+            ? { role: 'SURVEYOR', managerId: actor.id }
+            : role && { role }
       const where = {
-        // A lead's directory is their own team, nobody else.
-        ...(actor?.role === 'ACQUISITION_LEAD' ? { role: 'ACQUISITION_AGENT' } : role && { role }),
+        ...teamScope,
         ...(search && {
           OR: [
             { name: { contains: search, mode: 'insensitive' } },
@@ -324,6 +355,25 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
       // A lead may edit agents only, and may not promote one out of the team.
       assertMayManage(actor, current.role)
       if (data.role) assertMayManage(actor, data.role)
+      // A zone manager edits only Surveyors reporting to them (anyone else,
+      // themselves included, is out of scope → 404) and never their role or
+      // reports-to. Zones come only from the manager's own; zones the manager
+      // cannot see stay as they are.
+      if (actor?.role === 'MANAGER') {
+        if (current.role !== 'SURVEYOR' || current.managerId !== actor.id) throw ApiError.notFound('User not found')
+        if ((data.role && data.role !== current.role) || (managerId !== undefined && managerId !== current.managerId)) {
+          throw ApiError.badRequest("Only an admin can change a user's role or manager")
+        }
+        delete data.role
+        managerId = undefined
+        teamLeaderId = undefined
+        if (zoneIds !== undefined) {
+          const mine = await managerZoneIds(actor)
+          assertOwnZones(zoneIds, mine)
+          const kept = (current.assignedZones ?? []).map((z) => z.id).filter((id) => !mine.includes(id))
+          zoneIds = [...new Set([...zoneIds, ...kept])]
+        }
+      }
       // Changing to an email another account already uses → clean 409.
       if (email) {
         const existing = await userRepository.findByEmail(email)
@@ -341,12 +391,12 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
       // Password is stored only as a hash, never plaintext.
       if (password) data.passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS)
 
-      // Sales hierarchy: recompute (and sanitise) when it is sent or the role
-      // changes; otherwise leave it as-is. A move out of the sales roles clears
-      // the links.
+      // Reporting links: recompute (and sanitise) when they are sent or the role
+      // changes; otherwise leave them as-is. A move to a role without links
+      // clears them.
       const roleChanged = data.role && data.role !== current.role
       if (managerId !== undefined || teamLeaderId !== undefined || roleChanged) {
-        const h = await salesHierarchy(
+        const h = await reportingLinks(
           data.role ?? current.role,
           managerId !== undefined ? managerId : current.managerId,
           teamLeaderId !== undefined ? teamLeaderId : current.teamLeaderId,
@@ -386,6 +436,9 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
       }
 
       const user = await userRepository.update(id, data)
+      // A demoted manager leaves no Surveyor reporting to a non-manager. Run
+      // after the update so a refused update has no side effect.
+      if (current.role === 'MANAGER' && roleChanged) await userRepository.clearSurveyorReports(id)
       return toPublicUser(user)
     },
 

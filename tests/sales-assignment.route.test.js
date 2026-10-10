@@ -198,7 +198,9 @@ describe('field-sales team picker + hierarchy creation', () => {
       name: 'A Surveyor',
       email: 'sales-made-3@vitest.local',
       password: 'Passw0rd1',
-      role: 'SURVEYOR',
+      // Not SURVEYOR: since 10 Oct 2026 a surveyor reports to a coverage
+      // MANAGER, so a sales manager there is a 400 (zone-manager spec).
+      role: 'SUPERVISOR',
       managerId: 'sales-mgr', // should be ignored / cleared
     })
     expect(res.status).toBe(201)

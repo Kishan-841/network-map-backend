@@ -18,7 +18,7 @@ export const userRoutes = Router()
 userRoutes.use(requireAuth)
 userRoutes.post(
   '/',
-  requireRole('ADMIN', 'ACQUISITION_LEAD'),
+  requireRole('ADMIN', 'ACQUISITION_LEAD', 'MANAGER'),
   audit('User', 'Create', {
     describe: (req) => `User '${req.body?.email ?? 'unknown'}' created`,
   }),
@@ -57,7 +57,7 @@ userRoutes.get(
 )
 userRoutes.patch(
   '/:id',
-  requireRole('ADMIN', 'ACQUISITION_LEAD'),
+  requireRole('ADMIN', 'ACQUISITION_LEAD', 'MANAGER'),
   audit('User', 'Update', {
     load: (req) => userRepository.findById(req.params.id),
     describe: (req, old) => `User '${old?.email ?? req.params.id}' updated`,

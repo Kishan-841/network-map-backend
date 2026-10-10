@@ -51,6 +51,9 @@ export const userRepository = {
     prisma.zone
       .findMany({ where: { assignedUsers: { some: { id: userId } } }, select: { id: true } })
       .then((rows) => rows.map((row) => row.id)),
+  /// A demoted MANAGER leaves no Surveyor reporting to a non-manager.
+  clearSurveyorReports: (managerId) =>
+    prisma.user.updateMany({ where: { managerId, role: 'SURVEYOR' }, data: { managerId: null } }),
   update: (id, data) =>
     prisma.user.update({
       where: { id },

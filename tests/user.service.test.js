@@ -19,6 +19,11 @@ function fakeUserRepository(seed = []) {
       Object.assign(user, data)
       return user
     },
+    clearSurveyorReports: async (managerId) => {
+      const hit = users.filter((u) => u.managerId === managerId && u.role === 'SURVEYOR')
+      for (const u of hit) u.managerId = null
+      return { count: hit.length }
+    },
   }
 }
 
