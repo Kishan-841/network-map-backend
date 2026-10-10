@@ -5,7 +5,6 @@ import { toPublicUser } from '../auth/auth.service.js'
 import { BUILDING_EDIT_ROLES, FIBER_ACCESS_ROLES } from '../../middleware/auth.js'
 
 const BCRYPT_ROUNDS = 10
-// The roles that work by zone: surveyors, and team leaders (spec 2026-10-06).
 // Roles that work by zone: surveyors, team leaders and, since 10 Oct 2026, managers.
 const ZONE_ROLES = ['SURVEYOR', 'TEAM_LEADER', 'MANAGER']
 
@@ -102,7 +101,8 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
   }
 
   // zoneIds -> Prisma relation op, or undefined when not applicable
-  // (assignments are stored only for surveyors and team leaders).
+  // (assignments are stored only for the ZONE_ROLES: surveyors, team leaders
+  // and managers).
   async function zoneAssignment(zoneIds, role, op) {
     if (zoneIds === undefined || !ZONE_ROLES.includes(role)) return undefined
     // Dedupe first: countByIds is a distinct-row count, so a repeated id
