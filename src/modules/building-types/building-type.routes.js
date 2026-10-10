@@ -12,7 +12,7 @@ buildingTypeRoutes.use(requireAuth)
 buildingTypeRoutes.get('/', buildingTypeController.list)
 buildingTypeRoutes.post(
   '/',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN'),
   audit('BuildingType', 'Create', {
     describe: (req) => `Building type '${req.body?.name ?? 'unknown'}' created`,
   }),
@@ -21,7 +21,7 @@ buildingTypeRoutes.post(
 )
 buildingTypeRoutes.patch(
   '/:id',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN'),
   audit('BuildingType', 'Update', {
     load: (req) => buildingTypeRepository.findById(req.params.id),
     describe: (req, old) =>
@@ -32,7 +32,7 @@ buildingTypeRoutes.patch(
 )
 buildingTypeRoutes.delete(
   '/:id',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN'),
   audit('BuildingType', 'Delete', {
     load: (req) => buildingTypeRepository.findById(req.params.id),
     describe: (req, old) => `Building type '${old?.name ?? req.params.id}' deleted`,

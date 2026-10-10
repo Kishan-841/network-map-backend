@@ -28,6 +28,14 @@ describe('fiber routes API', () => {
     expect((await request(createApp()).get('/api/v1/fiber-routes')).status).toBe(401)
   })
 
+  it('blocks MANAGER writes (fiber routes are admin-only since 10 Oct 2026)', async () => {
+    const res = await request(createApp())
+      .post('/api/v1/fiber-routes')
+      .set('Authorization', `Bearer ${tokenFor('MANAGER')}`)
+      .send({ name: 'Nope', segments: SEGMENTS })
+    expect(res.status).toBe(403)
+  })
+
   it('blocks SURVEYOR writes', async () => {
     const res = await request(createApp())
       .post('/api/v1/fiber-routes')
@@ -36,10 +44,10 @@ describe('fiber routes API', () => {
     expect(res.status).toBe(403)
   })
 
-  it('MANAGER round-trip: create → duplicate 409 → update → delete', async () => {
+  it('ADMIN round-trip: create → duplicate 409 → update → delete', async () => {
     const stamp = Date.now()
     const app = createApp()
-    const auth = ['Authorization', `Bearer ${tokenFor('MANAGER')}`]
+    const auth = ['Authorization', `Bearer ${tokenFor('ADMIN')}`]
 
     // Missing details (fiberType/fiberId/placement) → validation error.
     const missing = await request(app)

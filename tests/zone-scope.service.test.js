@@ -8,10 +8,15 @@ const repo = {
 }
 
 describe('listZones scoping', () => {
-  it('returns all zones for ADMIN and MANAGER', async () => {
+  it('returns all zones for ADMIN and SUPERVISOR', async () => {
     const service = createZoneService({ zoneRepository: repo })
     expect(await service.listZones({ id: 'u-a', role: 'ADMIN' })).toHaveLength(3)
-    expect(await service.listZones({ id: 'u-m', role: 'MANAGER' })).toHaveLength(3)
+    expect(await service.listZones({ id: 'u-m', role: 'SUPERVISOR' })).toHaveLength(3)
+  })
+
+  it('returns only assigned zones for MANAGER (none assigned: nothing)', async () => {
+    const service = createZoneService({ zoneRepository: repo })
+    expect(await service.listZones({ id: 'u-m', role: 'MANAGER' })).toEqual([])
   })
 
   it('returns only assigned zones for SURVEYOR', async () => {

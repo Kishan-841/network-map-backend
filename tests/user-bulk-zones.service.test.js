@@ -8,7 +8,7 @@ const zones = [
 ]
 const users = [
   { id: 'u1', email: 'surv@isp.local', role: 'SURVEYOR' },
-  { id: 'u2', email: 'mgr@isp.local', role: 'MANAGER' },
+  { id: 'u2', email: 'mgr@isp.local', role: 'SUPERVISOR' },
 ]
 
 function fakeDeps() {
@@ -59,7 +59,7 @@ describe('bulkAssignZones', () => {
     expect(data.assignedZones).toEqual({ set: [{ id: 'z1' }, { id: 'z2' }] })
   })
 
-  it('skips unknown users, non-surveyors, and rows with unknown zones', async () => {
+  it('skips unknown users, non-zone roles, and rows with unknown zones', async () => {
     const deps = fakeDeps()
     const service = createUserService(deps)
     const result = await service.bulkAssignZones([
@@ -71,7 +71,7 @@ describe('bulkAssignZones', () => {
     expect(result.updated).toHaveLength(0)
     expect(result.skipped).toEqual([
       { email: 'ghost@isp.local', reason: 'user not found' },
-      { email: 'mgr@isp.local', reason: 'not a surveyor or team leader' },
+      { email: 'mgr@isp.local', reason: 'not a surveyor, team leader or manager' },
       { email: 'surv@isp.local', reason: "zone(s) not found: Nope Zone" },
     ])
     expect(result.total).toBe(3)

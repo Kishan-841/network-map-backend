@@ -38,10 +38,10 @@ describe('user zone assignment', () => {
     expect(data.assignedZones).toEqual({ connect: [{ id: 'z1' }, { id: 'z2' }] })
   })
 
-  it('ignores zoneIds for non-surveyors', async () => {
+  it('ignores zoneIds for roles that do not work by zone', async () => {
     const deps = fakeRepos()
     const service = createUserService(deps)
-    await service.createUser({ ...surveyorInput, role: 'MANAGER', zoneIds: ['z1'] })
+    await service.createUser({ ...surveyorInput, role: 'SUPERVISOR', zoneIds: ['z1'] })
     const [, data] = deps.calls.find(([op]) => op === 'create')
     expect(data.assignedZones).toBeUndefined()
   })

@@ -37,7 +37,7 @@ operatorRoutes.post(
 )
 operatorRoutes.post(
   '/',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN'),
   audit('Operator', 'Create', {
     describe: (req) => `Operator '${req.body?.name ?? 'unknown'}' created`,
   }),
@@ -46,7 +46,7 @@ operatorRoutes.post(
 )
 operatorRoutes.patch(
   '/:id',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN'),
   audit('Operator', 'Update', {
     load: (req) => operatorRepository.findById(req.params.id),
     describe: (req, old) => `Operator '${old?.name ?? req.params.id}' updated`,
@@ -56,7 +56,7 @@ operatorRoutes.patch(
 )
 operatorRoutes.delete(
   '/:id',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN'),
   audit('Operator', 'Delete', {
     load: (req) => operatorRepository.findById(req.params.id),
     describe: (req, old) => `Operator '${old?.name ?? req.params.id}' deleted`,

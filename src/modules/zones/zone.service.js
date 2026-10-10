@@ -1,17 +1,20 @@
 import { Prisma } from '@prisma/client'
 import { ApiError } from '../../lib/api-error.js'
 
+// Roles that see only the zones they were given.
+const ASSIGNED_ZONES_ONLY = ['SURVEYOR', 'TEAM_LEADER', 'MANAGER']
+
 export function createZoneService({ zoneRepository }) {
   return {
     async listZones(actor) {
-      // Surveyors and team leaders see the zones they were given; others all.
-      if (['SURVEYOR', 'TEAM_LEADER'].includes(actor?.role)) return zoneRepository.listAssigned(actor.id)
+      // Surveyors, team leaders and managers see the zones they were given; others all.
+      if (ASSIGNED_ZONES_ONLY.includes(actor?.role)) return zoneRepository.listAssigned(actor.id)
       return zoneRepository.list()
     },
 
     async listZonesPaged({ page, pageSize, search }, actor) {
       const where = {
-        ...(['SURVEYOR', 'TEAM_LEADER'].includes(actor?.role) && { assignedUsers: { some: { id: actor.id } } }),
+        ...(ASSIGNED_ZONES_ONLY.includes(actor?.role) && { assignedUsers: { some: { id: actor.id } } }),
         ...(search && {
           OR: [
             { name: { contains: search, mode: 'insensitive' } },

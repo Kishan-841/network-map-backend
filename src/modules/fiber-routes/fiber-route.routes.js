@@ -13,7 +13,7 @@ fiberRouteRoutes.use(requireAuth)
 fiberRouteRoutes.get('/', requireRole('ADMIN', 'MANAGER', 'SURVEYOR', 'SUPERVISOR'), fiberRouteController.list)
 fiberRouteRoutes.post(
   '/',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN'),
   audit('FiberRoute', 'Create', {
     describe: (req) => `Fiber route '${req.body?.name ?? 'unknown'}' created`,
   }),
@@ -22,7 +22,7 @@ fiberRouteRoutes.post(
 )
 fiberRouteRoutes.patch(
   '/:id',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN'),
   audit('FiberRoute', 'Update', {
     load: (req) => fiberRouteRepository.findById(req.params.id),
     describe: (req, old) => `Fiber route '${old?.name ?? req.params.id}' updated`,
@@ -32,7 +32,7 @@ fiberRouteRoutes.patch(
 )
 fiberRouteRoutes.delete(
   '/:id',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN'),
   audit('FiberRoute', 'Delete', {
     load: (req) => fiberRouteRepository.findById(req.params.id),
     describe: (req, old) => `Fiber route '${old?.name ?? req.params.id}' deleted`,

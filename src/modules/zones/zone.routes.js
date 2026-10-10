@@ -19,7 +19,7 @@ zoneRoutes.use(requireAuth)
 zoneRoutes.get(
   '/',
   // SALES_MANAGER reads it to filter the registry by zone when assigning to
-  // their team (read-only; zone writes stay ADMIN/MANAGER). A TEAM_LEADER reads
+  // their team (read-only; zone writes stay ADMIN). A TEAM_LEADER reads
   // their own zones' outlines for the Sales map.
   requireRole('ADMIN', 'MANAGER', 'SURVEYOR', 'SUPERVISOR', 'SALES_MANAGER', 'TEAM_LEADER'),
   validateQuery(listZonesQuerySchema),
@@ -27,14 +27,14 @@ zoneRoutes.get(
 )
 zoneRoutes.post(
   '/',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN'),
   audit('Zone', 'Create', { describe: (req) => `Zone '${req.body?.name ?? 'unknown'}' created` }),
   validateBody(createZoneSchema),
   zoneController.create,
 )
 zoneRoutes.post(
   '/bulk',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN'),
   audit('Zone', 'BulkCreate', {
     describe: (req, old, body) =>
       body?.data
@@ -46,7 +46,7 @@ zoneRoutes.post(
 )
 zoneRoutes.patch(
   '/:id',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN'),
   audit('Zone', 'Update', {
     load: (req) => zoneRepository.findById(req.params.id),
     describe: (req, old) => `Zone '${old?.name ?? req.params.id}' updated`,
@@ -56,7 +56,7 @@ zoneRoutes.patch(
 )
 zoneRoutes.delete(
   '/:id',
-  requireRole('ADMIN', 'MANAGER'),
+  requireRole('ADMIN'),
   audit('Zone', 'Delete', {
     load: (req) => zoneRepository.findById(req.params.id),
     describe: (req, old) => `Zone '${old?.name ?? req.params.id}' deleted`,

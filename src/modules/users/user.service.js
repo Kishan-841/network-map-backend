@@ -6,7 +6,8 @@ import { BUILDING_EDIT_ROLES, FIBER_ACCESS_ROLES } from '../../middleware/auth.j
 
 const BCRYPT_ROUNDS = 10
 // The roles that work by zone: surveyors, and team leaders (spec 2026-10-06).
-const ZONE_ROLES = ['SURVEYOR', 'TEAM_LEADER']
+// Roles that work by zone: surveyors, team leaders and, since 10 Oct 2026, managers.
+const ZONE_ROLES = ['SURVEYOR', 'TEAM_LEADER', 'MANAGER']
 
 // Accepts the enum values and the friendly sheet labels, case-insensitive.
 const BULK_ROLE_ALIASES = {
@@ -273,7 +274,7 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
           continue
         }
         if (!ZONE_ROLES.includes(user.role)) {
-          skipped.push({ email, reason: 'not a surveyor or team leader' })
+          skipped.push({ email, reason: 'not a surveyor, team leader or manager' })
           continue
         }
         const missing = zoneNames.filter(
