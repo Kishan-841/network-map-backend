@@ -34,12 +34,13 @@ visitTaskRoutes.get('/overdue', SALES_ANY, validateQuery(rangeQuerySchema), hand
 visitTaskRoutes.get('/assignees', PLANNER, handle((req) => visitTaskService.listAssignees(req.user)))
 visitTaskRoutes.get('/buildings', PLANNER, handle((req) => visitTaskService.searchBuildings(req.query.q, req.user)))
 visitTaskRoutes.get('/uploads', PLANNER, handle((req) => visitTaskService.listUploads(req.user)))
-// Undo an upload: its unvisited tasks from today on go; history and buildings stay.
+visitTaskRoutes.get('/uploads/:id/tasks', PLANNER, handle((req) => visitTaskService.uploadTaskList(req.params.id, req.user)))
+// Delete an upload (ADMIN): all its tasks and the upload — refused once any task has a visit.
 visitTaskRoutes.delete(
   '/uploads/:id',
-  PLANNER,
+  requireRole('ADMIN'),
   audit('VisitTask', 'RemoveTaskUpload', {
-    describe: (req) => `Visit plan upload ${req.params.id} removed`,
+    describe: (req) => `Visit plan upload ${req.params.id} deleted`,
     newValue: withDetail,
   }),
   handle((req) => visitTaskService.removeUpload(req.params.id, req.user)),

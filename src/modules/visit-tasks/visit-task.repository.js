@@ -139,6 +139,27 @@ export const visitTaskRepository = {
   /** Every task still linked to these uploads (scalars only). */
   uploadTasks: (uploadIds) => prisma.visitTask.findMany({ where: { uploadId: { in: uploadIds } } }),
 
+  /** One upload's tasks with who and where, oldest day first. */
+  uploadTaskList: (uploadId) =>
+    prisma.visitTask.findMany({
+      where: { uploadId },
+      include: taskInclude,
+      orderBy: [{ taskDate: 'asc' }, { startTime: 'asc' }],
+    }),
+
+  /**
+   * Delete an upload and exactly its tasks (`expected`: [{ id, updatedAt }]),
+   * all or nothing, if no task changed or went since they were read.
+   */
+  deleteUploadChecked: (uploadId, expected) =>
+    prisma.$transaction(async (tx) => {
+      if (expected.length) await lockUnchanged(tx, expected)
+      const { count } = await tx.visitTask.deleteMany({ where: { uploadId } })
+      if (count !== expected.length) throw ApiError.conflict(CHANGED)
+      await tx.taskUpload.delete({ where: { id: uploadId } })
+      return count
+    }),
+
   /**
    * One transaction: close + re-open building assignments (dropping the
    * previous holders' tasks there from today on), delete the replaced tasks,

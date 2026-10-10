@@ -14,10 +14,10 @@ import { addDays, dateOnly, istToday, weekdayIndex } from '../src/lib/visit-plan
 const app = createApp()
 const auth = (id, role) => ({ Authorization: `Bearer ${jwt.sign({ sub: id, role }, env.jwtSecret, { audience: 'staff', expiresIn: '1h' })}` })
 const S = `vpw-${Date.now()}`
-const [MGR, TL, TL2, SE, SE2, SE3, SE4, SE5] = ['mgr', 'tl', 'tl2', 'se', 'se2', 'se3', 'se4', 'se5'].map((s) => `${S}-${s}`)
+const [MGR, TL, TL2, SE, SE2, SE3, SE4, SE5, ADM] = ['mgr', 'tl', 'tl2', 'se', 'se2', 'se3', 'se4', 'se5', 'adm'].map((s) => `${S}-${s}`)
 const BLDS = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `${S}-b${n}`)
 const [B1, B2, B3, B4, B5, B6, B7, B8] = BLDS
-const USERS = [SE, SE2, SE3, SE4, SE5, TL, TL2, MGR]
+const USERS = [SE, SE2, SE3, SE4, SE5, TL, TL2, MGR, ADM]
 const Z = `${S}-z`
 const today = istToday()
 const d = addDays(today, 2)
@@ -25,10 +25,12 @@ const none = [false, false, false, false, false, false, false]
 const tenAm = new Date(`${today}T10:00:00+05:30`)
 const base = '/api/v1/sales/tasks'
 const MGR_AUTH = auth(MGR, 'SALES_MANAGER')
+const ADM_AUTH = auth(ADM, 'ADMIN')
 
 beforeAll(async () => {
   const mk = (id, role, extra = {}) => prisma.user.create({ data: { id, name: id, email: `${id}@v.local`, passwordHash: 'x', role, ...extra } })
   await mk(MGR, 'SALES_MANAGER')
+  await mk(ADM, 'ADMIN')
   await prisma.zone.create({ data: { id: Z, name: Z, city: 'Test' } })
   await mk(TL, 'TEAM_LEADER', { managerId: MGR, assignedZones: { connect: [{ id: Z }] } })
   await mk(TL2, 'TEAM_LEADER', { managerId: MGR })
@@ -348,29 +350,28 @@ describe('uploads: list and remove', () => {
     expect(tl2.body.data).toEqual([])
   })
 
-  it('out of scope or unknown → 404, nothing removed', async () => {
-    expect((await request(app).delete(`${base}/uploads/${tlUpload}`).set(auth(TL2, 'TEAM_LEADER'))).status).toBe(404)
-    expect((await request(app).delete(`${base}/uploads/${S}-nope`).set(MGR_AUTH)).status).toBe(404)
+  it('only ADMIN deletes an upload; unknown → 404, nothing removed', async () => {
+    expect((await request(app).delete(`${base}/uploads/${tlUpload}`).set(auth(TL, 'TEAM_LEADER'))).status).toBe(403)
+    expect((await request(app).delete(`${base}/uploads/${mgrUpload}`).set(MGR_AUTH)).status).toBe(403)
+    expect((await request(app).delete(`${base}/uploads/${S}-nope`).set(ADM_AUTH)).status).toBe(404)
     expect(await prisma.visitTask.count({ where: { uploadId: tlUpload } })).toBe(2)
   })
 
-  it('remove keeps the visited and the missed tasks, removes the upcoming ones, audited', async () => {
-    const res = await request(app).delete(`${base}/uploads/${mgrUpload}`).set(MGR_AUTH)
-    expect(res.status).toBe(200)
-    expect(res.body.data).toEqual({ removed: 2, kept: 2 })
+  it('an upload with a visit is refused (409) and keeps every task', async () => {
+    const res = await request(app).delete(`${base}/uploads/${mgrUpload}`).set(ADM_AUTH)
+    expect(res.status).toBe(409)
     const left = await prisma.visitTask.findMany({ where: { uploadId: mgrUpload } })
-    expect(left.map((t) => t.id).sort()).toEqual([ids.missed, ids.visited].sort())
-    const log = await logOf({ userId: MGR, action: 'RemoveTaskUpload', recordId: mgrUpload })
-    expect(log.newValue).toMatchObject({ removed: 2, kept: 2 })
-    expect(log.newValue.taskIds.sort()).toEqual([ids.up1, ids.up2].sort())
-    const again = await request(app).get(`${base}/uploads`).set(MGR_AUTH)
-    expect(again.body.data.find((u) => u.id === mgrUpload)).toMatchObject({ taskCount: 2, upcomingCount: 0, visitedCount: 1 })
+    expect(left.map((t) => t.id).sort()).toEqual(Object.values(ids).sort())
   })
 
-  it("a team leader removes their own upload; buildings stay assigned", async () => {
-    const res = await request(app).delete(`${base}/uploads/${tlUpload}`).set(auth(TL, 'TEAM_LEADER'))
+  it('a team leader\'s upload, never visited, is deleted whole and audited; buildings stay assigned', async () => {
+    const before = await prisma.visitTask.findMany({ where: { uploadId: tlUpload } })
+    const res = await request(app).delete(`${base}/uploads/${tlUpload}`).set(ADM_AUTH)
     expect(res.status).toBe(200)
-    expect(res.body.data).toEqual({ removed: 2, kept: 0 })
+    expect(res.body.data).toEqual({ removed: 2 })
+    expect(await prisma.taskUpload.findUnique({ where: { id: tlUpload } })).toBeNull()
+    const log = await logOf({ userId: ADM, action: 'RemoveTaskUpload', recordId: tlUpload })
+    expect(log.newValue.taskIds.sort()).toEqual(before.map((t) => t.id).sort())
     expect((await prisma.buildingAssignment.findFirst({ where: { buildingId: B8, status: 'ACTIVE' } }))?.assignedToId).toBe(SE5)
   })
 })
