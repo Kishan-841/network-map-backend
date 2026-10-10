@@ -26,6 +26,7 @@ describe('zone manager runs their own surveyors', () => {
     const sIds = surveyors.map((u) => u.id)
     const mIds = [m1, m2, admin].filter(Boolean).map((u) => u.id)
     await prisma.systemLog.deleteMany({ where: { userId: { in: [...sIds, ...mIds] } } })
+    await prisma.user.updateMany({ where: { id: { in: [...sIds, ...mIds] } }, data: { managerId: null, teamLeaderId: null } })
     await prisma.user.deleteMany({ where: { id: { in: sIds } } })
     await prisma.user.deleteMany({ where: { id: { in: mIds } } })
     await prisma.zone.deleteMany({ where: { id: { in: [zoneA, zoneB, zoneC].filter(Boolean).map((z) => z.id) } } })
@@ -106,6 +107,60 @@ describe('zone manager runs their own surveyors', () => {
     const bad = await send('patch', admin, `/api/v1/users/${t1.id}`, { managerId: admin.id })
     expect(bad.status).toBe(400)
     expect(bad.body.error.message).toBe('Reports to must be a manager')
+  })
+
+  // Fix round 1: an ADMIN role change that does not send managerId must not
+  // trip over the inherited link — it is kept if it fits the new role,
+  // cleared if not (never a 400).
+  describe('admin role change with no managerId sent', () => {
+    let sm, tl, se
+    const mk = (tag, data) => prisma.user.create({ data: { name: tag, email: `zmt-${tag}-${stamp}@test.local`, passwordHash: 'x', ...data } })
+    beforeAll(async () => {
+      sm = await mk('sm', { role: 'SALES_MANAGER' })
+      tl = await mk('tl', { role: 'TEAM_LEADER', managerId: sm.id })
+    })
+    afterAll(async () => {
+      // Remove the links to sm before the outer cleanup deletes everyone.
+      await prisma.user.updateMany({ where: { email: { endsWith: `-${stamp}@test.local` } }, data: { managerId: null, teamLeaderId: null } })
+    })
+
+    it('SALES_EXECUTIVE → SURVEYOR clears the sales links', async () => {
+      se = await mk('se1', { role: 'SALES_EXECUTIVE', managerId: sm.id, teamLeaderId: tl.id })
+      const res = await send('patch', admin, `/api/v1/users/${se.id}`, { role: 'SURVEYOR' })
+      expect(res.status).toBe(200)
+      expect(res.body.data.managerId).toBeNull()
+      expect(res.body.data.teamLeaderId).toBeNull()
+    })
+
+    it('TEAM_LEADER → SURVEYOR clears the sales manager', async () => {
+      const tl2 = await mk('tl2', { role: 'TEAM_LEADER', managerId: sm.id })
+      const res = await send('patch', admin, `/api/v1/users/${tl2.id}`, { role: 'SURVEYOR' })
+      expect(res.status).toBe(200)
+      expect(res.body.data.managerId).toBeNull()
+    })
+
+    it('SURVEYOR (with a MANAGER) → SALES_EXECUTIVE clears the coverage manager', async () => {
+      const s2 = await mk('s2', { role: 'SURVEYOR', managerId: m1.id })
+      const res = await send('patch', admin, `/api/v1/users/${s2.id}`, { role: 'SALES_EXECUTIVE' })
+      expect(res.status).toBe(200)
+      expect(res.body.data.managerId).toBeNull()
+      expect(res.body.data.teamLeaderId).toBeNull()
+    })
+
+    it('SALES_EXECUTIVE → TEAM_LEADER keeps a valid sales manager', async () => {
+      const se2 = await mk('se2', { role: 'SALES_EXECUTIVE', managerId: sm.id, teamLeaderId: tl.id })
+      const res = await send('patch', admin, `/api/v1/users/${se2.id}`, { role: 'TEAM_LEADER' })
+      expect(res.status).toBe(200)
+      expect(res.body.data.managerId).toBe(sm.id)
+      expect(res.body.data.teamLeaderId).toBeNull()
+    })
+
+    it('a managerId the caller sends is still validated strictly', async () => {
+      const se3 = await mk('se3', { role: 'SALES_EXECUTIVE', managerId: sm.id })
+      const res = await send('patch', admin, `/api/v1/users/${se3.id}`, { role: 'SURVEYOR', managerId: sm.id })
+      expect(res.status).toBe(400)
+      expect(res.body.error.message).toBe('Reports to must be a manager')
+    })
   })
 
   it('demoting a manager clears their surveyors\' reports-to', async () => {

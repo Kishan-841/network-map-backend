@@ -86,6 +86,21 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
     return out
   }
 
+  // The role a user's managerId must point at, per role (none → no manager).
+  const MANAGER_ROLE_FOR = {
+    SURVEYOR: 'MANAGER',
+    TEAM_LEADER: 'SALES_MANAGER',
+    SALES_EXECUTIVE: 'SALES_MANAGER',
+  }
+  // A stored link carried across a role change: kept only when it points at
+  // the role the new role reports to, otherwise null (never a 400 — the
+  // caller did not send it).
+  async function inheritedLink(id, expectedRole) {
+    if (!id || !expectedRole) return null
+    const u = await userRepository.findById(id)
+    return u?.role === expectedRole ? id : null
+  }
+
   // zoneIds -> Prisma relation op, or undefined when not applicable
   // (assignments are stored only for surveyors and team leaders).
   async function zoneAssignment(zoneIds, role, op) {
@@ -393,13 +408,25 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
 
       // Reporting links: recompute (and sanitise) when they are sent or the role
       // changes; otherwise leave them as-is. A move to a role without links
-      // clears them.
+      // clears them. A link the caller sent is validated strictly; a link only
+      // inherited across a role change is kept if it fits the new role and
+      // quietly dropped if not (spec 2026-10-10: "changing a user's role clears
+      // a managerId that no longer fits") — e.g. SALES_EXECUTIVE → SURVEYOR.
       const roleChanged = data.role && data.role !== current.role
       if (managerId !== undefined || teamLeaderId !== undefined || roleChanged) {
+        const nextRole = data.role ?? current.role
         const h = await reportingLinks(
-          data.role ?? current.role,
-          managerId !== undefined ? managerId : current.managerId,
-          teamLeaderId !== undefined ? teamLeaderId : current.teamLeaderId,
+          nextRole,
+          managerId !== undefined
+            ? managerId
+            : roleChanged
+              ? await inheritedLink(current.managerId, MANAGER_ROLE_FOR[nextRole])
+              : current.managerId,
+          teamLeaderId !== undefined
+            ? teamLeaderId
+            : roleChanged
+              ? await inheritedLink(current.teamLeaderId, nextRole === 'SALES_EXECUTIVE' ? 'TEAM_LEADER' : undefined)
+              : current.teamLeaderId,
         )
         data.managerId = h.managerId
         data.teamLeaderId = h.teamLeaderId
