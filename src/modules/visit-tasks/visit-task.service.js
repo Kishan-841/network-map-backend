@@ -768,23 +768,47 @@ export function createVisitTaskService({ repo, scope }) {
     },
 
     /**
-     * Undo an upload: delete its tasks that are unvisited AND dated today or
-     * later, for people the actor plans for. Visited and past (missed) tasks
-     * stay as history; buildings stay assigned. Not visible → 404.
+     * One upload's tasks for the Uploads panel — who, where, when and
+     * VISITED / MISSED / UPCOMING — for people the actor plans for. Not visible → 404.
      */
-    async removeUpload(id, actor, now = new Date()) {
+    async uploadTaskList(id, actor, now = new Date()) {
       if (!scope.isPlanner(actor.role)) throw ApiError.forbidden()
       const readable = await scope.readableUserIds(actor)
       const upload = await repo.findUpload(id)
       if (!upload || (readable !== null && !readable.includes(upload.uploadedById))) throw ApiError.notFound('Upload not found')
-      const tasks = await repo.uploadTasks([id])
-      const today = istToday(now)
       const mine = actor.role === 'ADMIN' ? null : new Set((await scope.assignees(actor)).map((u) => u.id))
-      const upcoming = tasks.filter((t) => dayOf(t.taskDate) >= today && (!mine || mine.has(t.assigneeId)))
-      const visited = await visitedIds(upcoming, now)
-      const gone = upcoming.filter((t) => !visited.has(t.id))
-      const removed = gone.length ? await repo.deleteTasksChecked(gone.map((t) => ({ id: t.id, updatedAt: t.updatedAt }))) : 0
-      return withAudit({ removed, kept: tasks.length - removed }, { taskIds: gone.map((t) => t.id) })
+      const tasks = (await repo.uploadTaskList(id)).filter((t) => !mine || mine.has(t.assigneeId))
+      const visited = await visitedIds(tasks, now)
+      const today = istToday(now)
+      return tasks.map((t) => ({
+        id: t.id,
+        assignee: t.assignee,
+        building: t.building,
+        taskDate: dayOf(t.taskDate),
+        startTime: t.startTime,
+        endTime: t.endTime,
+        status: visited.has(t.id) ? 'VISITED' : dayOf(t.taskDate) < today ? 'MISSED' : 'UPCOMING',
+      }))
+    },
+
+    /**
+     * Delete an upload (ADMIN only): every one of its tasks, past ones too, and
+     * the upload itself. Refused (409) once any of its tasks has a visit — then
+     * the sales team has worked it. Buildings stay assigned.
+     */
+    async removeUpload(id, actor, now = new Date()) {
+      if (actor.role !== 'ADMIN') throw ApiError.forbidden()
+      const upload = await repo.findUpload(id)
+      if (!upload) throw ApiError.notFound('Upload not found')
+      const tasks = await repo.uploadTasks([id])
+      const visited = await visitedIds(tasks, now)
+      if (visited.size) {
+        throw ApiError.conflict(
+          `${visited.size} ${visited.size === 1 ? 'visit in this upload was' : 'visits in this upload were'} already done — it can't be deleted. Delete single visits instead.`,
+        )
+      }
+      const removed = await repo.deleteUploadChecked(id, tasks.map((t) => ({ id: t.id, updatedAt: t.updatedAt })))
+      return withAudit({ removed }, { taskIds: tasks.map((t) => t.id) })
     },
   }
 }
