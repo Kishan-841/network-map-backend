@@ -214,18 +214,22 @@ describe("a team leader reads their zones' network", () => {
     await prisma.pop.deleteMany({ where: { id: p1 } })
   })
 
-  it('sees fibres and POPs in their zones only', async () => {
-    const fibers = idsOf(await request(app).get('/api/v1/fibers').set(auth(U.tl)))
-    expect(fibers).toContain(f1)
-    expect(fibers).not.toContain(f2)
+  it('sees POPs in their zones only, and no fibres at all (403)', async () => {
     expect(idsOf(await request(app).get('/api/v1/pops').set(auth(U.tl)))).toContain(p1)
-    expect((await request(app).get(`/api/v1/fibers/${f2}`).set(auth(U.tl))).status).toBe(404)
+    expect((await request(app).get('/api/v1/fibers').set(auth(U.tl))).status).toBe(403)
+    expect((await request(app).get(`/api/v1/fibers/${f1}`).set(auth(U.tl))).status).toBe(403)
+    expect((await request(app).get('/api/v1/closures').set(auth(U.tl))).status).toBe(403)
+    expect((await request(app).get('/api/v1/splitters').set(auth(U.tl))).status).toBe(403)
   })
 
-  it('a TL with no zones sees no network at all', async () => {
-    await prisma.user.update({ where: { id: U.tl2 }, data: { assignedZones: { set: [] } } })
-    expect(idsOf(await request(app).get('/api/v1/fibers').set(auth(U.tl2)))).not.toContain(f1)
-    await prisma.user.update({ where: { id: U.tl2 }, data: { assignedZones: { set: [{ id: Z1 }] } } })
+  it("a POP's details list no fibres for a team leader", async () => {
+    await prisma.fiberPoint.create({ data: { fiberId: f1, sequence: 0, type: 'POP', latitude: 18.5, longitude: 73.8, popId: p1 } })
+    const res = await request(app).get(`/api/v1/pops/${p1}`).set(auth(U.tl))
+    expect(res.status).toBe(200)
+    expect(res.body.data.fibers).toEqual([])
+    // …while the same POP shows it to an admin, so the empty list is the TL rule.
+    const admin = await request(app).get(`/api/v1/pops/${p1}`).set(auth('test-admin'))
+    expect(admin.body.data.fibers.map((f) => f.id)).toContain(f1)
   })
 
   it('cannot write (403)', async () => {

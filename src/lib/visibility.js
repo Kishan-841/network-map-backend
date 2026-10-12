@@ -76,6 +76,8 @@ export function splitterScope(actor) {
 export function canSeeFiber(actor, fiber) {
   if (!fiber) return false
   if (isAdmin(actor)) return true
+  // A team leader sees their zones' POPs, never the fibres (owner's call, 12 Oct).
+  if (actor?.role === 'TEAM_LEADER') return false
   if (!actor?.id) return false
   if (fiber.createdById && fiber.createdById === actor.id) return true
   return Boolean(fiber.zoneId) && zonesOf(actor).includes(fiber.zoneId)
