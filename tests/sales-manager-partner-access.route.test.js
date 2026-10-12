@@ -138,3 +138,25 @@ describe('everyone else stays where they were', () => {
     }
   })
 })
+
+describe('one lead in full (GET /leads/:id)', () => {
+  it('a sales manager opens any lead with partner, history (with who) and calls', async () => {
+    const changed = await request(app).patch(`/api/v1/leads/${lB.id}/status`).set(as(tokSM)).send({ status: 'CONTACTED', note: 'rang them' })
+    expect(changed.status).toBe(200)
+    const res = await request(app).get(`/api/v1/leads/${lB.id}`).set(as(tokSM))
+    expect(res.status).toBe(200)
+    expect(res.body.data).toMatchObject({ id: lB.id, status: 'CONTACTED', partner: { id: pB.id, name: 'partner-b' }, calls: [] })
+    const last = res.body.data.events.at(-1)
+    expect(last).toMatchObject({ toStatus: 'CONTACTED', note: 'rang them', by: { name: 'sm' } })
+  })
+
+  it("a partner manager opens their own lead but gets 404 for another's", async () => {
+    expect((await request(app).get(`/api/v1/leads/${lA.id}`).set(as(tokPM))).status).toBe(200)
+    expect((await request(app).get(`/api/v1/leads/${lB.id}`).set(as(tokPM))).status).toBe(404)
+  })
+
+  it('the rest of the sales team stays out', async () => {
+    expect((await request(app).get(`/api/v1/leads/${lA.id}`).set(as(tokTL))).status).toBe(403)
+    expect((await request(app).get(`/api/v1/leads/${lA.id}`).set(as(tokSE))).status).toBe(403)
+  })
+})

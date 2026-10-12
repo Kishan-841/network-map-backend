@@ -57,6 +57,30 @@ export const leadRepository = {
         },
       },
     }),
+
+  /** One lead with everything the staff detail page shows; `where` carries the role scope. */
+  findForStaff: (where) =>
+    prisma.lead.findFirst({
+      where,
+      include: {
+        partner: { select: { id: true, name: true, type: true, mobile: true, status: true } },
+        employee: { select: { id: true, name: true } },
+        building: { select: { id: true, buildingName: true, formattedAddress: true } },
+        earning: { select: { amount: true, status: true, speedMbps: true, billingPeriod: true, earnedAt: true } },
+        events: { orderBy: { createdAt: 'asc' } },
+        calls: {
+          orderBy: { endedAt: 'desc' },
+          select: {
+            id: true, outcome: true, startedAt: true, endedAt: true, durationSeconds: true,
+            callbackAt: true, note: true,
+            by: { select: { id: true, name: true } },
+          },
+        },
+      },
+    }),
+
+  /** Names for the user ids on status events (the event has no relation). */
+  userNames: (ids) => prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }),
 }
 
 export const demandRepository = {

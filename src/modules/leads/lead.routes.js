@@ -23,6 +23,7 @@ import { notifier } from '../../lib/push/notifier.js'
 import { createLeadMilestones } from './lead-notify.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
 import { PARTNER_STAFF } from '../../lib/partner-access.js'
+import { ApiError } from '../../lib/api-error.js'
 
 const earningService = createEarningService({
   earningRepository,
@@ -220,6 +221,24 @@ staffLeadRoutes.get('/', async (req, res, next) => {
       ...(req.user.role === 'PARTNER_MANAGER' && { employeeId: req.user.id }),
     }
     res.json({ success: true, data: await leadRepository.listForStaff(where) })
+  } catch (err) {
+    next(err)
+  }
+})
+
+// One lead in full. Same scope as the list: a partner manager reaches only
+// their own partners' leads — anything else is 404, never 403.
+staffLeadRoutes.get('/:id', async (req, res, next) => {
+  try {
+    const lead = await leadRepository.findForStaff({
+      id: req.params.id,
+      ...(req.user.role === 'PARTNER_MANAGER' && { employeeId: req.user.id }),
+    })
+    if (!lead) throw ApiError.notFound('Lead not found')
+    const ids = [...new Set(lead.events.map((e) => e.byUserId).filter(Boolean))]
+    const names = new Map((ids.length ? await leadRepository.userNames(ids) : []).map((u) => [u.id, u.name]))
+    const events = lead.events.map((e) => ({ ...e, by: e.byUserId ? { id: e.byUserId, name: names.get(e.byUserId) ?? null } : null }))
+    res.json({ success: true, data: { ...lead, events } })
   } catch (err) {
     next(err)
   }
