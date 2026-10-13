@@ -632,7 +632,9 @@ export function createBuildingService({ buildingRepository, storage, userReposit
      */
     async listMarkers(filters = {}, actor) {
       const where = await buildListWhere(filters, actor)
-      return buildingRepository.listMarkers(where)
+      // Only the acquisition map's card needs contact/city/home passes.
+      const acquisition = ['ACQUISITION_AGENT', 'ACQUISITION_LEAD'].includes(actor?.role)
+      return buildingRepository.listMarkers(where, { acquisition })
     },
 
     async listBuildings(filters = {}, actor) {

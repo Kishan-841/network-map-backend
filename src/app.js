@@ -1,6 +1,7 @@
 import path from 'node:path'
 import express from 'express'
 import cors from 'cors'
+import compression from 'compression'
 import { buildCorsOrigin } from './lib/cors-origin.js'
 import { env } from './config/env.js'
 import { errorHandler } from './middleware/error-handler.js'
@@ -56,6 +57,10 @@ export function createApp() {
       exposedHeaders: ['Content-Disposition', 'X-Export-Rows', 'X-Export-Truncated'],
     }),
   )
+  // gzip responses: JSON like the map's marker list is very repetitive and
+  // shrinks 5–10×. Only bodies over 1 KB with a compressible type (not the
+  // already-zipped .xlsx exports) are compressed.
+  app.use(compression())
   // A visit-plan sheet is up to 3,000 rows of long names — more than 1 MB.
   // Parsed here first, so the global 1 MB parser below sees a consumed body
   // and skips it.

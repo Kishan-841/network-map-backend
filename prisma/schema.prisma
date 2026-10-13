@@ -421,6 +421,8 @@ model FiberSegment {
   cutAt           DateTime?
   cutNote         String?
   @@unique([fiberId, sequence])
+  @@index([fromPointId])
+  @@index([toPointId])
 }
 
 model Closure {
@@ -449,6 +451,7 @@ model Closure {
   updatedAt  DateTime  @updatedAt
   points     FiberPoint[]
   splitters  Splitter[]
+  @@index([buildingId])
 }
 
 model Splitter {
@@ -473,6 +476,7 @@ model Splitter {
   outputs      SplitterOutput[]
   points       FiberPoint[]
   @@index([inputFiberId])
+  @@index([closureId])
 }
 
 model SplitterOutput {
@@ -486,6 +490,7 @@ model SplitterOutput {
   toBuilding   Building? @relation(fields: [toBuildingId], references: [id], onDelete: SetNull)
   label        String?
   @@unique([splitterId, portNo])
+  @@index([toBuildingId])
 }
 
 model Building {
@@ -551,6 +556,9 @@ model Building {
   @@index([latitude, longitude])
   @@index([source, createdById])
   @@index([source, permissionApproval])
+  @@index([zoneId])
+  @@index([cityId])
+  @@index([createdAt])
 }
 
 /// A building handed to a sales user. The single ACTIVE row per building is its
@@ -790,6 +798,7 @@ model Photo {
   type       PhotoType
   url        String
   createdAt  DateTime  @default(now())
+  @@index([buildingId])
 }
 
 /// Append-only audit trail. User fields are denormalized snapshots (no FK)
@@ -1037,6 +1046,8 @@ model Lead {
   @@index([status])
   @@index([customerMobile])
   @@index([nextCallAt])
+  @@index([buildingId])
+  @@index([createdAt])
 }
 
 /// Every status change, with who and when. Commission may one day depend on
@@ -1351,6 +1362,8 @@ model VisitTask {
   @@index([assigneeId, taskDate])
   @@index([taskDate])
   @@index([seriesId, taskDate])
+  @@index([uploadId])
+  @@index([buildingId])
 }
 
 /// One plan import.

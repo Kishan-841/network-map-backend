@@ -78,9 +78,17 @@ const markerSelect = {
   createdAt: true,
   zone: { select: { id: true, name: true, operatorId: true } },
   cityId: true,
+}
+
+/**
+ * The acquisition map's card also shows the city, pincode, home passes and
+ * the contact person — only acquisition roles get these, so the coverage map
+ * (every other role, and an admin's whole registry) doesn't carry them.
+ */
+const acquisitionMarkerSelect = {
+  ...markerSelect,
   pincode: true,
   details: { select: { homePass: true, floors: true, wings: true } },
-  // The acquisition map's card shows the city and the contact person.
   city: { select: { id: true, name: true } },
   contact: {
     select: {
@@ -126,10 +134,10 @@ export const buildingRepository = {
    * page of results, it is the whole picture — a `take` here is exactly the
    * bug that capped it at 500.
    */
-  listMarkers: (where = {}) =>
+  listMarkers: (where = {}, { acquisition = false } = {}) =>
     prisma.building.findMany({
       where,
-      select: markerSelect,
+      select: acquisition ? acquisitionMarkerSelect : markerSelect,
       orderBy: { buildingName: 'asc' },
     }),
   count: (where = {}) => prisma.building.count({ where }),

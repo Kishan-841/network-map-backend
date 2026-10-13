@@ -25,11 +25,9 @@ const MARKER_KEYS = [
   'createdAt',
   'zone',
   'cityId',
-  'pincode',
-  'details',
-  'city',
-  'contact',
 ]
+// Only the acquisition map's card needs these, so only acquisition roles get them.
+const ACQUISITION_EXTRA_KEYS = ['pincode', 'details', 'city', 'contact']
 
 // The reported bug: /map drew 500 pins out of 1155 buildings, because it read
 // the paginated list endpoint. The markers feed has no page to fall off.
@@ -124,7 +122,22 @@ describe('GET /buildings/markers', () => {
     const marker = res.body.data.find((b) => b.id === ownBuilding.id)
     expect(Object.keys(marker).sort()).toEqual([...MARKER_KEYS].sort())
     expect(marker.zone).toEqual({ id: zone.id, name: zone.name, operatorId: zone.operatorId })
-    expect(marker.details).toEqual({ homePass: 42, floors: 7, wings: 2 })
+  })
+
+  it("gives an acquisition lead the card's extra fields, and nobody else", async () => {
+    const lead = await prisma.user.create({
+      data: { name: 'Markers Test Lead', email: `markers-lead-${stamp}@test.local`, passwordHash: 'x', role: 'ACQUISITION_LEAD' },
+    })
+    try {
+      const res = await request(createApp())
+        .get('/api/v1/buildings/markers')
+        .set('Authorization', `Bearer ${tokenFor(lead)}`)
+      const marker = res.body.data.find((b) => b.id === acquisitionBuilding.id)
+      expect(Object.keys(marker).sort()).toEqual([...MARKER_KEYS, ...ACQUISITION_EXTRA_KEYS].sort())
+      expect(marker.pincode).toBe('411045')
+    } finally {
+      await prisma.user.delete({ where: { id: lead.id } })
+    }
   })
 
   it('shows a zoneless surveyor only their own buildings', async () => {

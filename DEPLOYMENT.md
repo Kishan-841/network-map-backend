@@ -147,7 +147,7 @@ Point `DATABASE_URL` at your managed database. The container runs
 
 **Data & files**
 - [ ] Database is a managed/persistent instance (or the `db-data` volume is
-      backed up). Take regular backups.
+      backed up). Take regular backups — see BACKUPS.md.
 - [ ] Uploads volume (`/app/uploads`) is persistent and backed up — or switch
       `STORAGE_DRIVER` to S3/R2 (the StorageProvider abstraction is ready).
 
