@@ -49,6 +49,28 @@ export function shapeFiber(fiber, extras = {}) {
   }
 }
 
+/**
+ * A fiber as the LIST sends it: what the map, the fiber table and the editor's
+ * opening state read — nothing more. The list carries every fiber with every
+ * point, and its feed info, OLT, creator, totals and segment metres were 2/3
+ * of a 4 MB response that is refetched after every save. `GET /fibers/:id`
+ * still returns the fiber in full.
+ */
+export function listFiber({ totals, fedBy, olt, createdBy, points, segments, ...fiber }) {
+  return {
+    ...fiber,
+    points: points.map(({ fiberId, pop, building, closure, ...point }) => ({
+      // Empty references are left out, not sent as null: a plain waypoint
+      // carried ten `"…":null` keys, a third of the response. Every reader
+      // treats a missing key like null (`?.`, `??`, truthiness).
+      ...Object.fromEntries(Object.entries(point).filter(([, value]) => value !== null)),
+      // The editor's opening state keeps a closure's notes (draft.js).
+      ...(closure ? { closure: { notes: closure.notes ?? null } } : {}),
+    })),
+    segments: segments.map(({ id, sequence, fromPointId, toPointId, isCut }) => ({ id, sequence, fromPointId, toPointId, isCut })),
+  }
+}
+
 export function createFiberService(deps) {
   const { fiberRepository, closureRepository, popRepository, buildingRepository, zoneRepository, userRepository, storage, sequences, prisma } = deps
 
@@ -318,7 +340,7 @@ export function createFiberService(deps) {
     getFiber,
 
     async listFibers(actor) {
-      return Promise.all((await fiberRepository.list(zoneScope(actor))).map(async (f) => shapeFiber(await signImages(f))))
+      return Promise.all((await fiberRepository.list(zoneScope(actor))).map(async (f) => listFiber(shapeFiber(await signImages(f)))))
     },
 
     async createFiber(data, actor) {

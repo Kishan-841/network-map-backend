@@ -105,6 +105,16 @@ describe('closures API', () => {
       expect(closureGet.body.data.splitters[0].fiberType).toBe('SUB')
       expect(closureGet.body.data.splitters[0].location).toBe('S2')
 
+      // The LIST carries only what list readers use (13 Oct): splitter ratios,
+      // building id + name, the point count — outputs/creator come from /:id.
+      const list = await request(app).get('/api/v1/closures').set(...auth)
+      const item = list.body.data.find((c) => c.id === closureId)
+      expect(item.splitters).toEqual([{ id: splitterId, ratio: 'R1_4' }])
+      expect(item).not.toHaveProperty('createdBy')
+      expect(item).toMatchObject({ code: closureGet.body.data.code, latitude: 18.5, longitude: 73.8, kind: 'pole' })
+      expect(item._count).toBeDefined()
+      expect(closureGet.body.data.createdBy).toBeDefined()
+
       expect(
         (
           await request(app)

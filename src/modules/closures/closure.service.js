@@ -71,7 +71,20 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
   }
 
   return {
-    listClosures: async (actor) => Promise.all((await closureRepository.list(closureScope(actor))).map(signImages)),
+    // The list carries what the closures table, its edit form and the editor's
+    // snap targets read; a closure's splitter outputs, creator and full
+    // building row come from GET /closures/:id.
+    listClosures: async (actor) =>
+      Promise.all(
+        (await closureRepository.list(closureScope(actor))).map(async (closure) => {
+          const { createdBy, building, splitters, ...rest } = await signImages(closure)
+          return {
+            ...rest,
+            building: building ? { id: building.id, buildingName: building.buildingName } : null,
+            splitters: (splitters ?? []).map(({ id, ratio }) => ({ id, ratio })),
+          }
+        }),
+      ),
 
     /** The Splitters page — every splitter in the reader's zones (or their own). */
     async listSplitters(actor) {
