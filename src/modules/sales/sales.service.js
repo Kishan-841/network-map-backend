@@ -83,10 +83,12 @@ export function createSalesService({ repo = salesRepository, storage = getStorag
      */
     async listMapBuildings(actor) {
       const ids = await scopeIdsFor(actor)
+      // A Set: this runs once per building in the registry.
+      const team = ids === null ? null : new Set(ids)
       const inScope = (b) =>
-        ids === null
+        team === null
           ? (b.salesAssignments?.length ?? 0) > 0
-          : (b.salesAssignments ?? []).some((a) => ids.includes(a.assignedToId))
+          : (b.salesAssignments ?? []).some((a) => team.has(a.assignedToId))
       if (actor.role === 'ADMIN' || actor.role === 'SALES_MANAGER') {
         const buildings = await repo.listAllBuildings()
         return buildings.map((b) => ({ ...b, assigned: inScope(b) }))
