@@ -6,6 +6,7 @@ const fullInclude = {
   city: { select: { id: true, name: true } },
   zone: true,
   details: true,
+  wings: { orderBy: { name: 'asc' } },
   permission: true,
   photos: true,
   createdBy: { select: { id: true, name: true } },
@@ -168,6 +169,32 @@ export const buildingRepository = {
     }),
   findById: (id) => prisma.building.findUnique({ where: { id }, include: fullInclude }),
   update: (id, data) => prisma.building.update({ where: { id }, data, include: fullInclude }),
+  /**
+   * Replace a building's wings with `wings` in one transaction: rows whose id
+   * is missing go, rows with an id are updated, rows without one are created.
+   * `derived` ({ isLive, homePass }) is written to the building when the set
+   * is complete (spec 2026-10-14). Kept wings first get a temporary unique
+   * name so a rename swap (A->B, B->A) cannot trip the case-insensitive
+   * unique index mid-way.
+   */
+  replaceWings: (buildingId, wings, actorId, derived) =>
+    prisma.$transaction(async (tx) => {
+      const keep = wings.filter((w) => w.id).map((w) => w.id)
+      await tx.buildingWing.deleteMany({ where: { buildingId, id: { notIn: keep } } })
+      for (const id of keep) {
+        await tx.buildingWing.update({ where: { id, buildingId }, data: { name: `__tmp_${id}` } })
+      }
+      for (const { id, ...data } of wings) {
+        if (id) await tx.buildingWing.update({ where: { id, buildingId }, data })
+        else await tx.buildingWing.create({ data: { ...data, buildingId, createdById: actorId ?? null } })
+      }
+      if (derived) {
+        await tx.building.update({
+          where: { id: buildingId },
+          data: { isLive: derived.isLive, details: { upsert: { create: { homePass: derived.homePass }, update: { homePass: derived.homePass } } } },
+        })
+      }
+    }),
   /**
    * Read-then-write under a row lock: `build(fresh)` gets the building as it
    * stands once locked and returns the update data (or throws to abort), so a

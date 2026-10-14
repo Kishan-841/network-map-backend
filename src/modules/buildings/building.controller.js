@@ -131,6 +131,14 @@ export const buildingController = {
     }
   },
 
+  async replaceWings(req, res, next) {
+    try {
+      res.json({ success: true, data: await buildingService.replaceWings(req.params.id, req.body.wings, req.user) })
+    } catch (err) {
+      next(err)
+    }
+  },
+
   async updateStatus(req, res, next) {
     try {
       const building = await buildingService.updateStatus(req.params.id, req.body, req.user)

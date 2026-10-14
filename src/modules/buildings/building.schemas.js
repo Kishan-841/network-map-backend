@@ -269,3 +269,18 @@ export const createBuildingSchema = z.object({
   // for every other role.
   remark: remarkSchema.optional(),
 })
+
+export const replaceWingsSchema = z.object({
+  wings: z
+    .array(
+      z.object({
+        id: z.string().min(1).optional(),
+        name: z.string().max(80),
+        latitude: z.number(),
+        longitude: z.number(),
+        homePass: z.number().int().min(0),
+        isLive: z.boolean(),
+      }),
+    )
+    .max(100),
+})

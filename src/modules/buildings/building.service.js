@@ -3,6 +3,7 @@ import { homePassTier, HOME_PASS_TIERS } from '../../lib/home-pass-tier.js'
 import { haversineMeters, boundingBox } from '../../lib/geo.js'
 import { isSimilarName } from '../../lib/name-similarity.js'
 import { PERMISSION_STATUSES } from './building.schemas.js'
+import { normaliseWings, wingSetErrors, isComplete, deriveTotals } from '../../lib/building-wings.js'
 import { diffPermissionEdit } from './permission-edit-diff.js'
 import { COVERAGE_REGISTRY, APPROVED_SOCIETY, VISIBLE_BUILDING, isVisibleBuilding } from '../../lib/building-source.js'
 import { readsByZone } from '../../lib/zone-scope-roles.js'
@@ -752,6 +753,42 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         data.permission = { upsert: { create: patch, update: patch } }
       }
       return signUrls(await buildingRepository.update(id, data))
+    },
+
+    /**
+     * Who may change a building's wings: whoever may edit the building —
+     * a society only by an ADMIN; a manager inside its read scope (else 404);
+     * a granted surveyor only on buildings they added.
+     */
+    async assertCanEditWings(existing, actor) {
+      if (existing.source === 'PERMISSION') {
+        if (actor?.role !== 'ADMIN') throw ApiError.forbidden('Only an admin edits a society')
+        return
+      }
+      if (actor?.role === 'MANAGER') {
+        const canRead = await readScope(actor)
+        if (!canRead(existing)) throw ApiError.notFound('Building not found')
+      }
+      if (actor?.role === 'SURVEYOR' && existing.createdById !== actor.id) {
+        throw ApiError.forbidden('You can only edit buildings you added')
+      }
+    },
+
+    /** Replace the building's wings; derive its totals when every wing is placed. */
+    async replaceWings(id, rawWings, actor) {
+      const existing = await buildingRepository.findById(id)
+      if (!existing) throw ApiError.notFound('Building not found')
+      await this.assertCanEditWings(existing, actor)
+      const wings = normaliseWings(rawWings)
+      const wingCount = existing.details?.wings ?? null
+      const errors = wingSetErrors(wings, wingCount)
+      if (errors.length) throw ApiError.badRequest(errors[0])
+      const known = new Set(existing.wings.map((w) => w.id))
+      if (wings.some((w) => w.id && !known.has(w.id))) throw ApiError.badRequest('A wing does not belong to this building')
+      const complete = isComplete(wings.length, wingCount)
+      await buildingRepository.replaceWings(id, wings, actor?.id, complete ? deriveTotals(wings) : null)
+      const saved = await buildingRepository.findById(id)
+      return { wings: saved.wings, complete, isLive: saved.isLive, homePass: saved.details?.homePass ?? null }
     },
 
     /**

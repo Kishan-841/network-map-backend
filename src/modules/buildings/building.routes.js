@@ -8,6 +8,7 @@ import {
   addPhotoSchema,
   updateStatusSchema,
   updateBuildingSchema,
+  replaceWingsSchema,
   bulkBuildingsSchema,
   bulkStatusSchema,
   bulkDeleteSchema,
@@ -119,6 +120,17 @@ buildingRoutes.patch(
   }),
   validateBody(updateBuildingSchema),
   buildingController.update,
+)
+// A building's wings, saved as one set (spec 2026-10-14). Same gate as editing it.
+buildingRoutes.put(
+  '/:id/wings',
+  requireBuildingEdit,
+  audit('Building', 'WingsUpdate', {
+    load: (req) => buildingRepository.findById(req.params.id),
+    describe: (req, old) => `Wings of '${old?.buildingName ?? req.params.id}' updated (${req.body?.wings?.length ?? 0})`,
+  }),
+  validateBody(replaceWingsSchema),
+  buildingController.replaceWings,
 )
 buildingRoutes.post(
   '/:id/photos',
