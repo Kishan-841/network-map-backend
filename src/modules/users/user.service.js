@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs'
+import { hashPasswords } from '../../lib/hash-pool.js'
 import { ApiError } from '../../lib/api-error.js'
 import { prisma } from '../../lib/prisma.js'
 import { toPublicUser } from '../auth/auth.service.js'
@@ -213,9 +214,7 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
         if (row.emailKey) wantEmails.add(row.emailKey)
         if (row.reportsToKey) wantEmails.add(row.reportsToKey)
       }
-      const foundExisting = await Promise.all(
-        [...wantEmails].map((e) => userRepository.findByEmailInsensitive(e)),
-      )
+      const foundExisting = await userRepository.findByEmailsInsensitive([...wantEmails])
       const existingByEmail = new Map()
       for (const u of foundExisting) if (u) existingByEmail.set(u.email.toLowerCase(), u)
 
@@ -245,43 +244,44 @@ export function createUserService({ userRepository, zoneRepository, cityReposito
         return { created: [], errors }
       }
 
-      // All valid — hash outside the transaction, then create in dependency
-      // order so a reference is always to an already-created (or existing) user.
-      const hashByEmail = new Map(
-        await Promise.all(norm.map(async (r) => [r.emailKey, await bcrypt.hash(r.password, BCRYPT_ROUNDS)])),
-      )
+      // All valid — hash outside the transaction, on worker threads: 500
+      // bcrypt hashes on the main thread froze the whole API for ~32 s.
+      const hashes = await hashPasswords(norm.map((r) => r.password), BCRYPT_ROUNDS)
+      const hashByEmail = new Map(norm.map((r, i) => [r.emailKey, hashes[i]]))
       // idByEmail: emailKey -> { id, managerId } for every referenceable user.
       const idByEmail = new Map()
       for (const [key, u] of existingByEmail) idByEmail.set(key, { id: u.id, managerId: u.managerId })
 
+      // One batch insert per level, in dependency order, so every reference is
+      // to a user that already exists (in the sheet's earlier level or before).
       const byRole = (role) => norm.filter((r) => r.role === role)
-      const created = await prisma.$transaction(async (tx) => {
-        const out = []
-        const make = async (row, managerId, teamLeaderId) => {
-          const u = await tx.user.create({
-            data: {
-              name: row.name,
-              email: row.email,
-              passwordHash: hashByEmail.get(row.emailKey),
-              role: row.role,
-              managerId,
-              teamLeaderId,
-            },
+      const created = await prisma.$transaction(
+        async (tx) => {
+          const out = []
+          const insert = async (rowsAtLevel, links) => {
+            if (!rowsAtLevel.length) return
+            const users = await tx.user.createManyAndReturn({
+              data: rowsAtLevel.map((row) => ({
+                name: row.name,
+                email: row.email,
+                passwordHash: hashByEmail.get(row.emailKey),
+                role: row.role,
+                ...links(row),
+              })),
+            })
+            for (const u of users) idByEmail.set(u.email.toLowerCase(), { id: u.id, managerId: u.managerId })
+            out.push(...users)
+          }
+          await insert(byRole('SALES_MANAGER'), () => ({ managerId: null, teamLeaderId: null }))
+          await insert(byRole('TEAM_LEADER'), (row) => ({ managerId: idByEmail.get(row.reportsToKey).id, teamLeaderId: null }))
+          await insert(byRole('SALES_EXECUTIVE'), (row) => {
+            const leader = idByEmail.get(row.reportsToKey)
+            return { managerId: leader.managerId ?? null, teamLeaderId: leader.id }
           })
-          idByEmail.set(row.emailKey, { id: u.id, managerId })
-          out.push(u)
-        }
-        for (const row of byRole('SALES_MANAGER')) await make(row, null, null)
-        for (const row of byRole('TEAM_LEADER')) {
-          const mgr = idByEmail.get(row.reportsToKey)
-          await make(row, mgr.id, null)
-        }
-        for (const row of byRole('SALES_EXECUTIVE')) {
-          const leader = idByEmail.get(row.reportsToKey)
-          await make(row, leader.managerId ?? null, leader.id)
-        }
-        return out
-      })
+          return out
+        },
+        { timeout: 30000 },
+      )
 
       return { created: created.map(toPublicUser), errors: [] }
     },

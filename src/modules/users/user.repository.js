@@ -8,6 +8,9 @@ export const userRepository = {
     } }),
   findByEmailInsensitive: (email) =>
     prisma.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' } } }),
+  /** Every user whose email is one of these, case-insensitive — one query for a whole sheet. */
+  findByEmailsInsensitive: (emails) =>
+    emails.length ? prisma.user.findMany({ where: { email: { in: emails, mode: 'insensitive' } } }) : Promise.resolve([]),
   findById: (id) =>
     prisma.user.findUnique({ where: { id }, include: {
       assignedZones: { select: { id: true, name: true } },

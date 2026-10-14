@@ -59,6 +59,15 @@ describe('POST /api/v1/users/bulk', () => {
     expect(byEmail[se].teamLeaderId).toBe(byEmail[tl].id)
     // The executive inherits its team leader's manager.
     expect(byEmail[se].managerId).toBe(byEmail[mgr].id)
+
+    // Passwords are hashed on worker threads — they must still log in.
+    const login = await request(createApp()).post('/api/v1/auth/login').send({ email: se, password: 'Passw0rd1' })
+    expect(login.status).toBe(200)
+  })
+
+  it('the repository has the batch email lookup the service calls', async () => {
+    const { userRepository } = await import('../src/modules/users/user.repository.js')
+    expect(typeof userRepository.findByEmailsInsensitive).toBe('function')
   })
 
   it('is all-or-nothing: one bad row creates nobody', async () => {
