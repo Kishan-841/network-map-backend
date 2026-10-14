@@ -700,9 +700,21 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         throw ApiError.badRequest(`${placed} wings are located — delete one first`)
       }
       const wingsComplete = isComplete(placed, details?.wings ?? existing.details?.wings ?? null)
-      if (wingsComplete && details) delete details.homePass
+      // Complete: home pass (and Live, unless this request sets it) are derived
+      // from the wings, never typed. Copy — never mutate the caller's object.
+      let derivedLive
+      if (wingsComplete) {
+        const totals = deriveTotals(existing.wings)
+        details = { ...(details ?? {}), homePass: totals.homePass }
+        if (building.isLive === undefined) derivedLive = totals.isLive
+      }
       if (existing.source === 'PERMISSION') {
-        const result = await updatePermissionBuilding(existing, { details, permission, contact, photos, remark, building }, actor)
+        const adminLive = actor?.role === 'ADMIN' && derivedLive !== undefined
+        const result = await updatePermissionBuilding(
+          existing,
+          { details, permission, contact, photos, remark, building: adminLive ? { ...building, isLive: derivedLive } : building },
+          actor,
+        )
         if (wingsComplete && building.isLive !== undefined) {
           await buildingRepository.setWingsLive([id], building.isLive)
         }
@@ -753,6 +765,7 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         if (!zone) throw ApiError.badRequest('Zone does not exist')
       }
       const data = { ...building }
+      if (derivedLive !== undefined && existing.isLive !== derivedLive) data.isLive = derivedLive
       // Older buildings may lack the child rows — upsert instead of update.
       if (details) data.details = { upsert: { create: details, update: details } }
       if (permission) {
@@ -819,8 +832,10 @@ export function createBuildingService({ buildingRepository, storage, userReposit
     async bulkSetLive({ ids, filter, isLive }, actor) {
       const scope = await buildListWhere(filter ?? {}, actor)
       const where = ids ? { AND: [scope, { id: { in: ids } }] } : scope
+      // Resolve ids FIRST: a filter on isLive stops matching once it is updated.
+      const matched = await buildingRepository.idsWhere(where)
       const { count } = await buildingRepository.updateMany(where, { isLive })
-      await buildingRepository.setWingsLive(await buildingRepository.idsWhere(where), isLive)
+      await buildingRepository.setWingsLive(matched, isLive)
       return { count, isLive }
     },
 

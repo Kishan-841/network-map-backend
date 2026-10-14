@@ -5,6 +5,8 @@ import jwt from 'jsonwebtoken'
 import { createApp } from '../src/app.js'
 import { env } from '../src/config/env.js'
 import { prisma } from '../src/lib/prisma.js'
+import { createBuildingService } from '../src/modules/buildings/building.service.js'
+import { buildingRepository } from '../src/modules/buildings/building.repository.js'
 
 const app = createApp()
 const S = `bwl-${Date.now()}`
@@ -47,7 +49,7 @@ describe('building edits with wings', () => {
     expect(res.status).toBe(200)
     const row = await prisma.buildingDetails.findUnique({ where: { buildingId: complete.id } })
     expect(row.floors).toBe(4)
-    expect(row.homePass).not.toBe(999)
+    expect(row.homePass).toBe(20)
   })
 
   it('the single Live toggle cascades to a complete building\'s wings only', async () => {
@@ -58,8 +60,10 @@ describe('building edits with wings', () => {
   })
 
   it('bulk Live cascades to complete buildings only', async () => {
+    await prisma.buildingWing.updateMany({ where: { buildingId: { in: [complete.id, partial.id] } }, data: { isLive: true } })
     const res = await request(app).patch('/api/v1/buildings/bulk-status').set(auth).send({ ids: [complete.id, partial.id], isLive: false })
     expect(res.status).toBe(200)
+    expect((await wingsOf(partial.id)).every((w) => w.isLive)).toBe(true)
     expect((await wingsOf(complete.id)).every((w) => !w.isLive)).toBe(true)
   })
 
@@ -85,6 +89,29 @@ describe('building edits with wings', () => {
     expect(res.status).toBe(200)
     const row = await prisma.buildingDetails.findUnique({ where: { buildingId: society.id } })
     expect(row.floors).toBe(5)
-    expect(row.homePass).not.toBe(777)
+    expect(row.homePass).toBe(20)
+  })
+
+  it('a filter that includes isLive still cascades (ids resolved before the update)', async () => {
+    await prisma.building.updateMany({ where: { id: { in: [complete.id, partial.id] } }, data: { isLive: false } })
+    await prisma.buildingWing.updateMany({ where: { buildingId: { in: [complete.id, partial.id] } }, data: { isLive: false } })
+    const service = createBuildingService({ buildingRepository })
+    await service.bulkSetLive({ filter: { zoneId: zone.id, isLive: false }, isLive: true }, { id: ADMIN, role: 'ADMIN' })
+    expect((await wingsOf(complete.id)).every((w) => w.isLive)).toBe(true)
+    expect((await wingsOf(partial.id)).every((w) => !w.isLive)).toBe(true)
+  })
+
+  it('lowering the count to the wings placed makes it complete and derives totals', async () => {
+    const b = await mk('Derive', 3, ['A', 'B'])
+    try {
+      await prisma.buildingWing.updateMany({ where: { buildingId: b.id, name: 'A' }, data: { isLive: true, homePass: 7 } })
+      const res = await request(app).patch(`/api/v1/buildings/${b.id}`).set(auth).send({ details: { wings: 2 } })
+      expect(res.status).toBe(200)
+      const row = await prisma.buildingDetails.findUnique({ where: { buildingId: b.id } })
+      expect(row.homePass).toBe(17)
+      expect((await prisma.building.findUnique({ where: { id: b.id } })).isLive).toBe(true)
+    } finally {
+      await prisma.building.delete({ where: { id: b.id } })
+    }
   })
 })
