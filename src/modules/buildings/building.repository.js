@@ -88,7 +88,7 @@ const markerSelect = {
  */
 const coverageMarkerSelect = {
   ...markerSelect,
-  details: { select: { wings: true } },
+  details: { select: { homePass: true, floors: true, wings: true } },
   wings: { select: { id: true, name: true, latitude: true, longitude: true, isLive: true }, orderBy: { name: 'asc' } },
 }
 

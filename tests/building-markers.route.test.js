@@ -124,7 +124,7 @@ describe('GET /buildings/markers', () => {
       .set('Authorization', `Bearer ${tokenFor(admin)}`)
     const marker = res.body.data.find((b) => b.id === ownBuilding.id)
     expect(Object.keys(marker).sort()).toEqual([...MARKER_KEYS, ...COVERAGE_EXTRA_KEYS].sort())
-    expect(marker.details).toEqual({ wings: 2 })
+    expect(marker.details).toEqual({ homePass: 42, floors: 7, wings: 2 })
     expect(marker.zone).toEqual({ id: zone.id, name: zone.name, operatorId: zone.operatorId })
   })
 

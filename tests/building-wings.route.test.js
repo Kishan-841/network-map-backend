@@ -152,7 +152,7 @@ describe('map lists carry wings', () => {
     const s = sales.body.data.find((b) => b.id === building.id)
     expect(s.wings.length).toBe(m.wings.length)
     // The wing count rides along so the pin is coloured from wings only when complete.
-    expect(m.details).toEqual({ wings: 3 })
+    expect(m.details).toEqual({ homePass: 22, floors: null, wings: 3 })
     expect(s.details).toEqual({ wings: 3 })
   })
 })
