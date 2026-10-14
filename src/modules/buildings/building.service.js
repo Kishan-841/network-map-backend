@@ -693,32 +693,34 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         if (!canRead(existing)) throw ApiError.notFound('Building not found')
       }
       // Wings (spec 2026-10-14): the wing count may not drop below the wings
-      // placed, and once every wing is placed home pass is theirs, not typed.
-      // Runs before the society branch so societies obey it too.
+      // placed (a cleared count, null, counts as 0), and once every wing is
+      // placed home pass and Live are theirs, not typed. Runs before the
+      // society branch so societies obey it too.
       const placed = existing.wings?.length ?? 0
-      if (details?.wings !== undefined && details.wings !== null && details.wings < placed) {
+      const setsWingCount = details != null && Object.hasOwn(details, 'wings')
+      if (setsWingCount && (details.wings ?? 0) < placed) {
         throw ApiError.badRequest(`${placed} wings are located — delete one first`)
       }
-      const wingsComplete = isComplete(placed, details?.wings ?? existing.details?.wings ?? null)
-      // Complete: home pass (and Live, unless this request sets it) are derived
-      // from the wings, never typed. Copy — never mutate the caller's object.
+      const wingsComplete = isComplete(placed, setsWingCount ? details.wings : (existing.details?.wings ?? null))
+      // Complete: the request's home pass AND Live are ignored — the derived
+      // values win (the single Live toggle and bulk Live are the ways to switch
+      // a complete building, and they cascade to its wings). Copy — never
+      // mutate the caller's object.
       let derivedLive
       if (wingsComplete) {
         const totals = deriveTotals(existing.wings)
         details = { ...(details ?? {}), homePass: totals.homePass }
-        if (building.isLive === undefined) derivedLive = totals.isLive
+        const { isLive: _ignored, ...rest } = building
+        building = rest
+        derivedLive = totals.isLive
       }
       if (existing.source === 'PERMISSION') {
         const adminLive = actor?.role === 'ADMIN' && derivedLive !== undefined
-        const result = await updatePermissionBuilding(
+        return updatePermissionBuilding(
           existing,
           { details, permission, contact, photos, remark, building: adminLive ? { ...building, isLive: derivedLive } : building },
           actor,
         )
-        if (wingsComplete && building.isLive !== undefined) {
-          await buildingRepository.setWingsLive([id], building.isLive)
-        }
-        return result
       }
       if (contact || photos) {
         throw ApiError.badRequest('Contact and photos are edited this way only on a society')
@@ -778,29 +780,36 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         }
         data.permission = { upsert: { create: patch, update: patch } }
       }
-      const updated = await buildingRepository.update(id, data)
-      if (wingsComplete && building.isLive !== undefined) {
-        await buildingRepository.setWingsLive([id], building.isLive)
-      }
-      return signUrls(updated)
+      return signUrls(await buildingRepository.update(id, data))
     },
 
     /**
      * Who may change a building's wings: whoever may edit the building —
-     * a society only by an ADMIN; a manager inside its read scope (else 404);
-     * a granted surveyor only on buildings they added.
+     * a society only by an ADMIN; otherwise an ADMIN or SUPERVISOR, a manager
+     * inside its read scope (else 404), a granted surveyor only on buildings
+     * they added. Every other role is refused (mirrors canEditBuilding).
      */
     async assertCanEditWings(existing, actor) {
       if (existing.source === 'PERMISSION') {
         if (actor?.role !== 'ADMIN') throw ApiError.forbidden('Only an admin edits a society')
         return
       }
-      if (actor?.role === 'MANAGER') {
-        const canRead = await readScope(actor)
-        if (!canRead(existing)) throw ApiError.notFound('Building not found')
-      }
-      if (actor?.role === 'SURVEYOR' && existing.createdById !== actor.id) {
-        throw ApiError.forbidden('You can only edit buildings you added')
+      switch (actor?.role) {
+        case 'ADMIN':
+        case 'SUPERVISOR':
+          return
+        case 'MANAGER': {
+          const canRead = await readScope(actor)
+          if (!canRead(existing)) throw ApiError.notFound('Building not found')
+          return
+        }
+        case 'SURVEYOR':
+          // The route already required the edit grant; this is the row half.
+          if (existing.createdById !== actor.id) throw ApiError.forbidden('You can only edit buildings you added')
+          return
+        default:
+          // e.g. a Permission Executive or acquisition role: not their building to edit.
+          throw ApiError.forbidden('You cannot edit this building\'s wings')
       }
     },
 
@@ -809,7 +818,14 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       const existing = await buildingRepository.findById(id)
       if (!existing) throw ApiError.notFound('Building not found')
       await this.assertCanEditWings(existing, actor)
-      const wings = normaliseWings(rawWings)
+      let wings = normaliseWings(rawWings)
+      // Only admins or managers mark a building live — a surveyor cannot do it
+      // through its wings either: existing wings keep their Live, new ones start
+      // not live (no error, so the rest of the save goes through).
+      if (actor?.role === 'SURVEYOR') {
+        const liveById = new Map((existing.wings ?? []).map((w) => [w.id, w.isLive]))
+        wings = wings.map((w) => ({ ...w, isLive: w.id ? (liveById.get(w.id) ?? false) : false }))
+      }
       const wingCount = existing.details?.wings ?? null
       const errors = wingSetErrors(wings, wingCount)
       if (errors.length) throw ApiError.badRequest(errors[0])

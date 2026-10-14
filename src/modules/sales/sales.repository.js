@@ -17,7 +17,9 @@ const buildingCard = {
   surveyStatus: true,
   // An approved society (source PERMISSION) gets its own marker on the sales map.
   source: true,
-  // Placed wings (spec 2026-10-14): the map expands a building into these.
+  // Placed wings + the wing count (spec 2026-10-14): the map expands a
+  // building into its wings and colours it from them once all are placed.
+  details: { select: { wings: true } },
   wings: { select: { id: true, name: true, latitude: true, longitude: true, isLive: true }, orderBy: { name: 'asc' } },
   salesAssignments: {
     where: { status: 'ACTIVE' },

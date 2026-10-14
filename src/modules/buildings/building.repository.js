@@ -79,7 +79,16 @@ const markerSelect = {
   createdAt: true,
   zone: { select: { id: true, name: true, operatorId: true } },
   cityId: true,
-  // Placed wings (spec 2026-10-14): the map expands a building into these.
+}
+
+/**
+ * The coverage map also expands a building into its placed wings and colours
+ * it from them once complete (spec 2026-10-14) — so it needs the wing COUNT
+ * (details.wings) too. The acquisition map is out of scope for wings.
+ */
+const coverageMarkerSelect = {
+  ...markerSelect,
+  details: { select: { wings: true } },
   wings: { select: { id: true, name: true, latitude: true, longitude: true, isLive: true }, orderBy: { name: 'asc' } },
 }
 
@@ -140,7 +149,7 @@ export const buildingRepository = {
   listMarkers: (where = {}, { acquisition = false } = {}) =>
     prisma.building.findMany({
       where,
-      select: acquisition ? acquisitionMarkerSelect : markerSelect,
+      select: acquisition ? acquisitionMarkerSelect : coverageMarkerSelect,
       orderBy: { buildingName: 'asc' },
     }),
   count: (where = {}) => prisma.building.count({ where }),

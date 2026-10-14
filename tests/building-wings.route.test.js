@@ -9,7 +9,7 @@ import { buildingRepository } from '../src/modules/buildings/building.repository
 const app = createApp()
 const S = `bw-${Date.now()}`
 const auth = (id, role) => ({ Authorization: `Bearer ${jwt.sign({ sub: id, role }, env.jwtSecret, { audience: 'staff', expiresIn: '1h' })}` })
-const IDS = { admin: `${S}-admin`, surveyor: `${S}-sv`, other: `${S}-sv2` }
+const IDS = { admin: `${S}-admin`, surveyor: `${S}-sv`, other: `${S}-sv2`, pe: `${S}-pe` }
 let zone, building, society
 const wing = (o) => ({ name: 'A', latitude: 18.5, longitude: 73.8, homePass: 10, isLive: false, ...o })
 const put = (id, wings, who = IDS.admin, role = 'ADMIN') => request(app).put(`/api/v1/buildings/${id}/wings`).set(auth(who, role)).send({ wings })
@@ -19,6 +19,7 @@ beforeAll(async () => {
   await prisma.user.create({ data: { id: IDS.admin, name: 'A', email: `${IDS.admin}@t.local`, passwordHash: 'x', role: 'ADMIN' } })
   await prisma.user.create({ data: { id: IDS.surveyor, name: 'S', email: `${IDS.surveyor}@t.local`, passwordHash: 'x', role: 'SURVEYOR', canEditBuildings: true } })
   await prisma.user.create({ data: { id: IDS.other, name: 'O', email: `${IDS.other}@t.local`, passwordHash: 'x', role: 'SURVEYOR', canEditBuildings: true } })
+  await prisma.user.create({ data: { id: IDS.pe, name: 'P', email: `${IDS.pe}@t.local`, passwordHash: 'x', role: 'PERMISSION_EXECUTIVE' } })
   building = await prisma.building.create({
     data: { buildingName: `${S} Tower`, formattedAddress: 'x', latitude: 18.5, longitude: 73.8, zoneId: zone.id, createdById: IDS.surveyor, isLive: false,
       details: { create: { wings: 3, homePass: 99 } } },
@@ -72,6 +73,40 @@ describe('PUT /buildings/:id/wings', () => {
     expect((await put(building.id, current, IDS.other, 'SURVEYOR')).status).toBe(403)
   })
 
+  it('a Permission Executive cannot place wings on a coverage building', async () => {
+    const before = await prisma.buildingWing.count({ where: { buildingId: building.id } })
+    expect((await put(building.id, [wing({ name: 'Z' })], IDS.pe, 'PERMISSION_EXECUTIVE')).status).toBe(403)
+    expect(await prisma.buildingWing.count({ where: { buildingId: building.id } })).toBe(before)
+  })
+
+  it('a surveyor cannot change Live through wings: existing wings keep theirs, new ones start not live', async () => {
+    const mkB = await prisma.building.create({
+      data: { buildingName: `${S} SvLive`, formattedAddress: 'x', latitude: 18.5, longitude: 73.8, zoneId: zone.id, createdById: IDS.surveyor, isLive: false,
+        details: { create: { wings: 2 } }, wings: { create: [{ name: 'A', latitude: 18.5, longitude: 73.8, homePass: 1, isLive: false }] } },
+    })
+    try {
+      const [a] = await prisma.buildingWing.findMany({ where: { buildingId: mkB.id } })
+      const res = await put(mkB.id, [
+        { id: a.id, name: 'A', latitude: 18.5, longitude: 73.8, homePass: 3, isLive: true },
+        wing({ name: 'B', homePass: 4, isLive: true }),
+      ], IDS.surveyor, 'SURVEYOR')
+      expect(res.status).toBe(200)
+      const rows = await prisma.buildingWing.findMany({ where: { buildingId: mkB.id }, orderBy: { name: 'asc' } })
+      expect(rows.map((w) => [w.name, w.isLive, w.homePass])).toEqual([['A', false, 3], ['B', false, 4]])
+      // Complete now — but the surveyor did not raise the building's Live.
+      const row = await prisma.building.findUnique({ where: { id: mkB.id }, include: { details: true } })
+      expect(row.isLive).toBe(false)
+      expect(row.details.homePass).toBe(7)
+      // A live wing set by an admin stays live through a surveyor's save.
+      await prisma.buildingWing.update({ where: { id: a.id }, data: { isLive: true } })
+      const again = await put(mkB.id, rows.map((w) => ({ id: w.id, name: w.name, latitude: w.latitude, longitude: w.longitude, homePass: w.homePass, isLive: false })), IDS.surveyor, 'SURVEYOR')
+      expect(again.status).toBe(200)
+      expect((await prisma.buildingWing.findUnique({ where: { id: a.id } })).isLive).toBe(true)
+    } finally {
+      await prisma.building.delete({ where: { id: mkB.id } })
+    }
+  })
+
   it('only an admin changes a society building\'s wings', async () => {
     expect((await put(society.id, [wing()], IDS.surveyor, 'SURVEYOR')).status).toBe(403)
     expect((await put(society.id, [wing()])).status).toBe(200)
@@ -114,6 +149,10 @@ describe('map lists carry wings', () => {
     expect(m.wings.length).toBeGreaterThan(0)
     expect(Object.keys(m.wings[0]).sort()).toEqual(['id', 'isLive', 'latitude', 'longitude', 'name'])
     const sales = await request(app).get('/api/v1/sales/map-buildings').set(auth(IDS.admin, 'ADMIN'))
-    expect(sales.body.data.find((b) => b.id === building.id).wings.length).toBe(m.wings.length)
+    const s = sales.body.data.find((b) => b.id === building.id)
+    expect(s.wings.length).toBe(m.wings.length)
+    // The wing count rides along so the pin is coloured from wings only when complete.
+    expect(m.details).toEqual({ wings: 3 })
+    expect(s.details).toEqual({ wings: 3 })
   })
 })

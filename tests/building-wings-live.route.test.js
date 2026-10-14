@@ -67,9 +67,38 @@ describe('building edits with wings', () => {
     expect((await wingsOf(complete.id)).every((w) => !w.isLive)).toBe(true)
   })
 
-  it('the edit-form Live switch cascades too', async () => {
-    await request(app).patch(`/api/v1/buildings/${complete.id}`).set(auth).send({ isLive: true })
-    expect((await wingsOf(complete.id)).every((w) => w.isLive)).toBe(true)
+  it('the edit form cannot switch a complete building: isLive is ignored, the wings decide', async () => {
+    // Mixed wings: A live, B not — so the derived Live is true.
+    await prisma.buildingWing.updateMany({ where: { buildingId: complete.id }, data: { isLive: false } })
+    await prisma.buildingWing.updateMany({ where: { buildingId: complete.id, name: 'A' }, data: { isLive: true } })
+    await prisma.building.update({ where: { id: complete.id }, data: { isLive: true } })
+    const mixed = async () => (await wingsOf(complete.id)).map((w) => [w.name, w.isLive])
+
+    const on = await request(app).patch(`/api/v1/buildings/${complete.id}`).set(auth).send({ isLive: true, details: { floors: 5 } })
+    expect(on.status).toBe(200)
+    expect(await mixed()).toEqual([['A', true], ['B', false]])
+    expect((await prisma.building.findUnique({ where: { id: complete.id } })).isLive).toBe(true)
+    expect((await prisma.buildingDetails.findUnique({ where: { buildingId: complete.id } })).floors).toBe(5)
+
+    const off = await request(app).patch(`/api/v1/buildings/${complete.id}`).set(auth).send({ isLive: false, details: { floors: 6 } })
+    expect(off.status).toBe(200)
+    expect(await mixed()).toEqual([['A', true], ['B', false]])
+    expect((await prisma.building.findUnique({ where: { id: complete.id } })).isLive).toBe(true)
+    expect((await prisma.buildingDetails.findUnique({ where: { buildingId: complete.id } })).floors).toBe(6)
+  })
+
+  it('a cleared wing count (null) counts as 0 for the limit', async () => {
+    const res = await request(app).patch(`/api/v1/buildings/${complete.id}`).set(auth).send({ details: { wings: null } })
+    expect(res.status).toBe(400)
+    expect(res.body.error.message).toMatch(/2 wings are located/)
+    expect((await prisma.buildingDetails.findUnique({ where: { buildingId: complete.id } })).wings).toBe(2)
+  })
+
+  it('a complete society ignores isLive in the edit too', async () => {
+    const res = await request(app).patch(`/api/v1/buildings/${society.id}`).set(auth).send({ isLive: true, details: { floors: 9 }, remark: 'x' })
+    expect(res.status).toBe(200)
+    expect((await prisma.building.findUnique({ where: { id: society.id } })).isLive).toBe(false)
+    expect((await wingsOf(society.id)).every((w) => !w.isLive)).toBe(true)
   })
 
   it('deleting a building deletes its wings', async () => {
@@ -99,6 +128,18 @@ describe('building edits with wings', () => {
     await service.bulkSetLive({ filter: { zoneId: zone.id, isLive: false }, isLive: true }, { id: ADMIN, role: 'ADMIN' })
     expect((await wingsOf(complete.id)).every((w) => w.isLive)).toBe(true)
     expect((await wingsOf(partial.id)).every((w) => !w.isLive)).toBe(true)
+  })
+
+  it('an edit that makes the building complete derives Live from the wings, whatever the request says', async () => {
+    const b = await mk('DeriveLive', 3, ['A', 'B'])
+    try {
+      const res = await request(app).patch(`/api/v1/buildings/${b.id}`).set(auth).send({ details: { wings: 2 }, isLive: true })
+      expect(res.status).toBe(200)
+      expect((await prisma.building.findUnique({ where: { id: b.id } })).isLive).toBe(false)
+      expect((await wingsOf(b.id)).every((w) => !w.isLive)).toBe(true)
+    } finally {
+      await prisma.building.delete({ where: { id: b.id } })
+    }
   })
 
   it('lowering the count to the wings placed makes it complete and derives totals', async () => {

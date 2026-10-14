@@ -25,8 +25,10 @@ const MARKER_KEYS = [
   'createdAt',
   'zone',
   'cityId',
-  'wings',
 ]
+// The coverage map also expands buildings into their wings (spec 2026-10-14)
+// and needs the wing count for the pin colour — only details.wings, nothing else.
+const COVERAGE_EXTRA_KEYS = ['details', 'wings']
 // Only the acquisition map's card needs these, so only acquisition roles get them.
 const ACQUISITION_EXTRA_KEYS = ['pincode', 'details', 'city', 'contact']
 
@@ -121,7 +123,8 @@ describe('GET /buildings/markers', () => {
       .get('/api/v1/buildings/markers')
       .set('Authorization', `Bearer ${tokenFor(admin)}`)
     const marker = res.body.data.find((b) => b.id === ownBuilding.id)
-    expect(Object.keys(marker).sort()).toEqual([...MARKER_KEYS].sort())
+    expect(Object.keys(marker).sort()).toEqual([...MARKER_KEYS, ...COVERAGE_EXTRA_KEYS].sort())
+    expect(marker.details).toEqual({ wings: 2 })
     expect(marker.zone).toEqual({ id: zone.id, name: zone.name, operatorId: zone.operatorId })
   })
 

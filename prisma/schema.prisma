@@ -709,6 +709,9 @@ model BuildingDetails {
 /// One wing (tower) of a building, placed on the map (spec 2026-10-14).
 /// The building's wing COUNT is BuildingDetails.wings; once every wing is
 /// placed, Building.isLive and BuildingDetails.homePass are derived from these.
+/// Names are unique per building case-insensitively: a hand-written unique
+/// index on ("buildingId", lower("name")) lives in migration
+/// 20261014000000_building_wings — Prisma cannot express it here.
 model BuildingWing {
   id          String   @id @default(cuid())
   buildingId  String
