@@ -143,6 +143,24 @@ export const buildingRepository = {
     }),
   count: (where = {}) => prisma.building.count({ where }),
   updateMany: (where, data) => prisma.building.updateMany({ where, data }),
+
+  /** Ids matching a where (bulk actions need them to cascade to wings). */
+  idsWhere: (where) => prisma.building.findMany({ where, select: { id: true } }).then((rows) => rows.map((r) => r.id)),
+
+  /**
+   * Set every wing of these buildings live / not live — only buildings whose
+   * wings are COMPLETE (placed === details.wings); a partly located building's
+   * wings keep their own state (spec 2026-10-14).
+   */
+  setWingsLive: async (buildingIds, isLive) => {
+    if (!buildingIds.length) return 0
+    return prisma.$executeRaw`
+      UPDATE "BuildingWing" w SET "isLive" = ${isLive}, "updatedAt" = now()
+      FROM "BuildingDetails" d
+      WHERE w."buildingId" = d."buildingId"
+        AND w."buildingId" = ANY(${buildingIds})
+        AND d."wings" = (SELECT count(*) FROM "BuildingWing" x WHERE x."buildingId" = w."buildingId")`
+  },
   /**
    * Name/address lookup for the PARTNER portal. Coverage registry only, and a
    * deliberately narrow select — partner rows must never carry survey data.

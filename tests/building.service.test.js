@@ -125,6 +125,7 @@ describe('building service', () => {
 
   it('toggles isLive via updateStatus (including false)', async () => {
     const repo = fakeBuildingRepository([{ id: 'b1', isLive: false }])
+    repo.setWingsLive = async () => 0
     repo.update = async (id, data) => {
       const building = repo.buildings.find((b) => b.id === id)
       Object.assign(building, data)

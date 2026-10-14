@@ -13,6 +13,8 @@ const fakeUserRepo = (zones = []) => ({ assignedZoneIds: async () => zones })
 function fakeRepo() {
   return {
     updateMany: vi.fn(async () => ({ count: 3 })),
+    idsWhere: vi.fn(async () => []),
+    setWingsLive: vi.fn(async () => 0),
     list: vi.fn(async () => []),
     count: vi.fn(async () => 0),
   }

@@ -692,8 +692,21 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         const canRead = await readScope(actor)
         if (!canRead(existing)) throw ApiError.notFound('Building not found')
       }
+      // Wings (spec 2026-10-14): the wing count may not drop below the wings
+      // placed, and once every wing is placed home pass is theirs, not typed.
+      // Runs before the society branch so societies obey it too.
+      const placed = existing.wings?.length ?? 0
+      if (details?.wings !== undefined && details.wings !== null && details.wings < placed) {
+        throw ApiError.badRequest(`${placed} wings are located — delete one first`)
+      }
+      const wingsComplete = isComplete(placed, details?.wings ?? existing.details?.wings ?? null)
+      if (wingsComplete && details) delete details.homePass
       if (existing.source === 'PERMISSION') {
-        return updatePermissionBuilding(existing, { details, permission, contact, photos, remark, building }, actor)
+        const result = await updatePermissionBuilding(existing, { details, permission, contact, photos, remark, building }, actor)
+        if (wingsComplete && building.isLive !== undefined) {
+          await buildingRepository.setWingsLive([id], building.isLive)
+        }
+        return result
       }
       if (contact || photos) {
         throw ApiError.badRequest('Contact and photos are edited this way only on a society')
@@ -752,7 +765,11 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         }
         data.permission = { upsert: { create: patch, update: patch } }
       }
-      return signUrls(await buildingRepository.update(id, data))
+      const updated = await buildingRepository.update(id, data)
+      if (wingsComplete && building.isLive !== undefined) {
+        await buildingRepository.setWingsLive([id], building.isLive)
+      }
+      return signUrls(updated)
     },
 
     /**
@@ -803,6 +820,7 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       const scope = await buildListWhere(filter ?? {}, actor)
       const where = ids ? { AND: [scope, { id: { in: ids } }] } : scope
       const { count } = await buildingRepository.updateMany(where, { isLive })
+      await buildingRepository.setWingsLive(await buildingRepository.idsWhere(where), isLive)
       return { count, isLive }
     },
 
@@ -852,11 +870,13 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       // Out of the actor's read scope (a manager outside its zones) is a 404.
       const canRead = await readScope(actor)
       if (!canRead(building)) throw ApiError.notFound('Building not found')
-      return buildingRepository.update(id, {
+      const updated = await buildingRepository.update(id, {
         ...(feasibleStatus && { feasibleStatus }),
         ...(surveyStatus && { surveyStatus }),
         ...(isLive !== undefined && { isLive }),
       })
+      if (isLive !== undefined) await buildingRepository.setWingsLive([id], isLive)
+      return updated
     },
 
     async findNearby({ latitude, longitude, radiusMeters, name, placeId }, actor) {

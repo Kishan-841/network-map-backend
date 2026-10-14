@@ -47,6 +47,8 @@ function fakeRepo(buildings = [COVERAGE, ACQ]) {
     upsertPermissionDocument: vi.fn(async () => {}),
     create: vi.fn(async (d) => ({ id: 'new', ...d })),
     updateMany: vi.fn(async () => ({ count: 2 })),
+    idsWhere: vi.fn(async () => []),
+    setWingsLive: vi.fn(async () => 0),
   }
 }
 
