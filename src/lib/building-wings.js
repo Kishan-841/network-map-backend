@@ -6,12 +6,15 @@
  */
 export const WING_NAME_MAX = 40
 
+// Number(null) and Number('') are 0 — a blank location must stay invalid, not become 0,0.
+const toCoord = (v) => (v === null || v === undefined || String(v).trim() === '' ? NaN : Number(v))
+
 export function normaliseWings(wings = []) {
   return wings.map((wing) => ({
     ...(wing.id ? { id: wing.id } : {}),
     name: String(wing.name ?? '').trim(),
-    latitude: Number(wing.latitude),
-    longitude: Number(wing.longitude),
+    latitude: toCoord(wing.latitude),
+    longitude: toCoord(wing.longitude),
     homePass: Number(wing.homePass ?? 0),
     isLive: Boolean(wing.isLive),
   }))

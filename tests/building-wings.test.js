@@ -22,6 +22,15 @@ describe('building wing rules', () => {
     expect(wingSetErrors([w({ homePass: -1 })], 2)).toContain('Home pass must be a whole number, 0 or more')
     expect(wingSetErrors([w({ latitude: 91 })], 2)).toContain('Wing A has an invalid location')
   })
+  it('treats a blank or missing location as invalid, not 0,0', () => {
+    const [a] = normaliseWings([w({ latitude: null })])
+    const [b] = normaliseWings([w({ longitude: '' })])
+    expect(wingSetErrors([a], 2)).toContain('Wing A has an invalid location')
+    expect(wingSetErrors([b], 2)).toContain('Wing A has an invalid location')
+  })
+  it('refuses a non-integer home pass', () => {
+    expect(wingSetErrors([w({ homePass: 1.5 })], 2)).toContain('Home pass must be a whole number, 0 or more')
+  })
   it('an empty set is always valid (removes every wing)', () => {
     expect(wingSetErrors([], null)).toEqual([])
   })
