@@ -106,3 +106,14 @@ describe('PUT /buildings/:id/wings', () => {
     }
   })
 })
+
+describe('map lists carry wings', () => {
+  it('markers and sales map include a building\'s wings', async () => {
+    const markers = await request(app).get('/api/v1/buildings/markers').set(auth(IDS.admin, 'ADMIN'))
+    const m = markers.body.data.find((b) => b.id === building.id)
+    expect(m.wings.length).toBeGreaterThan(0)
+    expect(Object.keys(m.wings[0]).sort()).toEqual(['id', 'isLive', 'latitude', 'longitude', 'name'])
+    const sales = await request(app).get('/api/v1/sales/map-buildings').set(auth(IDS.admin, 'ADMIN'))
+    expect(sales.body.data.find((b) => b.id === building.id).wings.length).toBe(m.wings.length)
+  })
+})

@@ -79,6 +79,8 @@ const markerSelect = {
   createdAt: true,
   zone: { select: { id: true, name: true, operatorId: true } },
   cityId: true,
+  // Placed wings (spec 2026-10-14): the map expands a building into these.
+  wings: { select: { id: true, name: true, latitude: true, longitude: true, isLive: true }, orderBy: { name: 'asc' } },
 }
 
 /**

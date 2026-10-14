@@ -25,6 +25,7 @@ const MARKER_KEYS = [
   'createdAt',
   'zone',
   'cityId',
+  'wings',
 ]
 // Only the acquisition map's card needs these, so only acquisition roles get them.
 const ACQUISITION_EXTRA_KEYS = ['pincode', 'details', 'city', 'contact']
