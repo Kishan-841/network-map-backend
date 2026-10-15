@@ -79,7 +79,7 @@ describe('PUT /buildings/:id/wings', () => {
     expect(await prisma.buildingWing.count({ where: { buildingId: building.id } })).toBe(before)
   })
 
-  it('a surveyor cannot change Live through wings: existing wings keep theirs, new ones start not live', async () => {
+  it('the surveyor who added the building sets its wings Live and Not live', async () => {
     const mkB = await prisma.building.create({
       data: { buildingName: `${S} SvLive`, formattedAddress: 'x', latitude: 18.5, longitude: 73.8, zoneId: zone.id, createdById: IDS.surveyor, isLive: false,
         details: { create: { wings: 2 } }, wings: { create: [{ name: 'A', latitude: 18.5, longitude: 73.8, homePass: 1, isLive: false }] } },
@@ -92,16 +92,16 @@ describe('PUT /buildings/:id/wings', () => {
       ], IDS.surveyor, 'SURVEYOR')
       expect(res.status).toBe(200)
       const rows = await prisma.buildingWing.findMany({ where: { buildingId: mkB.id }, orderBy: { name: 'asc' } })
-      expect(rows.map((w) => [w.name, w.isLive, w.homePass])).toEqual([['A', false, 3], ['B', false, 4]])
-      // Complete now — but the surveyor did not raise the building's Live.
+      expect(rows.map((w) => [w.name, w.isLive, w.homePass])).toEqual([['A', true, 3], ['B', true, 4]])
+      // Complete now — the building takes its Live from the wings.
       const row = await prisma.building.findUnique({ where: { id: mkB.id }, include: { details: true } })
-      expect(row.isLive).toBe(false)
+      expect(row.isLive).toBe(true)
       expect(row.details.homePass).toBe(7)
-      // A live wing set by an admin stays live through a surveyor's save.
-      await prisma.buildingWing.update({ where: { id: a.id }, data: { isLive: true } })
+      // …and back to Not live.
       const again = await put(mkB.id, rows.map((w) => ({ id: w.id, name: w.name, latitude: w.latitude, longitude: w.longitude, homePass: w.homePass, isLive: false })), IDS.surveyor, 'SURVEYOR')
       expect(again.status).toBe(200)
-      expect((await prisma.buildingWing.findUnique({ where: { id: a.id } })).isLive).toBe(true)
+      expect((await prisma.buildingWing.findUnique({ where: { id: a.id } })).isLive).toBe(false)
+      expect((await prisma.building.findUnique({ where: { id: mkB.id } })).isLive).toBe(false)
     } finally {
       await prisma.building.delete({ where: { id: mkB.id } })
     }

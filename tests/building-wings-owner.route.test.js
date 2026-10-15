@@ -8,7 +8,7 @@ import { prisma } from '../src/lib/prisma.js'
 /**
  * The surveyor who added a building locates its wings — with or without the
  * "can edit buildings" tick (owner's request, 15 Oct) — and may set the wing
- * count while doing it. They still can't mark wings live.
+ * count and each wing's Live while doing it.
  */
 const app = createApp()
 const S = `bwo-${Date.now()}`
@@ -55,11 +55,11 @@ describe('the surveyor who added a building locates its wings', () => {
     expect((await prisma.buildingDetails.findUnique({ where: { buildingId: noCount.id } })).wings).toBe(3)
   })
 
-  it('still cannot mark a wing live', async () => {
-    const res = await put(counted.id, { wings: [wing({ name: 'A', isLive: true }), wing({ name: 'B', isLive: true })] })
+  it('marks a wing live without the tick', async () => {
+    const res = await put(counted.id, { wings: [wing({ name: 'A', isLive: true }), wing({ name: 'B' })] })
     expect(res.status).toBe(200)
-    expect(res.body.data.wings.every((w) => !w.isLive)).toBe(true)
-    expect(res.body.data).toMatchObject({ complete: true, isLive: false, homePass: 20 })
+    expect(res.body.data.wings.map((w) => w.isLive)).toEqual([true, false])
+    expect(res.body.data).toMatchObject({ complete: true, isLive: true, homePass: 20 })
   })
 
   it("another surveyor can't touch it — tick or not", async () => {

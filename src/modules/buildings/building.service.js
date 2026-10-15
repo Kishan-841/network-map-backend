@@ -822,14 +822,9 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       const existing = await buildingRepository.findById(id)
       if (!existing) throw ApiError.notFound('Building not found')
       await this.assertCanEditWings(existing, actor)
-      let wings = normaliseWings(rawWings)
-      // Only admins or managers mark a building live — a surveyor cannot do it
-      // through its wings either: existing wings keep their Live, new ones start
-      // not live (no error, so the rest of the save goes through).
-      if (actor?.role === 'SURVEYOR') {
-        const liveById = new Map((existing.wings ?? []).map((w) => [w.id, w.isLive]))
-        wings = wings.map((w) => ({ ...w, isLive: w.id ? (liveById.get(w.id) ?? false) : false }))
-      }
+      // Whoever may save the wings sets their Live too — including the
+      // surveyor who added the building (owner's call, 15 Oct).
+      const wings = normaliseWings(rawWings)
       const wingCount = newWingCount ?? existing.details?.wings ?? null
       const errors = wingSetErrors(wings, wingCount)
       if (errors.length) throw ApiError.badRequest(errors[0])
