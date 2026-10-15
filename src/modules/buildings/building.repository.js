@@ -206,8 +206,11 @@ export const buildingRepository = {
    * name so a rename swap (A->B, B->A) cannot trip the case-insensitive
    * unique index mid-way.
    */
-  replaceWings: (buildingId, wings, actorId, derived) =>
+  replaceWings: (buildingId, wings, actorId, derived, wingCount = null) =>
     prisma.$transaction(async (tx) => {
+      if (wingCount != null) {
+        await tx.buildingDetails.upsert({ where: { buildingId }, create: { buildingId, wings: wingCount }, update: { wings: wingCount } })
+      }
       const keep = wings.filter((w) => w.id).map((w) => w.id)
       await tx.buildingWing.deleteMany({ where: { buildingId, id: { notIn: keep } } })
       for (const id of keep) {

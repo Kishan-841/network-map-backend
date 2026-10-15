@@ -804,7 +804,7 @@ export function createBuildingService({ buildingRepository, storage, userReposit
           return
         }
         case 'SURVEYOR':
-          // The route already required the edit grant; this is the row half.
+          // The surveyor who added the building — edit tick or not (15 Oct).
           if (existing.createdById !== actor.id) throw ApiError.forbidden('You can only edit buildings you added')
           return
         default:
@@ -813,8 +813,12 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       }
     },
 
-    /** Replace the building's wings; derive its totals when every wing is placed. */
-    async replaceWings(id, rawWings, actor) {
+    /**
+     * Replace the building's wings; derive its totals when every wing is
+     * placed. `wingCount` (optional) sets the building's wing count in the
+     * same save — it can't be below the wings being saved.
+     */
+    async replaceWings(id, rawWings, actor, { wingCount: newWingCount } = {}) {
       const existing = await buildingRepository.findById(id)
       if (!existing) throw ApiError.notFound('Building not found')
       await this.assertCanEditWings(existing, actor)
@@ -826,15 +830,21 @@ export function createBuildingService({ buildingRepository, storage, userReposit
         const liveById = new Map((existing.wings ?? []).map((w) => [w.id, w.isLive]))
         wings = wings.map((w) => ({ ...w, isLive: w.id ? (liveById.get(w.id) ?? false) : false }))
       }
-      const wingCount = existing.details?.wings ?? null
+      const wingCount = newWingCount ?? existing.details?.wings ?? null
       const errors = wingSetErrors(wings, wingCount)
       if (errors.length) throw ApiError.badRequest(errors[0])
       const known = new Set(existing.wings.map((w) => w.id))
       if (wings.some((w) => w.id && !known.has(w.id))) throw ApiError.badRequest('A wing does not belong to this building')
       const complete = isComplete(wings.length, wingCount)
-      await buildingRepository.replaceWings(id, wings, actor?.id, complete ? deriveTotals(wings) : null)
+      await buildingRepository.replaceWings(id, wings, actor?.id, complete ? deriveTotals(wings) : null, newWingCount ?? null)
       const saved = await buildingRepository.findById(id)
-      return { wings: saved.wings, complete, isLive: saved.isLive, homePass: saved.details?.homePass ?? null }
+      return {
+        wings: saved.wings,
+        complete,
+        isLive: saved.isLive,
+        homePass: saved.details?.homePass ?? null,
+        wingCount: saved.details?.wings ?? null,
+      }
     },
 
     /**

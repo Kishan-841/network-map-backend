@@ -133,7 +133,7 @@ export const buildingController = {
 
   async replaceWings(req, res, next) {
     try {
-      res.json({ success: true, data: await buildingService.replaceWings(req.params.id, req.body.wings, req.user) })
+      res.json({ success: true, data: await buildingService.replaceWings(req.params.id, req.body.wings, req.user, { wingCount: req.body.wingCount }) })
     } catch (err) {
       next(err)
     }

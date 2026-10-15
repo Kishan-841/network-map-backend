@@ -121,10 +121,11 @@ buildingRoutes.patch(
   validateBody(updateBuildingSchema),
   buildingController.update,
 )
-// A building's wings, saved as one set (spec 2026-10-14). Same gate as editing it.
+// A building's wings, saved as one set (spec 2026-10-14). No edit-tick gate
+// here: the surveyor who added the building locates its wings without the tick
+// (owner's call, 15 Oct) — the service decides who may (assertCanEditWings).
 buildingRoutes.put(
   '/:id/wings',
-  requireBuildingEdit,
   audit('Building', 'WingsUpdate', {
     load: (req) => buildingRepository.findById(req.params.id),
     describe: (req, old) => `Wings of '${old?.buildingName ?? req.params.id}' updated (${req.body?.wings?.length ?? 0})`,

@@ -271,6 +271,9 @@ export const createBuildingSchema = z.object({
 })
 
 export const replaceWingsSchema = z.object({
+  // Optional: set the building's wing count in the same save (the owner can't
+  // open the edit form without the tick, so Locate wings asks for it).
+  wingCount: z.number().int().min(1).max(100).optional(),
   wings: z
     .array(
       z.object({
