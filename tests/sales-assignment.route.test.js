@@ -244,6 +244,15 @@ describe('field-sales visit tracking (check-in / activity / inquiry / check-out)
     // toggle UMBRELLA off, then back on
     expect((await request(app).delete(`/api/v1/sales/visits/${visitId}/activities/UMBRELLA`).set(auth('sales-se1'))).status).toBe(200)
     expect((await request(app).post(`/api/v1/sales/visits/${visitId}/activities`).set(auth('sales-se1')).send({ type: 'UMBRELLA' })).status).toBe(201)
+    // Kite activity and Notice board (15 Oct): logged and toggled off like the rest
+    for (const type of ['KITE', 'NOTICE_BOARD']) {
+      expect((await request(app).post(`/api/v1/sales/visits/${visitId}/activities`).set(auth('sales-se1')).send({ type })).status).toBe(201)
+    }
+    expect((await prisma.visitActivity.findMany({ where: { visitId }, orderBy: { type: 'asc' } })).map((a) => a.type).sort())
+      .toEqual(['DESK', 'KITE', 'NOTICE_BOARD', 'UMBRELLA'])
+    for (const type of ['KITE', 'NOTICE_BOARD']) {
+      expect((await request(app).delete(`/api/v1/sales/visits/${visitId}/activities/${type}`).set(auth('sales-se1'))).status).toBe(200)
+    }
     // bad type, and someone else's visit
     expect((await request(app).post(`/api/v1/sales/visits/${visitId}/activities`).set(auth('sales-se1')).send({ type: 'NOPE' })).status).toBe(400)
     expect((await request(app).post(`/api/v1/sales/visits/${visitId}/activities`).set(auth('sales-se2')).send({ type: 'LIFT' })).status).toBe(404)

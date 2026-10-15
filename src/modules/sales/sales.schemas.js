@@ -1,3 +1,4 @@
+import { ACTIVITY_TYPES } from '../../lib/visit-activities.js'
 import { z } from 'zod'
 
 // Assign / distribute a batch of buildings to one sales user. Ids only — the
@@ -47,7 +48,7 @@ export const checkInSchema = z.object({
 })
 
 export const visitActivitySchema = z.object({
-  type: z.enum(['DESK', 'UMBRELLA', 'LIFT']),
+  type: z.enum(ACTIVITY_TYPES),
 })
 
 // Check OUT also forces the location.

@@ -1,3 +1,4 @@
+import { ACTIVITY_TYPES } from '../../lib/visit-activities.js'
 import { ApiError } from '../../lib/api-error.js'
 import { salesRepository } from './sales.repository.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
@@ -216,7 +217,7 @@ export function createSalesService({ repo = salesRepository, storage = getStorag
 
     /** Un-mark an activity type (toggle it off) on the actor's own open visit. */
     async removeActivity(visitId, type, actor) {
-      if (!['DESK', 'UMBRELLA', 'LIFT'].includes(type)) throw ApiError.badRequest('Unknown activity')
+      if (!ACTIVITY_TYPES.includes(type)) throw ApiError.badRequest('Unknown activity')
       const visit = await repo.ownedVisit(visitId, actor.id)
       if (!visit) throw ApiError.notFound('Visit not found')
       if (visit.checkOutAt) throw ApiError.badRequest('This visit is already checked out')

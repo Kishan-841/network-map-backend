@@ -631,7 +631,9 @@ model VisitCompanion {
 enum ActivityType {
   DESK
   UMBRELLA
-  LIFT
+  LIFT // shown as "Leafleting"
+  KITE // "Kite activity"
+  NOTICE_BOARD
 }
 
 /// One piece of field work logged during a visit (many per visit).
