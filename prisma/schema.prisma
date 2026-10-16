@@ -646,6 +646,9 @@ model VisitActivity {
   visitId   String
   visit     BuildingVisit @relation(fields: [visitId], references: [id], onDelete: Cascade)
   type      ActivityType
+  /// Proof photos of THIS activity — upload-API URLs (stored canonical, served
+  /// signed). Rides on the activity row, so un-checking the activity clears them.
+  images    String[]      @default([])
   createdAt DateTime      @default(now())
 
   @@unique([visitId, type])

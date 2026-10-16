@@ -51,6 +51,15 @@ export const visitActivitySchema = z.object({
   type: z.enum(ACTIVITY_TYPES),
 })
 
+// The most proof photos one activity can keep (mirrored in the open-visit card).
+export const MAX_ACTIVITY_IMAGES = 10
+
+// Add / remove ONE proof photo on an activity: the upload-API URL. The service
+// checks it is ours and turns it into the permanent form before storing.
+export const activityImageSchema = z.object({
+  url: z.string().trim().min(1, 'An image is required'),
+})
+
 // Check OUT also forces the location.
 export const checkOutSchema = z.object({
   checkOutLat: latitude,

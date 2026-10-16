@@ -8,6 +8,7 @@ import {
   searchBuildingsQuerySchema,
   checkInSchema,
   visitActivitySchema,
+  activityImageSchema,
   checkOutSchema,
   createInquirySchema,
   updateInquirySchema,
@@ -112,6 +113,22 @@ salesRoutes.delete(
   SALES_ANY,
   audit('VisitActivity', 'UnlogActivity', { describe: (req) => `${req.params?.type ?? 'Activity'} removed` }),
   salesController.removeActivity,
+)
+// Proof photos of what was done for one activity — one URL per call. Adding or
+// removing a photo only works while the visit is still open.
+salesRoutes.post(
+  '/visits/:id/activities/:type/images',
+  SALES_ANY,
+  audit('VisitActivity', 'AddActivityImage', { describe: (req) => `Photo added to ${req.params?.type ?? 'activity'}` }),
+  validateBody(activityImageSchema),
+  salesController.addActivityImage,
+)
+salesRoutes.delete(
+  '/visits/:id/activities/:type/images',
+  SALES_ANY,
+  audit('VisitActivity', 'RemoveActivityImage', { describe: (req) => `Photo removed from ${req.params?.type ?? 'activity'}` }),
+  validateBody(activityImageSchema),
+  salesController.removeActivityImage,
 )
 salesRoutes.post(
   '/visits/:id/checkout',

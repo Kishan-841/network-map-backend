@@ -1,6 +1,7 @@
 import { ACTIVITY_TYPES } from '../../lib/visit-activities.js'
 import { ApiError } from '../../lib/api-error.js'
 import { salesRepository } from './sales.repository.js'
+import { MAX_ACTIVITY_IMAGES } from './sales.schemas.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
 import { scopedUserIds, canAssign, poolWhere } from '../../lib/sales-visibility.js'
 
@@ -14,7 +15,17 @@ export function createSalesService({ repo = salesRepository, storage = getStorag
   // the permanent one) — the same rule as building photos and partner
   // documents, so they still show once the bucket is private.
   const sign = async (url) => (url && storage?.readUrl ? storage.readUrl(url) : url)
-  const signVisit = async (v) => (v ? { ...v, selfieUrl: await sign(v.selfieUrl) } : v)
+  // An activity's proof photos leave as signed links too (rows keep canonical).
+  const signActivity = async (a) =>
+    a?.images?.length && storage?.readUrl ? { ...a, images: await Promise.all(a.images.map((u) => storage.readUrl(u))) } : a
+  const signVisit = async (v) =>
+    v
+      ? {
+          ...v,
+          selfieUrl: await sign(v.selfieUrl),
+          ...(v.activities ? { activities: await Promise.all(v.activities.map(signActivity)) } : {}),
+        }
+      : v
   const signMeeting = async (m) => (m ? { ...m, photoUrl: await sign(m.photoUrl) } : m)
   // …and are stored in their permanent form: if a page posts back the signed
   // preview link, saving it would leave a link that stops working in an hour.
@@ -36,6 +47,17 @@ export function createSalesService({ repo = salesRepository, storage = getStorag
     if (actor.role === 'TEAM_LEADER' && target.role === 'SALES_EXECUTIVE' && target.teamLeaderId === actor.id)
       return
     throw ApiError.forbidden('You can only assign to people on your own team')
+  }
+
+  // The actor's own OPEN visit for a given activity type — 404 if it is not
+  // theirs, 400 if it is already checked out or the type is unknown. Photos can
+  // only be added to / removed from a still-open visit.
+  async function openVisitForActivity(visitId, type, actor) {
+    if (!ACTIVITY_TYPES.includes(type)) throw ApiError.badRequest('Unknown activity')
+    const visit = await repo.ownedVisit(visitId, actor.id)
+    if (!visit) throw ApiError.notFound('Visit not found')
+    if (visit.checkOutAt) throw ApiError.badRequest('This visit is already checked out')
+    return visit
   }
 
   return {
@@ -223,6 +245,35 @@ export function createSalesService({ repo = salesRepository, storage = getStorag
       if (visit.checkOutAt) throw ApiError.badRequest('This visit is already checked out')
       await repo.removeActivity(visitId, type)
       return { visitId, type, removed: true }
+    },
+
+    /**
+     * Add ONE proof photo to an activity on the actor's own open visit. The URL
+     * must be one of our uploads (stored canonical); the list is a set, so
+     * re-adding the same photo is a no-op.
+     */
+    async addActivityImage(visitId, type, { url }, actor) {
+      await openVisitForActivity(visitId, type, actor)
+      if (!storage?.keyFromUrl?.(url)) throw ApiError.badRequest('Image URL must come from the uploads API')
+      const activity = await repo.getActivity(visitId, type)
+      if (!activity) throw ApiError.badRequest('Log this activity before adding photos')
+      const canonical = permanent(url)
+      const images = activity.images ?? []
+      if (images.includes(canonical)) return signActivity(activity)
+      if (images.length >= MAX_ACTIVITY_IMAGES) {
+        throw ApiError.badRequest(`An activity can keep ${MAX_ACTIVITY_IMAGES} photos`)
+      }
+      return signActivity(await repo.setActivityImages(visitId, type, [...images, canonical]))
+    },
+
+    /** Remove ONE proof photo from an activity on the actor's own open visit. */
+    async removeActivityImage(visitId, type, { url }, actor) {
+      await openVisitForActivity(visitId, type, actor)
+      const activity = await repo.getActivity(visitId, type)
+      if (!activity) throw ApiError.notFound('Activity not found')
+      const canonical = permanent(url)
+      const images = (activity.images ?? []).filter((u) => u !== canonical)
+      return signActivity(await repo.setActivityImages(visitId, type, images))
     },
 
     /** Check OUT: closes the actor's own open visit, capturing the location. */

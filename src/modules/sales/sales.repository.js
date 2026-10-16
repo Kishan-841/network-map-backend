@@ -185,6 +185,12 @@ export const salesRepository = {
 
   removeActivity: (visitId, type) => prisma.visitActivity.deleteMany({ where: { visitId, type } }),
 
+  // The one activity row for a visit + type (there is at most one), used to read
+  // and replace its proof photos.
+  getActivity: (visitId, type) => prisma.visitActivity.findUnique({ where: { visitId_type: { visitId, type } } }),
+  setActivityImages: (visitId, type, images) =>
+    prisma.visitActivity.update({ where: { visitId_type: { visitId, type } }, data: { images } }),
+
   checkoutVisit: (id, data) => prisma.buildingVisit.update({ where: { id }, data }),
 
   createInquiry: (data) => prisma.customerInquiry.create({ data }),

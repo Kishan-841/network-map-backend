@@ -127,6 +127,24 @@ export const salesController = {
     }
   },
 
+  async addActivityImage(req, res, next) {
+    try {
+      const data = await salesService.addActivityImage(req.params.id, req.params.type, req.body, req.user)
+      res.status(201).json({ success: true, data })
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  async removeActivityImage(req, res, next) {
+    try {
+      const data = await salesService.removeActivityImage(req.params.id, req.params.type, req.body, req.user)
+      res.json({ success: true, data })
+    } catch (err) {
+      next(err)
+    }
+  },
+
   async checkOut(req, res, next) {
     try {
       const data = await salesService.checkOut(req.params.id, req.body, req.user)
