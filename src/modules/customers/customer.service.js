@@ -212,10 +212,7 @@ export function createCustomerService({ customerRepository, buildingService }) {
         skip('Building not found')
         continue
       }
-      const wing = matchWing(row.wing, wingsByBuilding.get(row.buildingId))
-      if (wing.flag) flags.push(wing.flag)
-
-      const cleaned = toData({ ...row, wingId: wing.wingId })
+      const cleaned = toData({ ...row, wingId: null })
       // No Username and no mobile → no identity; the field check below gives
       // the real reason ("Mobile number is missing"), not a false duplicate.
       if (cleaned.username || cleaned.mobile) {
@@ -227,6 +224,9 @@ export function createCustomerService({ customerRepository, buildingService }) {
         seenIdentities.add(identity)
       }
 
+      const mobileCandidates = cleaned.mobile
+        ? (byMobile.get(`${row.buildingId}:${cleaned.mobile}`) ?? []).filter((c) => !matchedIds.has(c.id))
+        : []
       let match = null
       if (cleaned.username) {
         match = byUsername.get(cleaned.username) ?? null
@@ -234,17 +234,27 @@ export function createCustomerService({ customerRepository, buildingService }) {
           skip(`Username belongs to ${match.building?.buildingName ?? 'another building'}`)
           continue
         }
-      } else if (cleaned.mobile) {
-        const candidates = byMobile.get(`${row.buildingId}:${cleaned.mobile}`) ?? []
-        match = candidates.find((customer) => !customer.username) ?? candidates[0] ?? null
+        // First upload of a billing sheet: a customer added by hand (no
+        // Username) on the same number is this one — claim it, oldest first.
+        // One that already has a different Username is a second connection.
+        if (!match) match = mobileCandidates.find((customer) => !customer.username) ?? null
+      } else {
+        match = mobileCandidates.find((customer) => !customer.username) ?? mobileCandidates[0] ?? null
       }
       if (match && matchedIds.has(match.id)) {
         skip('Duplicate in this file')
         continue
       }
 
+      // The wing is resolved only once the row is known to be kept, so a
+      // skipped row never carries a wing flag.
+      const wingsHere = wingsByBuilding.get(row.buildingId)
+
       if (match) {
         matchedIds.add(match.id)
+        const wing = matchWing(row.wing, wingsHere, { update: true })
+        if (wing.flag) flags.push(wing.flag)
+        cleaned.wingId = wing.wingId
         // On an update a blank name/mobile simply means "leave alone"; only a
         // filled-but-wrong email or mobile needs saying, and it is dropped.
         const errors = customerFieldErrors({ ...row, name: 'x', mobile: row.mobile || match.mobile })
@@ -273,6 +283,9 @@ export function createCustomerService({ customerRepository, buildingService }) {
         skip(errors[0])
         continue
       }
+      const wing = matchWing(row.wing, wingsHere)
+      if (wing.flag) flags.push(wing.flag)
+      cleaned.wingId = wing.wingId
       creates.push({ ...cleaned, buildingId: row.buildingId, createdById: actor.id })
       finish('create', wingName(row.buildingId, cleaned.wingId))
     }

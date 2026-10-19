@@ -439,6 +439,52 @@ describe('POST /customers/import — upsert, dry run, wings, not in this sheet',
     expect(res.body.data.skipped[0]).toMatchObject({ row: 3, reason: 'Duplicate in this file' })
   })
 
+  it('a Username row claims a stored customer with no Username on the same mobile', async () => {
+    const hand = (await post({ buildingId: imp.id, name: 'Hand Added', mobile: '9100000020' })).body.data
+    const res = await run([{ row: 2, buildingId: imp.id, username: `${S}-claim`, name: 'Hand Added', mobile: '919100000020', planName: 'P1' }])
+    expect(res.body.data).toMatchObject({ createdCount: 0, updatedCount: 1 })
+    const after = await prisma.customer.findUnique({ where: { id: hand.id } })
+    expect(after).toMatchObject({ username: `${S}-claim`, planName: 'P1' })
+    expect(await prisma.customer.count({ where: { buildingId: imp.id, mobile: '9100000020' } })).toBe(1)
+  })
+
+  it('a stored customer with a different Username on the same mobile is never claimed', async () => {
+    expect((await post({ buildingId: imp.id, name: 'Has A', mobile: '9100000021', username: `${S}-ua1` })).status).toBe(201)
+    const res = await run([{ row: 2, buildingId: imp.id, username: `${S}-ub1`, name: 'Has B', mobile: '9100000021' }])
+    expect(res.body.data).toMatchObject({ createdCount: 1, updatedCount: 0 })
+    expect((await stored(`${S}-ua1`)).name).toBe('Has A')
+  })
+
+  it('an unknown wing on an update row keeps the wing, and says so', async () => {
+    const before = await stored(U(1))
+    const res = await run([
+      { row: 2, buildingId: imp.id, username: U(1), name: 'Imp One', mobile: '9100000001', wing: 'Z' },
+      { row: 3, buildingId: imp.id, username: U(6), name: 'New Z', mobile: '9100000006', wing: 'Z' },
+    ])
+    expect(res.body.data.rows[0].flags).toEqual(['Wing Z is not located yet — wing left as it was'])
+    expect(res.body.data.rows[0].wingName).toBe('A')
+    expect(res.body.data.rows[1].flags).toEqual(['Wing Z is not located yet — added without a wing'])
+    expect((await stored(U(1))).wingId).toBe(before.wingId)
+  })
+
+  it('an ambiguous wing on an update row says the wing was left as it was', async () => {
+    const extra = await prisma.buildingWing.create({ data: { buildingId: imp.id, name: 'Wing B', latitude: 18.5, longitude: 73.8 } })
+    try {
+      const res = await run([{ row: 2, buildingId: imp.id, username: U(1), name: 'Imp One', mobile: '9100000001', wing: 'b' }])
+      expect(res.body.data.rows[0].flags).toEqual(['Wing b matches more than one wing — wing left as it was'])
+    } finally {
+      await prisma.buildingWing.delete({ where: { id: extra.id } })
+    }
+  })
+
+  it('a skipped row carries no wing flags', async () => {
+    expect((await post({ buildingId: mine.id, name: 'Elsewhere', mobile: '9100000022', username: `${S}-u-far` })).status).toBe(201)
+    const res = await run([{ row: 7, buildingId: imp.id, username: `${S}-u-far`, name: 'Far', mobile: '9100000022', wing: 'Nowhere' }])
+    expect(res.body.data.rows[0]).toMatchObject({ outcome: 'skip', flags: [] })
+    expect(res.body.data.rows[0].reason).toBe(`Username belongs to ${mine.buildingName}`)
+    expect(res.body.data.flagged).toEqual([])
+  })
+
   it('two rows with no Username and no mobile get the real reason, not a duplicate', async () => {
     const res = await run([
       { row: 2, buildingId: imp.id, name: 'No Number 1', mobile: '' },

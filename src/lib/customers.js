@@ -111,21 +111,23 @@ export function foldWingName(name) {
 
 /**
  * Pick the located wing a sheet's wing cell means. A blank cell is simply "no
- * wing" (no flag). A name matching zero or several wings is never guessed: the
- * customer is added without a wing and the flag says why.
+ * wing" (no flag). A name matching zero or several wings is never guessed. A
+ * new customer is added without a wing; an update row (`{ update: true }`)
+ * keeps the wing it has — the flag says which.
  */
-export function matchWing(name, wings) {
+export function matchWing(name, wings, { update = false } = {}) {
   const raw = String(name ?? '').trim()
   if (!raw) return { wingId: null, flag: null }
   const key = foldWingName(raw)
   const hits = key ? (wings ?? []).filter((wing) => foldWingName(wing.name) === key) : []
   if (hits.length === 1) return { wingId: hits[0].id, flag: null }
   const label = `Wing ${raw}`
+  const outcome = update ? 'wing left as it was' : 'added without a wing'
   return {
     wingId: null,
     flag: hits.length > 1
-      ? `${label} matches more than one wing — added without a wing`
-      : `${label} is not located yet — added without a wing`,
+      ? `${label} matches more than one wing — ${outcome}`
+      : `${label} is not located yet — ${outcome}`,
   }
 }
 

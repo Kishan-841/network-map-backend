@@ -125,6 +125,13 @@ describe('wing names', () => {
     expect(matchWing('A', [{ id: '1', name: 'A' }, { id: '2', name: 'Wing A' }]).flag)
       .toBe('Wing A matches more than one wing — added without a wing')
   })
+  it('on an update row the copy says the wing was left as it was', () => {
+    expect(matchWing('C', wings, { update: true }))
+      .toEqual({ wingId: null, flag: 'Wing C is not located yet — wing left as it was' })
+    expect(matchWing('A', [{ id: '1', name: 'A' }, { id: '2', name: 'Wing A' }], { update: true }).flag)
+      .toBe('Wing A matches more than one wing — wing left as it was')
+    expect(matchWing('b', wings, { update: true })).toEqual({ wingId: 'wb', flag: null })
+  })
 })
 
 describe('customer identity', () => {
