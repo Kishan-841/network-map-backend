@@ -163,6 +163,59 @@ Point `DATABASE_URL` at your managed database. The container runs
 - [ ] Log in with the seeded admin; confirm building create + map load work.
 - [ ] `docker compose logs api` shows migrations applied, no errors.
 
+## OLT connection status (optional)
+
+The API can show each customer's live ONU status and signal, read from the
+company OLT monitoring system by the customer's Username. The lookup is made by
+the backend only: the OLT key stays in the API's `.env` and is never sent to the
+frontend. If either variable is unset, the feature is off and nothing is shown.
+
+Add both to the API's `.env` on the VM (`.env.example` lists them, blank):
+
+```bash
+OLT_API_URL=https://olt.gazonindia.com/api/external/v1
+OLT_API_KEY=<key from the OLT team>
+```
+
+**IP allowlist.** The OLT system answers only allow-listed IPs. The VM
+(`202.136.68.13`) is allow-listed. A developer machine needs its own public IP
+added by the OLT team before local testing works. A `403` means the caller is
+not allow-listed or the key is inactive.
+
+**DNS.** `olt.gazonindia.com` is not in public DNS. It resolves only on the
+ISP's internal DNS, to `202.136.68.17`, and the VM cannot resolve it. The
+preferred fix is for the OLT team to add a public A record for
+`olt.gazonindia.com` pointing to `202.136.68.17`. The fallback is to add this to
+the `api` service in `docker-compose.yml`:
+
+```yaml
+    extra_hosts:
+      - "olt.gazonindia.com:202.136.68.17"
+```
+
+The host's `/etc/hosts` is not visible inside the container, so this entry must
+be in compose. This doc change does not touch `docker-compose.yml`; add the
+entry in a separate deploy change when it is needed.
+
+**Quick check from the VM.** Read the key without putting it in shell history,
+then call the ping endpoint:
+
+```bash
+read -rs OLT_KEY
+curl -sS --resolve olt.gazonindia.com:443:202.136.68.17 \
+  -H "X-API-Key: $OLT_KEY" \
+  https://olt.gazonindia.com/api/external/v1/ping
+```
+
+Expect `{"ok":true,...}`. A DNS error means the name does not resolve (see
+above); a `403` means the IP or key is the problem.
+
+**Never log or paste the key.** Do not put it in commands you share, tickets,
+commits or chat. The OLT `/olts` list carries a `location` field that contains
+device credentials; the app never reads that endpoint or field.
+
+---
+
 ## Frontend
 
 The frontend is a Next.js app (`../frontend`) — deploy it on Vercel, or build
