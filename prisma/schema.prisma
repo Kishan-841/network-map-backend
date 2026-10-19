@@ -162,6 +162,7 @@ model User {
   surveysSubmitted   SocietySurvey[]   @relation("SocietySurveySubmittedBy")
   surveysDecided     SocietySurvey[]   @relation("SocietySurveyDecidedBy")
   buildingWingsCreated BuildingWing[] @relation("BuildingWingCreatedBy")
+  customersCreated     Customer[]     @relation("CustomerCreatedBy")
 }
 
 /// One row per pincode an acquisition agent covers (within one city).
@@ -554,6 +555,7 @@ model Building {
   salesInquiries   CustomerInquiry[]
   permissionVisits PermissionVisit[]
   societySurvey    SocietySurvey?
+  customers        Customer[]
 
   @@index([latitude, longitude])
   @@index([source, createdById])
@@ -819,6 +821,49 @@ model BuildingContact {
   designationOther String?
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
+}
+
+/// A subscriber connected at a building (spec 2026-10-17). One building has
+/// many customers; a customer belongs to exactly one building. The columns
+/// mirror the ISP's billing export one-for-one, so a sheet row is stored as it
+/// was read and nothing is inferred:
+///   Username → username, Mobile No. → mobile (normalised digits),
+///   Site → site, Operator → operator (free text, NOT the Operator model),
+///   Zone → networkZone (the ISP's network name, e.g. "MORYA INTERNET" — NOT
+///   our Zone geography), Plan Activation/Expiry Date → planActivatedAt /
+///   planExpiresAt (IST wall clock → instant), Customer Ageing → ageingDays.
+/// `status` is free text ("Active"): stored, never derived from the expiry.
+/// A duplicate — same mobile in the same building — is refused in the service,
+/// not by a constraint: one person with two connections must stay possible.
+model Customer {
+  id               String   @id @default(cuid())
+  buildingId       String
+  building         Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  username         String?
+  name             String
+  address          String?
+  /// Normalised: digits only, the 91 / leading 0 the sheet writes is dropped.
+  mobile           String
+  email            String?
+  site             String?
+  operator         String?
+  networkZone      String?
+  planName         String?
+  /// Rupees. The export writes 0 for its plan column.
+  planAmount       Int?
+  planValidityDays Int?
+  autoRenewal      Boolean?
+  planActivatedAt  DateTime?
+  planExpiresAt    DateTime?
+  status           String?
+  ageingDays       Int?
+  createdById      String?
+  createdBy        User?    @relation("CustomerCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([buildingId])
+  @@index([mobile])
 }
 
 model Photo {

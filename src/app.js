@@ -10,6 +10,7 @@ import { userRoutes } from './modules/users/user.routes.js'
 import { zoneRoutes } from './modules/zones/zone.routes.js'
 import { buildingRoutes } from './modules/buildings/building.routes.js'
 import { permissionBuildingRoutes } from './modules/permission-buildings/permission-building.routes.js'
+import { customerRoutes } from './modules/customers/customer.routes.js'
 import { uploadRoutes } from './modules/uploads/upload.routes.js'
 import { buildingTypeRoutes } from './modules/building-types/building-type.routes.js'
 import { statsRoutes } from './modules/stats/stats.routes.js'
@@ -90,6 +91,7 @@ export function createApp() {
   app.use('/api/v1/zones', zoneRoutes)
   app.use('/api/v1/buildings', buildingRoutes)
   app.use('/api/v1/permission-buildings', permissionBuildingRoutes)
+  app.use('/api/v1/customers', customerRoutes)
   // Before /api/v1/sales so its own router never sees /tasks.
   app.use('/api/v1/sales/tasks', visitTaskRoutes)
   app.use('/api/v1/sales', salesRoutes)
