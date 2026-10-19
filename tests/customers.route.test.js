@@ -17,7 +17,7 @@ const SV = auth(IDS.surveyor, 'SURVEYOR')
 const OTHER = auth(IDS.other, 'SURVEYOR')
 const MGR = auth(IDS.manager, 'MANAGER')
 
-let zone, mine, theirs
+let zone, mine, theirs, wingA, wingB, wingX
 const post = (body, who = ADMIN) => request(app).post('/api/v1/customers').set(who).send(body)
 const list = (buildingId, who = ADMIN) =>
   request(app).get('/api/v1/customers').query({ buildingId }).set(who)
@@ -34,6 +34,11 @@ beforeAll(async () => {
   theirs = await prisma.building.create({
     data: { buildingName: `${S} Other Tower`, formattedAddress: 'x', latitude: 18.5, longitude: 73.8, zoneId: zone.id, createdById: IDS.admin },
   })
+  const wing = (buildingId, name) =>
+    prisma.buildingWing.create({ data: { buildingId, name, latitude: 18.5, longitude: 73.8 } })
+  wingA = await wing(mine.id, 'A')
+  wingB = await wing(mine.id, 'B')
+  wingX = await wing(theirs.id, 'X')
 })
 
 afterAll(async () => {
@@ -46,7 +51,7 @@ afterAll(async () => {
 
 describe('POST /customers', () => {
   it('the repository has the methods the service calls', () => {
-    for (const method of ['listByBuilding', 'findById', 'findByBuildingAndMobile', 'create', 'update', 'remove', 'createMany', 'listMobilesForBuildings', 'findBuildingIds', 'listBuildingsForLookup']) {
+    for (const method of ['listByBuilding', 'findById', 'findByBuildingAndMobile', 'create', 'update', 'remove', 'createMany', 'listMobilesForBuildings', 'findBuildingIds', 'listBuildingsForLookup', 'listWings', 'findWing', 'findByUsername']) {
       expect(typeof customerRepository[method]).toBe('function')
     }
   })
@@ -90,8 +95,19 @@ describe('GET /customers', () => {
   it('lists a building’s customers for the admin', async () => {
     const res = await list(mine.id)
     expect(res.status).toBe(200)
-    expect(Array.isArray(res.body.data)).toBe(true)
-    expect(res.body.data.length).toBeGreaterThanOrEqual(2)
+    expect(Array.isArray(res.body.data.customers)).toBe(true)
+    expect(res.body.data.customers.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('list returns customers, the located wings and the building', async () => {
+    const created = (await post({ buildingId: mine.id, name: 'Winged', mobile: '9000000070', wingId: wingA.id })).body.data
+    const res = await list(mine.id)
+    expect(res.body.data.wings.map((w) => w.name)).toEqual(['A', 'B'])
+    expect(res.body.data.building).toMatchObject({ id: mine.id, buildingName: mine.buildingName })
+    const row = res.body.data.customers.find((c) => c.id === created.id)
+    expect(row.wing).toEqual({ id: wingA.id, name: 'A' })
+    const plain = res.body.data.customers.find((c) => c.mobile === '9867412726')
+    expect(plain.wing).toBeNull()
   })
 
   it('requires a buildingId', async () => {
@@ -119,6 +135,8 @@ describe('GET /customers/:id', () => {
     expect(res.status).toBe(200)
     expect(res.body.data).toMatchObject({ id: created.id, name: 'Detail Me', mobile: '9000000060' })
     expect(res.body.data.building).toMatchObject({ id: mine.id, buildingName: mine.buildingName })
+    expect(res.body.data.wing).toBeNull()
+    expect(res.body.data.wings.map((w) => w.name)).toEqual(['A', 'B'])
     expect((await request(app).get('/api/v1/customers/nope').set(ADMIN)).status).toBe(404)
   })
 
@@ -150,6 +168,67 @@ describe('PATCH /customers/:id', () => {
     const created = (await post({ buildingId: mine.id, name: 'Keep Name', mobile: '9000000013' })).body.data
     expect((await request(app).patch(`/api/v1/customers/${created.id}`).set(ADMIN).send({ name: '' })).status).toBe(400)
     expect((await request(app).patch(`/api/v1/customers/${created.id}`).set(ADMIN).send({})).status).toBe(400)
+  })
+})
+
+describe('wings, PON/OLT and Username identity', () => {
+  const patch = (id, body) => request(app).patch(`/api/v1/customers/${id}`).set(ADMIN).send(body)
+
+  it('stores PON number and OLT', async () => {
+    const res = await post({ buildingId: mine.id, name: 'Pon', mobile: '9000000071', ponNumber: '6', olt: 'DIAMOND ROCK' })
+    expect(res.status).toBe(201)
+    expect(res.body.data).toMatchObject({ ponNumber: '6', olt: 'DIAMOND ROCK', wingId: null })
+  })
+
+  it('refuses a wing from another building', async () => {
+    const bad = await post({ buildingId: mine.id, name: 'Wrong Wing', mobile: '9000000072', wingId: wingX.id })
+    expect(bad.status).toBe(400)
+    expect(bad.body.error.message).toBe('That wing is not in this building')
+    const ok = (await post({ buildingId: mine.id, name: 'Right Wing', mobile: '9000000073' })).body.data
+    expect((await patch(ok.id, { wingId: wingX.id })).status).toBe(400)
+    expect((await patch(ok.id, { wingId: 'no-such-wing' })).status).toBe(400)
+  })
+
+  it('PATCH wingId: null moves a customer to No wing', async () => {
+    const c = (await post({ buildingId: mine.id, name: 'Move', mobile: '9000000074', wingId: wingA.id })).body.data
+    expect(c.wingId).toBe(wingA.id)
+    const res = await patch(c.id, { wingId: null })
+    expect(res.status).toBe(200)
+    expect(res.body.data.wingId).toBeNull()
+    expect((await patch(c.id, { wingId: wingB.id })).body.data.wingId).toBe(wingB.id)
+  })
+
+  it('a duplicate Username is refused', async () => {
+    expect((await post({ buildingId: mine.id, name: 'U1', mobile: '9000000075', username: `${S}-u1` })).status).toBe(201)
+    const res = await post({ buildingId: theirs.id, name: 'U1b', mobile: '9000000076', username: `${S}-u1` })
+    expect(res.status).toBe(409)
+    expect(res.body.error.message).toBe('A customer with this username already exists')
+  })
+
+  it('PATCH checks the Username against others, not itself', async () => {
+    const a = (await post({ buildingId: mine.id, name: 'UA', mobile: '9000000080', username: `${S}-ua` })).body.data
+    const b = (await post({ buildingId: mine.id, name: 'UB', mobile: '9000000081', username: `${S}-ub` })).body.data
+    expect((await patch(a.id, { username: `${S}-ua`, name: 'UA2' })).status).toBe(200)
+    expect((await patch(b.id, { username: `${S}-ua` })).status).toBe(409)
+  })
+
+  it('same mobile, different usernames are two customers', async () => {
+    const one = await post({ buildingId: mine.id, name: 'Two Conn', mobile: '9000000077', username: `${S}-c1` })
+    const two = await post({ buildingId: mine.id, name: 'Two Conn', mobile: '9000000077', username: `${S}-c2` })
+    expect([one.status, two.status]).toEqual([201, 201])
+  })
+
+  it('no username: duplicate mobile in the building is refused', async () => {
+    expect((await post({ buildingId: mine.id, name: 'N1', mobile: '9000000078' })).status).toBe(201)
+    expect((await post({ buildingId: mine.id, name: 'N2', mobile: '9000000078' })).status).toBe(409)
+  })
+
+  it('deleting a wing drops its customers to No wing', async () => {
+    const wing = await prisma.buildingWing.create({ data: { buildingId: mine.id, name: 'Temp', latitude: 18.5, longitude: 73.8 } })
+    const c = (await post({ buildingId: mine.id, name: 'Orphan', mobile: '9000000079', wingId: wing.id })).body.data
+    await prisma.buildingWing.delete({ where: { id: wing.id } })
+    const after = await prisma.customer.findUnique({ where: { id: c.id } })
+    expect(after.wingId).toBeNull()
   })
 })
 

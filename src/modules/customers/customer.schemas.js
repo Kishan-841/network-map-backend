@@ -63,6 +63,9 @@ const customerFields = {
   planExpiresAt: nullableDate,
   status: nullableText(40),
   ageingDays: nullableInt(36_500),
+  wingId: z.string().min(1).nullable().optional(),
+  ponNumber: nullableText(40),
+  olt: nullableText(100),
 }
 
 export const createCustomerSchema = z.object({

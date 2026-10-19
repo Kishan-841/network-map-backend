@@ -23,8 +23,8 @@ const customerService = createCustomerService({ customerRepository, buildingServ
 export const customerController = {
   async list(req, res, next) {
     try {
-      const customers = await customerService.listCustomers(req.validatedQuery, req.user)
-      res.json({ success: true, data: customers })
+      const data = await customerService.listCustomers(req.validatedQuery, req.user)
+      res.json({ success: true, data })
     } catch (err) {
       next(err)
     }

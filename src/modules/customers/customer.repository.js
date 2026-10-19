@@ -2,9 +2,27 @@ import { prisma } from '../../lib/prisma.js'
 
 export const customerRepository = {
   listByBuilding: (buildingId) =>
-    prisma.customer.findMany({ where: { buildingId }, orderBy: { createdAt: 'asc' } }),
+    prisma.customer.findMany({
+      where: { buildingId },
+      orderBy: { createdAt: 'asc' },
+      include: { wing: { select: { id: true, name: true } } },
+    }),
 
-  findById: (id) => prisma.customer.findUnique({ where: { id } }),
+  findById: (id) =>
+    prisma.customer.findUnique({ where: { id }, include: { wing: { select: { id: true, name: true } } } }),
+
+  /** The building's located wings, for the wing picker and the list's grouping. */
+  listWings: (buildingId) =>
+    prisma.buildingWing.findMany({
+      where: { buildingId },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    }),
+
+  findWing: (id) =>
+    prisma.buildingWing.findUnique({ where: { id }, select: { id: true, name: true, buildingId: true } }),
+
+  findByUsername: (username) => prisma.customer.findFirst({ where: { username } }),
 
   findByBuildingAndMobile: (buildingId, mobile) =>
     prisma.customer.findFirst({ where: { buildingId, mobile } }),

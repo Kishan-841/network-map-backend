@@ -732,6 +732,7 @@ model BuildingWing {
   createdBy   User?    @relation("BuildingWingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  customers   Customer[]
 
   @@index([buildingId])
 }
@@ -835,10 +836,18 @@ model BuildingContact {
 /// `status` is free text ("Active"): stored, never derived from the expiry.
 /// A duplicate — same mobile in the same building — is refused in the service,
 /// not by a constraint: one person with two connections must stay possible.
+/// Spec 2026-10-19: `wingId` places the customer in one of the building's
+/// located wings (null = "No wing"; deleting the wing sets it null), `ponNumber`
+/// is the PON port as written in the sheet and `olt` the OLT's name (free text).
+/// A set Username is the customer's global identity (spec: re-upload dedupe).
 model Customer {
   id               String   @id @default(cuid())
   buildingId       String
   building         Building @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  wingId           String?
+  wing             BuildingWing? @relation(fields: [wingId], references: [id], onDelete: SetNull)
+  ponNumber        String?
+  olt              String?
   username         String?
   name             String
   address          String?
@@ -864,6 +873,8 @@ model Customer {
 
   @@index([buildingId])
   @@index([mobile])
+  @@index([wingId])
+  @@index([username])
 }
 
 model Photo {

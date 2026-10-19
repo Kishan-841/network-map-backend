@@ -21,6 +21,8 @@ export function createCustomerService({ customerRepository, buildingService }) {
     'networkZone',
     'planName',
     'status',
+    'ponNumber',
+    'olt',
   ]
   const NULLABLE_NUMBERS = ['planAmount', 'planValidityDays', 'ageingDays']
   const NULLABLE_DATES = ['planActivatedAt', 'planExpiresAt']
@@ -31,6 +33,7 @@ export function createCustomerService({ customerRepository, buildingService }) {
       name: String(input.name ?? '').trim(),
       mobile: normaliseMobile(input.mobile),
       autoRenewal: input.autoRenewal ?? null,
+      wingId: input.wingId ?? null,
     }
     for (const field of TEXT_FIELDS) {
       const value = input[field]
@@ -41,10 +44,30 @@ export function createCustomerService({ customerRepository, buildingService }) {
     return data
   }
 
+  /** A wing must exist and belong to the customer's own building. */
+  async function assertWingInBuilding(wingId, buildingId) {
+    if (!wingId) return
+    const wing = await customerRepository.findWing(wingId)
+    if (!wing || wing.buildingId !== buildingId) {
+      throw ApiError.badRequest('That wing is not in this building')
+    }
+  }
+
+  async function assertUsernameFree(username, exceptId) {
+    const clash = await customerRepository.findByUsername(username)
+    if (clash && clash.id !== exceptId) {
+      throw ApiError.conflict('A customer with this username already exists')
+    }
+  }
+
   async function listCustomers({ buildingId }, actor) {
     // getBuilding throws 404 for a building the actor cannot read.
-    await buildingService.getBuilding(buildingId, actor)
-    return customerRepository.listByBuilding(buildingId)
+    const building = await buildingService.getBuilding(buildingId, actor)
+    const [customers, wings] = await Promise.all([
+      customerRepository.listByBuilding(buildingId),
+      customerRepository.listWings(buildingId),
+    ])
+    return { customers, wings, building: { id: building.id, buildingName: building.buildingName } }
   }
 
   /**
@@ -56,7 +79,13 @@ export function createCustomerService({ customerRepository, buildingService }) {
     const customer = await customerRepository.findById(id)
     if (!customer) throw ApiError.notFound('Customer not found')
     const building = await buildingService.getBuilding(customer.buildingId, actor)
-    return { ...customer, building: { id: building.id, buildingName: building.buildingName } }
+    const wings = await customerRepository.listWings(customer.buildingId)
+    return {
+      ...customer,
+      wing: customer.wing ?? null,
+      wings,
+      building: { id: building.id, buildingName: building.buildingName },
+    }
   }
 
   async function createCustomer(body, actor) {
@@ -65,9 +94,14 @@ export function createCustomerService({ customerRepository, buildingService }) {
     const errors = customerFieldErrors(body)
     if (errors.length) throw ApiError.badRequest(errors[0])
     const data = toData(body)
-    const duplicate = await customerRepository.findByBuildingAndMobile(buildingId, data.mobile)
-    if (duplicate) {
-      throw ApiError.conflict('A customer with this mobile number already exists in this building')
+    await assertWingInBuilding(data.wingId, buildingId)
+    if (data.username) {
+      await assertUsernameFree(data.username)
+    } else {
+      const duplicate = await customerRepository.findByBuildingAndMobile(buildingId, data.mobile)
+      if (duplicate) {
+        throw ApiError.conflict('A customer with this mobile number already exists in this building')
+      }
     }
     return customerRepository.create({ ...data, buildingId, createdById: actor.id })
   }
@@ -78,7 +112,10 @@ export function createCustomerService({ customerRepository, buildingService }) {
     const errors = customerFieldErrors({ ...existing, ...body })
     if (errors.length) throw ApiError.badRequest(errors[0])
     const data = toData({ ...existing, ...body })
-    if (data.mobile !== existing.mobile) {
+    if (data.wingId !== existing.wingId) await assertWingInBuilding(data.wingId, existing.buildingId)
+    if (data.username) {
+      if (data.username !== existing.username) await assertUsernameFree(data.username, id)
+    } else if (data.mobile !== existing.mobile || existing.username) {
       const clash = await customerRepository.findByBuildingAndMobile(existing.buildingId, data.mobile)
       if (clash && clash.id !== id) {
         throw ApiError.conflict('A customer with this mobile number already exists in this building')
@@ -126,7 +163,7 @@ export function createCustomerService({ customerRepository, buildingService }) {
         skip(errors[0])
         continue
       }
-      const data = toData(row)
+      const data = { ...toData(row), wingId: null } // wing matching is the import's next step
       const key = `${row.buildingId}:${data.mobile}`
       if (seen.has(key)) {
         skip('Already recorded in this building')
