@@ -5,6 +5,10 @@ import {
   foldBuildingName,
   matchBuildingNames,
   customerFieldErrors,
+  foldWingName,
+  matchWing,
+  customerIdentity,
+  mergeCustomerUpdate,
 } from '../src/lib/customers.js'
 
 describe('customer mobile normalisation', () => {
@@ -100,5 +104,48 @@ describe('customer field rules', () => {
   it('checks an email when one is given, and is happy without one', () => {
     expect(customerFieldErrors({ ...good, email: 'nope' })).toContain('Email address looks wrong')
     expect(customerFieldErrors({ ...good, email: '' })).toEqual([])
+  })
+})
+
+describe('wing names', () => {
+  const wings = [{ id: 'wa', name: 'A' }, { id: 'wb', name: 'Wing B' }]
+  it('folds the word wing and punctuation away', () => {
+    for (const v of ['A', 'a', 'Wing A', 'A Wing', 'A-wing', ' wing-a ']) expect(foldWingName(v)).toBe('a')
+  })
+  it('matches a located wing', () => {
+    expect(matchWing('b', wings)).toEqual({ wingId: 'wb', flag: null })
+  })
+  it('blank → no wing, no flag', () => {
+    expect(matchWing('  ', wings)).toEqual({ wingId: null, flag: null })
+  })
+  it('not located → flagged', () => {
+    expect(matchWing('C', wings)).toEqual({ wingId: null, flag: 'Wing C is not located yet — added without a wing' })
+  })
+  it('two wings folding alike → flagged, never guessed', () => {
+    expect(matchWing('A', [{ id: '1', name: 'A' }, { id: '2', name: 'Wing A' }]).flag)
+      .toBe('Wing A matches more than one wing — added without a wing')
+  })
+})
+
+describe('customer identity', () => {
+  it('username wins', () => expect(customerIdentity({ username: ' 868 ', buildingId: 'b', mobile: '9' })).toBe('u:868'))
+  it('falls back to building + normalised mobile', () =>
+    expect(customerIdentity({ username: '', buildingId: 'b', mobile: '918686692513' })).toBe('m:b:8686692513'))
+})
+
+describe('merge for update', () => {
+  const existing = { name: 'A', email: 'a@x.in', planExpiresAt: new Date('2026-12-11T18:29:59Z'), wingId: 'wa', ponNumber: null }
+  it('blank never erases', () => {
+    expect(mergeCustomerUpdate(existing, { name: '', email: null, wingId: null })).toEqual({ data: {}, changed: false })
+  })
+  it('same instant is unchanged', () => {
+    expect(mergeCustomerUpdate(existing, { planExpiresAt: new Date('2026-12-11T18:29:59Z') }).changed).toBe(false)
+  })
+  it('a Date matches an ISO string of the same instant', () => {
+    const stored = { planExpiresAt: '2026-12-11T18:29:59.000Z' }
+    expect(mergeCustomerUpdate(stored, { planExpiresAt: new Date('2026-12-11T18:29:59Z') }).changed).toBe(false)
+  })
+  it('a filled cell overwrites', () => {
+    expect(mergeCustomerUpdate(existing, { ponNumber: '6', name: 'A' })).toEqual({ data: { ponNumber: '6' }, changed: true })
   })
 })

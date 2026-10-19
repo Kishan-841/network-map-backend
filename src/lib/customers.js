@@ -92,3 +92,82 @@ export function customerFieldErrors(input) {
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errors.push('Email address looks wrong')
   return errors
 }
+
+/**
+ * A wing name as a comparable key: lowercase, punctuation dropped, and a
+ * leading or trailing *word* "wing" dropped — so `A`, `Wing A`, `A Wing`,
+ * `A-wing` and ` wing-a ` all agree. A name with nothing left folds to ''
+ * and must never match anything.
+ */
+export function foldWingName(name) {
+  const words = String(name ?? '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+  if (words[0] === 'wing') words.shift()
+  if (words[words.length - 1] === 'wing') words.pop()
+  return words.join('')
+}
+
+/**
+ * Pick the located wing a sheet's wing cell means. A blank cell is simply "no
+ * wing" (no flag). A name matching zero or several wings is never guessed: the
+ * customer is added without a wing and the flag says why.
+ */
+export function matchWing(name, wings) {
+  const raw = String(name ?? '').trim()
+  if (!raw) return { wingId: null, flag: null }
+  const key = foldWingName(raw)
+  const hits = key ? (wings ?? []).filter((wing) => foldWingName(wing.name) === key) : []
+  if (hits.length === 1) return { wingId: hits[0].id, flag: null }
+  const label = `Wing ${raw}`
+  return {
+    wingId: null,
+    flag: hits.length > 1
+      ? `${label} matches more than one wing — added without a wing`
+      : `${label} is not located yet — added without a wing`,
+  }
+}
+
+/**
+ * Who a customer row is, for re-upload dedupe: the billing username when there
+ * is one, otherwise building + normalised mobile.
+ */
+export function customerIdentity({ username, buildingId, mobile }) {
+  const user = String(username ?? '').trim()
+  if (user) return `u:${user}`
+  return `m:${buildingId}:${normaliseMobile(mobile)}`
+}
+
+/** Columns a re-uploaded sheet may update on a stored customer. */
+export const MERGE_FIELDS = [
+  'username', 'name', 'address', 'mobile', 'email', 'site', 'operator',
+  'networkZone', 'planName', 'planAmount', 'planValidityDays', 'autoRenewal',
+  'planActivatedAt', 'planExpiresAt', 'status', 'ageingDays', 'wingId',
+  'ponNumber', 'olt',
+]
+
+const sameValue = (a, b) => {
+  const isTime = (v) => v instanceof Date
+  if (isTime(a) || isTime(b)) {
+    const ta = new Date(a).getTime()
+    const tb = new Date(b).getTime()
+    return ta === tb
+  }
+  return a === b
+}
+
+/**
+ * What a re-upload changes. A blank incoming cell (null / undefined / '') never
+ * erases stored data; a filled one is kept only when it differs from what is
+ * stored (dates compare by instant). `changed` is false when nothing differs.
+ */
+export function mergeCustomerUpdate(existing, incoming) {
+  const data = {}
+  for (const key of MERGE_FIELDS) {
+    const next = incoming?.[key]
+    if (next === null || next === undefined || next === '') continue
+    if (!sameValue(existing?.[key], next)) data[key] = next
+  }
+  return { data, changed: Object.keys(data).length > 0 }
+}
