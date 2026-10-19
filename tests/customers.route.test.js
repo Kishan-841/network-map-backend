@@ -51,7 +51,7 @@ afterAll(async () => {
 
 describe('POST /customers', () => {
   it('the repository has the methods the service calls', () => {
-    for (const method of ['listByBuilding', 'findById', 'findByBuildingAndMobile', 'create', 'update', 'remove', 'createMany', 'listMobilesForBuildings', 'findBuildingIds', 'listBuildingsForLookup', 'listWings', 'findWing', 'findByUsername']) {
+    for (const method of ['listByBuilding', 'findById', 'findByBuildingAndMobile', 'create', 'update', 'remove', 'createMany', 'listMobilesForBuildings', 'findBuildingIds', 'listBuildingsForLookup', 'listWings', 'findWing', 'findByUsername', 'listWingsForBuildings', 'listForImport', 'listByUsernames', 'applyImport']) {
       expect(typeof customerRepository[method]).toBe('function')
     }
   })
@@ -283,10 +283,12 @@ describe('POST /customers/import', () => {
     expect(res.status).toBe(201)
     expect(res.body.data.createdCount).toBe(2)
     const byRow = Object.fromEntries(res.body.data.skipped.map((s) => [s.row, s]))
-    expect(byRow[3].reason).toMatch(/already recorded/i)
+    expect(byRow[3].reason).toBe('Duplicate in this file')
     expect(byRow[4].reason).toMatch(/building not found/i)
     expect(byRow[5].reason).toMatch(/name is missing/i)
-    expect(byRow[6].reason).toMatch(/already recorded/i)
+    // already stored, same cells → matched by building + mobile, nothing to change
+    expect(byRow[6]).toBeUndefined()
+    expect(res.body.data.rows.find((r) => r.row === 6).outcome).toBe('unchanged')
     expect(await prisma.customer.count({ where: { buildingId: mine.id, mobile: '9000000030' } })).toBe(1)
   })
 
@@ -295,7 +297,7 @@ describe('POST /customers/import', () => {
     expect((await run([])).status).toBe(400)
   })
 
-  it('re-uploading the same file writes nothing and reports every row already recorded', async () => {
+  it('re-uploading the same file writes nothing and reports every row unchanged', async () => {
     const rows = [
       { row: 2, buildingId: mine.id, name: 'Repeat One', mobile: '9000000050' },
       { row: 3, buildingId: theirs.id, name: 'Repeat Two', mobile: '9000000051' },
@@ -305,8 +307,187 @@ describe('POST /customers/import', () => {
     const second = await run(rows)
     expect(second.status).toBe(201)
     expect(second.body.data.createdCount).toBe(0)
-    expect(second.body.data.skipped).toHaveLength(2)
-    expect(second.body.data.skipped.every((s) => /already recorded/i.test(s.reason))).toBe(true)
+    expect(second.body.data.skipped).toHaveLength(0)
+    expect(second.body.data.unchangedCount).toBe(2)
     expect(await prisma.customer.count({ where: { mobile: { in: ['9000000050', '9000000051'] } } })).toBe(2)
+  })
+})
+
+describe('POST /customers/import — upsert, dry run, wings, not in this sheet', () => {
+  const run = (rows, extra = {}) =>
+    request(app).post('/api/v1/customers/import').set(ADMIN).send({ rows, ...extra })
+  const U = (n) => `${S}-i${n}`
+  let imp
+  const BASE = () => [
+    { row: 2, sheet: 'Sheet1', buildingId: imp.id, username: U(1), name: 'Imp One', mobile: '9100000001', wing: 'wing a', email: 'a@x.in' },
+    { row: 3, sheet: 'Sheet1', buildingId: imp.id, username: U(2), name: 'Imp Two', mobile: '9100000002', wing: 'C' },
+  ]
+  const stored = (username) => prisma.customer.findFirst({ where: { username } })
+  const importLogs = () =>
+    prisma.systemLog.count({ where: { userId: IDS.admin, module: 'Customer', action: 'BulkImport' } })
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 150))
+  let firstRun
+
+  beforeAll(async () => {
+    imp = await prisma.building.create({
+      data: { buildingName: `${S} Import Heights`, formattedAddress: 'x', latitude: 18.5, longitude: 73.8, zoneId: zone.id, createdById: IDS.admin },
+    })
+    for (const name of ['A', 'B']) {
+      await prisma.buildingWing.create({ data: { buildingId: imp.id, name, latitude: 18.5, longitude: 73.8 } })
+    }
+  })
+
+  it('dry run writes nothing', async () => {
+    const before = await importLogs()
+    const res = await run(BASE(), { dryRun: true })
+    expect(res.status).toBe(201)
+    expect(res.body.data.createdCount).toBe(2)
+    expect(res.body.data.rows.map((r) => r.outcome)).toEqual(['create', 'create'])
+    expect((await list(imp.id)).body.data.customers).toHaveLength(0)
+    await settle()
+    expect(await importLogs()).toBe(before)
+  })
+
+  it('creates with the wing from the Wing cell', async () => {
+    const before = await importLogs()
+    firstRun = await run(BASE())
+    expect(firstRun.status).toBe(201)
+    expect(firstRun.body.data.createdCount).toBe(2)
+    const wingA = await prisma.buildingWing.findFirst({ where: { buildingId: imp.id, name: 'A' } })
+    expect((await stored(U(1))).wingId).toBe(wingA.id)
+    expect(firstRun.body.data.rows[0]).toMatchObject({ row: 2, sheet: 'Sheet1', outcome: 'create', wingName: 'A', flags: [] })
+    await settle()
+    expect(await importLogs()).toBe(before + 1)
+    const log = await prisma.systemLog.findFirst({
+      where: { userId: IDS.admin, module: 'Customer', action: 'BulkImport' },
+      orderBy: { createdAt: 'desc' },
+    })
+    expect(log.description).toBe('Customer import: 2 created, 0 updated, 0 unchanged, 0 skipped')
+  })
+
+  it('unlocated wing is flagged, customer kept with no wing', async () => {
+    expect((await stored(U(2))).wingId).toBeNull()
+    expect(firstRun.body.data.flagged).toHaveLength(1)
+    expect(firstRun.body.data.flagged[0]).toMatchObject({ row: 3, sheet: 'Sheet1', name: 'Imp Two' })
+    expect(firstRun.body.data.flagged[0].note).toBe('Wing C is not located yet — added without a wing')
+    expect(firstRun.body.data.rows[1].flags).toEqual(['Wing C is not located yet — added without a wing'])
+  })
+
+  it('re-upload of the same rows changes nothing', async () => {
+    const before = await stored(U(1))
+    const res = await run(BASE())
+    expect(res.body.data).toMatchObject({ createdCount: 0, updatedCount: 0, unchangedCount: 2 })
+    expect((await stored(U(1))).updatedAt).toEqual(before.updatedAt)
+  })
+
+  it('update fills only filled cells', async () => {
+    const res = await run([{ row: 2, buildingId: imp.id, username: U(1), name: '', mobile: '', email: '', planName: 'NEW' }])
+    expect(res.status).toBe(201)
+    expect(res.body.data.updatedCount).toBe(1)
+    const after = await stored(U(1))
+    expect(after).toMatchObject({ planName: 'NEW', email: 'a@x.in', name: 'Imp One', mobile: '9100000001' })
+  })
+
+  it('blank Wing keeps the current wing', async () => {
+    const before = await stored(U(1))
+    const res = await run([{ row: 2, buildingId: imp.id, username: U(1), name: 'Imp One', mobile: '9100000001', wing: null }])
+    expect(res.body.data.unchangedCount).toBe(1)
+    expect(res.body.data.rows[0].wingName).toBe('A')
+    expect((await stored(U(1))).wingId).toBe(before.wingId)
+  })
+
+  it('bad email on an update still applies the other cells', async () => {
+    const res = await run([{ row: 2, buildingId: imp.id, username: U(1), name: 'Imp One', mobile: '9100000001', email: 'not-an-email', status: 'Inactive' }])
+    expect(res.status).toBe(201)
+    expect(res.body.data.updatedCount).toBe(1)
+    expect(res.body.data.rows[0].flags).toEqual(['Email address looks wrong — kept the old one'])
+    expect(res.body.data.flagged).toHaveLength(1)
+    const after = await stored(U(1))
+    expect(after).toMatchObject({ status: 'Inactive', email: 'a@x.in' })
+  })
+
+  it('bad mobile on an update keeps the old one, with a flag', async () => {
+    const res = await run([{ row: 2, buildingId: imp.id, username: U(1), name: 'Imp One', mobile: '12', status: 'Active' }])
+    expect(res.body.data.updatedCount).toBe(1)
+    expect(res.body.data.rows[0].flags).toEqual(['Mobile number looks wrong — kept the old one'])
+    expect(await stored(U(1))).toMatchObject({ status: 'Active', mobile: '9100000001' })
+  })
+
+  it('bad email on a new customer is skipped, not a 400', async () => {
+    const res = await run([{ row: 9, buildingId: imp.id, username: U(9), name: 'Bad Mail', mobile: '9100000009', email: 'nope' }])
+    expect(res.status).toBe(201)
+    expect(res.body.data.skipped[0]).toMatchObject({ row: 9, name: 'Bad Mail', reason: 'Email address looks wrong' })
+    expect(res.body.data.rows[0]).toMatchObject({ outcome: 'skip', reason: 'Email address looks wrong' })
+    expect(await stored(U(9))).toBeNull()
+  })
+
+  it('same mobile, different usernames → two customers', async () => {
+    const res = await run([
+      { row: 2, buildingId: imp.id, username: U(3), name: 'Twin', mobile: '9100000003' },
+      { row: 3, buildingId: imp.id, username: U(4), name: 'Twin', mobile: '9100000003' },
+    ])
+    expect(res.body.data.createdCount).toBe(2)
+    expect(await prisma.customer.count({ where: { buildingId: imp.id, mobile: '9100000003' } })).toBe(2)
+  })
+
+  it('a Username twice in one file is skipped the second time', async () => {
+    const res = await run([
+      { row: 2, buildingId: imp.id, username: U(5), name: 'Once', mobile: '9100000005' },
+      { row: 3, buildingId: imp.id, username: U(5), name: 'Twice', mobile: '9100000006' },
+    ])
+    expect(res.body.data.createdCount).toBe(1)
+    expect(res.body.data.skipped[0]).toMatchObject({ row: 3, reason: 'Duplicate in this file' })
+  })
+
+  it('two rows with no Username and no mobile get the real reason, not a duplicate', async () => {
+    const res = await run([
+      { row: 2, buildingId: imp.id, name: 'No Number 1', mobile: '' },
+      { row: 3, buildingId: imp.id, name: 'No Number 2', mobile: '' },
+    ])
+    expect(res.body.data.skipped.map((s) => s.reason)).toEqual(['Mobile number is missing', 'Mobile number is missing'])
+  })
+
+  it('username in another building is skipped', async () => {
+    expect((await post({ buildingId: mine.id, name: 'Other Home', mobile: '9100000010', username: `${S}-u-other` })).status).toBe(201)
+    const res = await run([{ row: 4, buildingId: imp.id, username: `${S}-u-other`, name: 'Moved?', mobile: '9100000010' }])
+    expect(res.status).toBe(201)
+    expect(res.body.data.skipped[0].reason).toBe(`Username belongs to ${mine.buildingName}`)
+    expect((await stored(`${S}-u-other`)).buildingId).toBe(mine.id)
+  })
+
+  it('not in sheet lists untouched customers', async () => {
+    const own = await prisma.building.create({
+      data: { buildingName: `${S} Not In Sheet`, formattedAddress: 'x', latitude: 18.5, longitude: 73.8, zoneId: zone.id, createdById: IDS.admin },
+    })
+    const three = [1, 2, 3].map((n) => ({ row: n + 1, buildingId: own.id, username: `${S}-n${n}`, name: `Nis ${n}`, mobile: `920000000${n}` }))
+    expect((await run(three)).body.data.createdCount).toBe(3)
+    const third = await stored(`${S}-n3`)
+    const res = await run(three.slice(0, 2))
+    expect(res.body.data.unchangedCount).toBe(2)
+    expect(res.body.data.notInSheet).toEqual([
+      { id: third.id, name: 'Nis 3', mobile: '9200000003', buildingName: own.buildingName, wingName: null },
+    ])
+    expect(await stored(`${S}-n3`)).toEqual(third)
+  })
+
+  it('a 900-row file with long addresses is accepted', async () => {
+    const rows = Array.from({ length: 900 }, (_, i) => ({
+      row: i + 2,
+      buildingId: imp.id,
+      username: `${S}-big-${i}`,
+      name: `Big Customer ${i}`.padEnd(100, '.'),
+      mobile: String(9300000000 + i),
+      address: 'x'.repeat(490),
+      olt: 't'.repeat(90),
+      site: 's'.repeat(90),
+      operator: 'o'.repeat(90),
+      networkZone: 'z'.repeat(90),
+      planName: 'p'.repeat(90),
+    }))
+    expect(JSON.stringify({ rows }).length).toBeGreaterThan(1024 * 1024) // past the global 1 MB parser
+    const res = await run(rows, { dryRun: true })
+    expect(res.status).not.toBe(413)
+    expect(res.status).toBe(201)
+    expect(res.body.data.createdCount).toBe(900)
   })
 })

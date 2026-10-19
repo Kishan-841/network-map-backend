@@ -96,14 +96,25 @@ export const lookupSchema = z.object({
  * sheet, and the service turns a bad row into a *skip with a reason* rather
  * than failing the whole file with a 400.
  */
+const { wingId: _wingId, ...importFields } = customerFields
+
+/**
+ * The wing arrives as the sheet's *name* (matched server-side), never an id;
+ * the email is plain text so a bad one on an update can be flagged and
+ * dropped instead of failing the whole file.
+ */
 const importRowSchema = z.object({
   row: z.number().int().min(1).max(100_000),
+  sheet: nullableText(60),
   buildingId: z.string().min(1).max(100),
-  ...customerFields,
+  ...importFields,
   name: z.string().trim().max(120),
   mobile: z.string().trim().max(20),
+  email: nullableText(150),
+  wing: nullableText(60),
 })
 
 export const importCustomersSchema = z.object({
   rows: z.array(importRowSchema).min(1).max(1000),
+  dryRun: z.boolean().optional(),
 })

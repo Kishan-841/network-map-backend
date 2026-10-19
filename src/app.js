@@ -66,6 +66,8 @@ export function createApp() {
   // Parsed here first, so the global 1 MB parser below sees a consumed body
   // and skips it.
   app.use('/api/v1/sales/tasks', express.json({ limit: '5mb' }))
+  // A customer billing sheet is up to 1,000 rows with long addresses.
+  app.use('/api/v1/customers/import', express.json({ limit: '5mb' }))
   app.use(express.json({ limit: '1mb' }))
 
   app.get('/api/v1/health', (req, res) => {

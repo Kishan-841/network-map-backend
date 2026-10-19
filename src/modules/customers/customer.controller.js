@@ -78,7 +78,9 @@ export const customerController = {
 
   async importRows(req, res, next) {
     try {
-      const result = await customerService.importCustomers(req.body.rows, req.user)
+      const result = await customerService.importCustomers(req.body.rows, req.user, {
+        dryRun: req.body.dryRun === true,
+      })
       res.status(201).json({ success: true, data: result })
     } catch (err) {
       next(err)

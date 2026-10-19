@@ -29,18 +29,25 @@ customerRoutes.post(
   customerController.lookup,
 )
 
+// The file can hold ~1k rows of personal data — log the outcome, not the rows.
+const auditImport = audit('Customer', 'BulkImport', {
+  describe: (req, old, body) => {
+    const data = body?.data ?? {}
+    return `Customer import: ${data.createdCount ?? 0} created, ${data.updatedCount ?? 0} updated, ${data.unchangedCount ?? 0} unchanged, ${data.skipped?.length ?? 0} skipped`
+  },
+  newValue: (req, body) => ({
+    createdCount: body?.data?.createdCount ?? 0,
+    updatedCount: body?.data?.updatedCount ?? 0,
+    unchangedCount: body?.data?.unchangedCount ?? 0,
+    skipped: body?.data?.skipped?.length ?? 0,
+  }),
+})
+
 customerRoutes.post(
   '/import',
   requireRole('ADMIN'),
-  // The file can hold ~1k rows of personal data — log the outcome, not the rows.
-  audit('Customer', 'BulkCreate', {
-    describe: (req, old, body) =>
-      `Customer import: ${body?.data?.createdCount ?? 0} created, ${body?.data?.skipped?.length ?? 0} skipped`,
-    newValue: (req, body) => ({
-      createdCount: body?.data?.createdCount ?? 0,
-      skipped: body?.data?.skipped?.length ?? 0,
-    }),
-  }),
+  // A dry run (the preview) changes nothing, so it leaves no log entry.
+  (req, res, next) => (req.body?.dryRun === true ? next() : auditImport(req, res, next)),
   validateBody(importCustomersSchema),
   customerController.importRows,
 )
