@@ -33,20 +33,6 @@ export const customerRepository = {
 
   remove: (id) => prisma.customer.delete({ where: { id } }),
 
-  /**
-   * The import writes in one statement. `updatedAt` is passed explicitly —
-   * `createMany` skips Prisma's `@updatedAt` and the column has no DB default.
-   */
-  createMany: (rows) =>
-    prisma.customer.createMany({ data: rows.map((row) => ({ ...row, updatedAt: new Date() })) }),
-
-  /** Every (building, mobile) already stored, for the import's duplicate check. */
-  listMobilesForBuildings: (buildingIds) =>
-    prisma.customer.findMany({
-      where: { buildingId: { in: buildingIds } },
-      select: { buildingId: true, mobile: true },
-    }),
-
   /** Located wings of many buildings, as `Map<buildingId, wings[]>`, for the import. */
   listWingsForBuildings: async (buildingIds) => {
     const rows = await prisma.buildingWing.findMany({

@@ -19,7 +19,12 @@ import { mapLimit, redactConnection, summariseConnection } from '../../lib/olt-o
  *
  * `createCustomerService({ customerRepository, buildingService })`.
  */
-export function createCustomerService({ customerRepository, buildingService, getOpticalLookup = () => null }) {
+export function createCustomerService({
+  customerRepository,
+  buildingService,
+  getOpticalLookup = () => null,
+  connectionDeadlineMs = 15000,
+}) {
   const TEXT_FIELDS = [
     'username',
     'address',
@@ -116,7 +121,31 @@ export function createCustomerService({ customerRepository, buildingService, get
     const optical = getOpticalLookup()
     if (!optical?.enabled) return { enabled: false }
     const customers = await customerRepository.listByBuilding(buildingId)
-    const list = await mapLimit(customers, FAN_OUT, (cu) => connectionOf(optical, cu.username))
+    // Overall deadline: lookups still running when it passes count as
+    // unavailable; they may finish later and fill the lookup cache.
+    const unavailable = () => summariseConnection({ unavailable: true })
+    const done = new Array(customers.length).fill(null)
+    let expired = false
+    const work = mapLimit(customers, FAN_OUT, async (cu, i) => {
+      if (expired) return null // not started in time: no new OLT call
+      try {
+        done[i] = await connectionOf(optical, cu.username)
+      } catch {
+        done[i] = unavailable()
+      }
+      return null
+    }).catch(() => {})
+    let timer
+    const deadline = new Promise((resolve) => {
+      timer = setTimeout(resolve, connectionDeadlineMs)
+    })
+    try {
+      await Promise.race([work, deadline])
+    } finally {
+      clearTimeout(timer)
+      expired = true
+    }
+    const list = done.map((d) => d ?? unavailable())
     const counts = { online: 0, offline: 0, notSeen: 0, notLinked: 0, noUsername: 0, unavailable: 0, weak: 0 }
     const connections = {}
     customers.forEach((cu, i) => {

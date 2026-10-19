@@ -102,7 +102,7 @@ export function summariseConnection(lookup) {
   const best = pickBest(onus)
   const signalDropped =
     best.rxDbm != null && best.baselineRxDbm != null && best.rxDbm <= best.baselineRxDbm - DROP_DB + 1e-9
-  const weak = state === 'online' && (best.rxQuality !== 'good' || signalDropped)
+  const weak = state === 'online' && ((best.rxQuality != null && best.rxQuality !== 'good') || signalDropped)
   return { state, onus, best, signalDropped, weak }
 }
 

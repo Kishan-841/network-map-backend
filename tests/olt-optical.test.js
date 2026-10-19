@@ -16,6 +16,18 @@ const make = (fetchImpl, extra = {}) =>
   createOpticalLookup({ fetchImpl, baseUrl: 'https://olt.test/api/', apiKey: 'test-key', ...extra })
 
 describe('lookup + normalise', () => {
+  it('drops location and unknown keys from a raw ONU', async () => {
+    const raw = { ...JSON.parse(JSON.stringify(ONLINE)) }
+    raw.onus[0].location = 'telnet admin/secret'
+    raw.onus[0].foo = 'bar'
+    const r = await make(vi.fn(async () => reply(200, raw))).lookup('8983453863')
+    const text = JSON.stringify(r)
+    expect(text).not.toContain('telnet')
+    expect(text).not.toContain('secret')
+    expect(text).not.toContain('foo')
+    expect(text).not.toContain('location')
+  })
+
   it('normalises an online customer and sends key + encoded username', async () => {
     const f = vi.fn(async () => reply(200, ONLINE))
     const r = await make(f).lookup('8983453863')
@@ -101,6 +113,8 @@ describe('summariseConnection', () => {
     expect(sum(onu({ rxQuality: 'poor' })).weak).toBe(true)
     expect(sum(onu({ rxDbm: -20, baselineRxDbm: -12 })).weak).toBe(true)
     expect(sum(onu({ status: 'offline', rxQuality: 'poor' })).weak).toBe(false)
+    expect(sum(onu({ rxQuality: null })).weak).toBe(false)
+    expect(sum(onu({ rxQuality: null, rxDbm: -20, baselineRxDbm: -12 })).weak).toBe(true)
   })
 
   it('offline: linked, not stale, not online', () => {

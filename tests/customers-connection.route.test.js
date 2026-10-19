@@ -5,6 +5,7 @@ import { createApp } from '../src/app.js'
 import { env } from '../src/config/env.js'
 import { prisma } from '../src/lib/prisma.js'
 import { createOpticalLookup, ADMIN_ONLY_ONU_FIELDS } from '../src/lib/olt-optical.js'
+import { createCustomerService } from '../src/modules/customers/customer.service.js'
 import { setOpticalLookupForTests } from '../src/modules/customers/customer.controller.js'
 
 const app = createApp()
@@ -79,6 +80,26 @@ afterAll(async () => {
   await prisma.building.deleteMany({ where: { buildingName: { startsWith: S } } })
   await prisma.user.deleteMany({ where: { id: { in: Object.values(IDS) } } })
   await prisma.zone.delete({ where: { id: zone.id } })
+})
+
+describe('building connections deadline', () => {
+  it('a lookup that never resolves is unavailable once the deadline passes; others intact', async () => {
+    const rows = [{ id: 'a', username: 'fast' }, { id: 'b', username: 'hang' }, { id: 'c', username: null }]
+    const lookup = async (u) => (u === 'hang' ? new Promise(() => {}) : u ? { found: false } : null)
+    const svc = createCustomerService({
+      customerRepository: { listByBuilding: async () => rows },
+      buildingService: { getBuilding: async () => ({}) },
+      getOpticalLookup: () => ({ enabled: true, lookup }),
+      connectionDeadlineMs: 50,
+    })
+    const t0 = Date.now()
+    const out = await svc.getBuildingConnections({ buildingId: 'x' }, { role: 'ADMIN' })
+    expect(Date.now() - t0).toBeLessThan(1000)
+    expect(out.connections.a.state).toBe('not_linked')
+    expect(out.connections.b).toEqual({ state: 'unavailable', onus: [], best: null, signalDropped: false, weak: false })
+    expect(out.connections.c.state).toBe('no_username')
+    expect(out.counts.unavailable).toBe(1)
+  })
 })
 
 describe('GET /customers/connections', () => {
