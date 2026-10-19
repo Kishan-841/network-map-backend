@@ -20,6 +20,11 @@ customerRoutes.use(requireAuth)
 
 customerRoutes.get('/', validateQuery(listQuerySchema), customerController.list)
 
+// Before '/:id' so "connections" is not read as a customer id.
+customerRoutes.get('/connections', validateQuery(listQuerySchema), customerController.connections)
+
+customerRoutes.get('/:id/connection', customerController.connection)
+
 customerRoutes.get('/:id', customerController.get)
 
 customerRoutes.post(

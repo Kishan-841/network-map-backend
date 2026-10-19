@@ -7,6 +7,7 @@ import {
   mergeCustomerUpdate,
   normaliseMobile,
 } from '../../lib/customers.js'
+import { mapLimit, redactConnection, summariseConnection } from '../../lib/olt-optical.js'
 
 /**
  * Customers of a building (spec 2026-10-17).
@@ -18,7 +19,7 @@ import {
  *
  * `createCustomerService({ customerRepository, buildingService })`.
  */
-export function createCustomerService({ customerRepository, buildingService }) {
+export function createCustomerService({ customerRepository, buildingService, getOpticalLookup = () => null }) {
   const TEXT_FIELDS = [
     'username',
     'address',
@@ -93,6 +94,44 @@ export function createCustomerService({ customerRepository, buildingService }) {
       wings,
       building: { id: building.id, buildingName: building.buildingName },
     }
+  }
+
+  // Connection status from the OLT API (spec 2026-10-19). Reads follow the
+  // building's read rule; only ADMIN keeps the device identifiers.
+  const FAN_OUT = 5
+  const COUNT_KEY = {
+    online: 'online',
+    offline: 'offline',
+    not_seen: 'notSeen',
+    not_linked: 'notLinked',
+    no_username: 'noUsername',
+    unavailable: 'unavailable',
+  }
+  const view = (connection, actor) => (actor?.role === 'ADMIN' ? connection : redactConnection(connection))
+  const connectionOf = async (optical, username) =>
+    summariseConnection(await optical.lookup(username)) // blank -> null -> no_username
+
+  async function getBuildingConnections({ buildingId }, actor) {
+    await buildingService.getBuilding(buildingId, actor) // 404 out of scope
+    const optical = getOpticalLookup()
+    if (!optical?.enabled) return { enabled: false }
+    const customers = await customerRepository.listByBuilding(buildingId)
+    const list = await mapLimit(customers, FAN_OUT, (cu) => connectionOf(optical, cu.username))
+    const counts = { online: 0, offline: 0, notSeen: 0, notLinked: 0, noUsername: 0, unavailable: 0, weak: 0 }
+    const connections = {}
+    customers.forEach((cu, i) => {
+      counts[COUNT_KEY[list[i].state]] += 1
+      if (list[i].weak) counts.weak += 1
+      connections[cu.id] = view(list[i], actor)
+    })
+    return { enabled: true, connections, counts }
+  }
+
+  async function getCustomerConnection(id, actor) {
+    const customer = await getCustomer(id, actor) // 404 out of scope
+    const optical = getOpticalLookup()
+    if (!optical?.enabled) return { enabled: false }
+    return { enabled: true, connection: view(await connectionOf(optical, customer.username), actor) }
   }
 
   async function createCustomer(body, actor) {
@@ -317,6 +356,8 @@ export function createCustomerService({ customerRepository, buildingService }) {
   return {
     listCustomers,
     getCustomer,
+    getBuildingConnections,
+    getCustomerConnection,
     createCustomer,
     updateCustomer,
     deleteCustomer,
