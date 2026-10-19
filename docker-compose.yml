@@ -43,6 +43,10 @@ services:
     volumes:
       # Persist uploaded documents/photos across container restarts.
       - uploads:/app/uploads
+    # The OLT API host is only in the ISP's internal DNS (not public DNS); the
+    # container cannot read the VM's /etc/hosts. Remove once a public A record exists.
+    extra_hosts:
+      - "olt.gazonindia.com:202.136.68.17"
 
 volumes:
   db-data:

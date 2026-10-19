@@ -185,17 +185,18 @@ not allow-listed or the key is inactive.
 **DNS.** `olt.gazonindia.com` is not in public DNS. It resolves only on the
 ISP's internal DNS, to `202.136.68.17`, and the VM cannot resolve it. The
 preferred fix is for the OLT team to add a public A record for
-`olt.gazonindia.com` pointing to `202.136.68.17`. The fallback is to add this to
-the `api` service in `docker-compose.yml`:
+`olt.gazonindia.com` pointing to `202.136.68.17`. Until then,
+`docker-compose.yml` already carries the fallback on the `api` service:
 
 ```yaml
     extra_hosts:
       - "olt.gazonindia.com:202.136.68.17"
 ```
 
-The host's `/etc/hosts` is not visible inside the container, so this entry must
-be in compose. This doc change does not touch `docker-compose.yml`; add the
-entry in a separate deploy change when it is needed.
+The host's `/etc/hosts` is not visible inside the container, so this entry has to
+live in compose. Once a public A record exists, delete the `extra_hosts` block
+(and its comment) from `docker-compose.yml`, then run
+`docker compose up -d --build` to recreate the `api` container.
 
 **Quick check from the VM.** Read the key without putting it in shell history,
 then call the ping endpoint:
