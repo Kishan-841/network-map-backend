@@ -83,6 +83,12 @@ export const env = {
     // Public base URL the files are served from (r2.dev or a custom domain).
     publicUrl: (process.env.R2_PUBLIC_URL ?? '').replace(/\/+$/, ''),
   },
+  // Company OLT monitoring API (customer connection status). Both unset =
+  // feature off; deliberately NOT required, the server boots without them.
+  olt: {
+    apiUrl: (process.env.OLT_API_URL ?? '').replace(/\/+$/, ''),
+    apiKey: process.env.OLT_API_KEY,
+  },
   duplicateRadiusMeters: Number(process.env.DUPLICATE_RADIUS_METERS ?? 100),
   // Comma-separated list of allowed browser origins, or '*' (dev default).
   // In production set this to your frontend URL(s).
