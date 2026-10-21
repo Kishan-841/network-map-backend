@@ -68,7 +68,7 @@ export function createOpticalLookup({
   /** Reserve a token; resolves to the ms to wait, or null if too long. */
   function reserve() {
     const t = now()
-    tokens = Math.min(burst, tokens + ((t - refilledAt) / 1000) * ratePerSec)
+    tokens = Math.min(burst, tokens + (Math.max(0, t - refilledAt) / 1000) * ratePerSec)
     refilledAt = t
     const wait = tokens >= 1 ? 0 : Math.ceil(((1 - tokens) / ratePerSec) * 1000)
     if (wait > maxWaitMs) return null
@@ -102,7 +102,11 @@ export function createOpticalLookup({
         const json = await res.json()
         value = { found: true, onus: (Array.isArray(json?.onus) ? json.onus : []).map(normaliseOnu) }
       } else if (res.status === 429) {
-        pausedUntil = now() + retryAfterMs(res)
+        pausedUntil = Math.max(pausedUntil, now() + retryAfterMs(res))
+        // Drain the bucket and hold refill until the pause ends, so we
+        // don't burst the moment it lifts (the server has refilled far less).
+        tokens = Math.min(tokens, 0)
+        refilledAt = pausedUntil
         return RATE_LIMITED()
       } else return { unavailable: true, reason: 'error' }
     } catch {

@@ -168,7 +168,7 @@ describe('rate limiting', () => {
   const clock = () => {
     const c = { t: 1000, slept: [] }
     c.now = () => c.t
-    c.sleep = async (ms) => { c.slept.push(ms); c.t += ms }
+    c.sleep = async (ms) => { c.slept.push(ms); await null; c.t += ms } // time passes only after concurrent callers have reserved
     return c
   }
   const ok = () => vi.fn(async () => reply(200, ONLINE))
@@ -244,6 +244,61 @@ describe('rate limiting', () => {
     const [x, y] = await Promise.all([o.lookup('u'), o.lookup('u')])
     expect(f).toHaveBeenCalledTimes(1)
     expect(x).toEqual(y)
+  })
+
+  it('concurrent waiters get distinct, increasing waits', async () => {
+    const c = clock(), f = ok()
+    const o = make(f, { now: c.now, sleep: c.sleep, burst: 1, ratePerSec: 1 })
+    await o.lookup('a')
+    await Promise.all([o.lookup('b'), o.lookup('c')])
+    expect(c.slept).toEqual([1000, 2000])
+    expect(f).toHaveBeenCalledTimes(3)
+  })
+
+  it('a sleeper that wakes into a 429 pause makes no request', async () => {
+    const c = clock()
+    let release
+    const f = vi.fn(() => new Promise((r) => { release = () => r(reply(429, {}, { 'retry-after': '12' })) }))
+    let a
+    const sleep = async (ms) => { c.slept.push(ms); c.t += ms; release(); await a }
+    const o = make(f, { now: c.now, sleep, burst: 1, ratePerSec: 1 })
+    a = o.lookup('a')
+    expect(await o.lookup('b')).toEqual(RL)
+    expect(await a).toEqual(RL)
+    expect(f).toHaveBeenCalledTimes(1)
+  })
+
+  it('a failed de-duplicated request is retried by the next lookup', async () => {
+    const f = vi.fn(async () => reply(500, {}))
+    const o = make(f)
+    await Promise.all([o.lookup('u'), o.lookup('u')])
+    expect(f).toHaveBeenCalledTimes(1)
+    await o.lookup('u')
+    expect(f).toHaveBeenCalledTimes(2)
+  })
+
+  it('a 429 drains the bucket: after the pause lookups wait for refill', async () => {
+    const c = clock()
+    let status = 429
+    const f = vi.fn(async () => status === 429 ? reply(429, {}, { 'retry-after': '10' }) : reply(200, ONLINE))
+    const o = make(f, { now: c.now, sleep: c.sleep, burst: 5, ratePerSec: 1 })
+    await o.lookup('a')
+    c.t += 10000
+    status = 200
+    await Promise.all(['x', 'y', 'z'].map((u) => o.lookup(u)))
+    expect(c.slept).toEqual([1000, 2000, 3000])
+  })
+
+  it('the pause only grows', async () => {
+    const c = clock()
+    const hdr = ['60', '5']
+    const f = vi.fn(async () => reply(429, {}, { 'retry-after': hdr.shift() ?? '5' }))
+    const g = vi.fn(async (...a) => f(...a))
+    const o = make(g, { now: c.now, sleep: c.sleep })
+    await Promise.all([o.lookup('a'), o.lookup('b')]) // both in flight: 60 s then 5 s
+    c.t += 6000
+    expect(await o.lookup('c')).toEqual(RL)
+    expect(g).toHaveBeenCalledTimes(2)
   })
 
   it('other failures stay plain unavailable and are not cached', async () => {
