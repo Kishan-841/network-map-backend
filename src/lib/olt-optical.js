@@ -61,8 +61,9 @@ export function createOpticalLookup({
   const cache = new Map()
   const inflight = new Map()
 
-  // The API accepts ~120 requests in a burst, then ~2/s. One bucket per
-  // instance (= per API process). tokens may go negative: that is the queue.
+  // The API allows 120 requests per rolling 60 s, then 429 + Retry-After; we
+  // pace with a token bucket (default burst 50, 1/s). One bucket per instance
+  // (= per API process). tokens may go negative: that is the queue.
   let tokens = burst
   let refilledAt = now()
   let pausedUntil = 0

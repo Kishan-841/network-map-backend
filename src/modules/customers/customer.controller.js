@@ -20,7 +20,7 @@ const buildingService = createBuildingService({
   operatorRepository,
 })
 
-// One OLT client for the process (it holds the 5-minute cache). Tests swap it
+// One OLT client for the process (it holds the 10-minute cache). Tests swap it
 // with setOpticalLookupForTests(fake); null restores the one built from env.
 const buildOptical = () => createOpticalLookup({ baseUrl: env.olt.apiUrl, apiKey: env.olt.apiKey })
 let opticalLookup = buildOptical()
