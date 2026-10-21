@@ -88,3 +88,52 @@ export const appVersionLimiter = rateLimit({
   skip: () => process.env.NODE_ENV === 'test',
   handler: (req, res) => json(res, 'Too many requests. Try again in a few minutes.'),
 })
+
+/**
+ * POST /customers/refresh, per signed-in user (spec 2026-10-21-customers-refresh §2):
+ * every call can spend OLT API tokens the whole process shares, so one user
+ * gets at most `limit` calls a minute. Mount after requireAuth (keyed by user id).
+ * The route mounts the instance below, skipped under NODE_ENV=test; tests
+ * build their own with this factory.
+ */
+export function createCustomerRefreshLimiter({ limit = 6, windowMs = 60 * 1000, skip } = {}) {
+  return rateLimit({
+    windowMs,
+    limit,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => `user:${req.user?.id}`,
+    ...(skip && { skip }),
+    handler: (req, res) => json(res, 'Too many status refreshes. Try again in a minute.'),
+  })
+}
+
+/**
+ * `force: true` on /customers/refresh re-asks the OLT API for every row, so it
+ * is honoured at most once per `intervalMs` per user. A repeat inside the
+ * window is not refused — it just runs as a normal (staleness-checked)
+ * refresh. Mount after validateBody (reads/writes req.body.force).
+ */
+export function createForceThrottle({ intervalMs = 30 * 1000, now = Date.now, maxUsers = 5000, skip } = {}) {
+  const lastForce = new Map() // userId -> when force was last honoured
+  return (req, res, next) => {
+    if (skip?.(req) || req.body?.force !== true) return next()
+    const id = req.user?.id
+    const t = now()
+    const last = lastForce.get(id)
+    if (last != null && t - last < intervalMs) {
+      req.body.force = false
+      return next()
+    }
+    if (!lastForce.has(id) && lastForce.size >= maxUsers) {
+      for (const [k, at] of lastForce) if (t - at >= intervalMs) lastForce.delete(k)
+      if (lastForce.size >= maxUsers) lastForce.delete(lastForce.keys().next().value)
+    }
+    lastForce.set(id, t)
+    return next()
+  }
+}
+
+const inTest = () => process.env.NODE_ENV === 'test'
+export const customerRefreshLimiter = createCustomerRefreshLimiter({ skip: inTest })
+export const customerRefreshForceThrottle = createForceThrottle({ skip: inTest })

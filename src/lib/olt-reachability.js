@@ -12,6 +12,11 @@
  * and is retried after `retryMs`, not on every call. Never fetched → empty set.
  * Feature off (no url/key) → empty set, no request.
  *
+ * Stale-while-revalidate: once a set is known, callers get it at once and an
+ * expired one is refreshed in the background (one refresh in flight at most).
+ * Only the very first fetch is waited for, and only for `firstWaitMs` (3 s);
+ * past that the caller gets an empty set and the fetch finishes on its own.
+ *
  * `acquire` / `notePause` plug the request into the optical lookup's token
  * bucket, so this call spends the same key budget the lookups do.
  */
@@ -22,6 +27,7 @@ export function createOltReachability({
   ttlMs = 600000, // 10 min
   retryMs = 60000,
   timeoutMs = 8000,
+  firstWaitMs = 3000,
   now = Date.now,
   acquire = async () => true,
   notePause = () => {},
@@ -31,6 +37,7 @@ export function createOltReachability({
   let known = null // Set<string> from the last good answer
   let nextAt = 0 // when the next request may go
   let inflight = null
+  let firstAttempt = true
 
   function namesOf(json) {
     const rows = Array.isArray(json) ? json : Array.isArray(json?.olts) ? json.olts : null
@@ -68,12 +75,26 @@ export function createOltReachability({
 
   async function unreachableOlts() {
     if (!enabled) return new Set()
-    if (now() >= nextAt) {
-      if (!inflight) inflight = refresh().finally(() => { inflight = null })
-      await inflight
+    if (now() >= nextAt && !inflight) inflight = refresh().finally(() => { inflight = null })
+    if (firstAttempt && inflight) {
+      // The very first fetch: wait for it, but never longer than firstWaitMs.
+      firstAttempt = false
+      let timer
+      const cap = new Promise((resolve) => {
+        timer = setTimeout(resolve, firstWaitMs)
+        timer.unref?.()
+      })
+      try {
+        await Promise.race([inflight, cap])
+      } finally {
+        clearTimeout(timer)
+      }
     }
     return new Set(known ?? [])
   }
 
-  return { enabled, unreachableOlts }
+  /** Resolves once no refresh is in flight (tests; a graceful shutdown). */
+  const whenIdle = () => inflight ?? Promise.resolve()
+
+  return { enabled, unreachableOlts, whenIdle }
 }

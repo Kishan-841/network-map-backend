@@ -6,7 +6,12 @@ import { createOltReachability } from '../../lib/olt-reachability.js'
 // bucket). The controller and the background refresher both use this one, so
 // they share the budget. Tests swap it with setOpticalLookupForTests(fake);
 // null restores the one built from env.
-const build = () => createOpticalLookup({ baseUrl: env.olt.apiUrl, apiKey: env.olt.apiKey })
+// Under NODE_ENV=test both are built DISABLED (no url, no key), so no test can
+// reach the real OLT API by accident; a test that needs one injects a fake.
+const IS_TEST = process.env.NODE_ENV === 'test'
+const oltUrl = IS_TEST ? '' : env.olt.apiUrl
+const oltKey = IS_TEST ? '' : env.olt.apiKey
+const build = () => createOpticalLookup({ baseUrl: oltUrl, apiKey: oltKey })
 let current = build()
 
 export const getOpticalLookup = () => current
@@ -20,8 +25,8 @@ export function setOpticalLookupForTests(lookup) {
 // setOltReachabilityForTests(fake); null restores the env-built one.
 const buildReachability = () =>
   createOltReachability({
-    baseUrl: env.olt.apiUrl,
-    apiKey: env.olt.apiKey,
+    baseUrl: oltUrl,
+    apiKey: oltKey,
     acquire: async () => (current.acquire ? current.acquire() : true),
     notePause: (res) => current.notePause?.(res),
   })

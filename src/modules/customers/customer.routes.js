@@ -12,6 +12,7 @@ import {
 } from './customer.schemas.js'
 import { customerController } from './customer.controller.js'
 import { audit } from '../system-logs/audit.js'
+import { customerRefreshForceThrottle, customerRefreshLimiter } from '../../middleware/rate-limit.js'
 import { customerRepository } from './customer.repository.js'
 
 export const customerRoutes = Router()
@@ -29,7 +30,14 @@ customerRoutes.get('/list.csv', validateQuery(listAllQuerySchema), customerContr
 
 // Fresh connection status for the rows on screen (spec 2026-10-21-customers-refresh §2):
 // any signed-in staff; ids outside the actor's building scope are dropped.
-customerRoutes.post('/refresh', validateBody(refreshCustomersSchema), customerController.refresh)
+// 6 calls a minute per user; force honoured once per 30 s per user (else run as non-force).
+customerRoutes.post(
+  '/refresh',
+  customerRefreshLimiter,
+  validateBody(refreshCustomersSchema),
+  customerRefreshForceThrottle,
+  customerController.refresh,
+)
 
 // Before '/:id' so "connections" is not read as a customer id.
 customerRoutes.get('/connections', validateQuery(listQuerySchema), customerController.connections)

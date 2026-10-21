@@ -10,6 +10,8 @@ const DAY_MS = 24 * 60 * 60 * 1000
 export const CSV_CAP = 5000
 /** POST /customers/refresh re-checks a row only when its snapshot is older than this (or never taken), unless forced. */
 export const REFRESH_STALE_MS = 5 * 60 * 1000
+/** Refresh starts no new lookup while the shared bucket holds fewer tokens than this (building pages and the background job keep a floor). */
+export const REFRESH_MIN_TOKENS = 15
 /** At most this many ids per refresh call. */
 export const REFRESH_MAX_IDS = 50
 

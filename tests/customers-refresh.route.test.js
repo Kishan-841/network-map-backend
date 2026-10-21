@@ -216,7 +216,7 @@ describe('refreshCustomers (service) — deadline', () => {
     building: { id: 'b', buildingName: 'B', zone: null }, wing: null,
   })
 
-  function make({ lookup, rows, deadline = 50 }) {
+  function make({ lookup, rows, deadline = 50, availableTokens }) {
     const saved = []
     const service = createCustomerService({
       customerRepository: {
@@ -225,7 +225,7 @@ describe('refreshCustomers (service) — deadline', () => {
         saveConnectionSnapshots: async (entries) => { saved.push(...entries) },
       },
       buildingService: { readScope: async () => () => true },
-      getOpticalLookup: () => ({ enabled: true, lookup }),
+      getOpticalLookup: () => ({ enabled: true, lookup, ...(availableTokens && { availableTokens }) }),
       getOltReachability: () => ({ unreachableOlts: async () => new Set() }),
       refreshDeadlineMs: deadline,
     })
@@ -268,5 +268,29 @@ describe('refreshCustomers (service) — deadline', () => {
     expect(lookup).not.toHaveBeenCalled() // checked just now: not stale
     await service.refreshCustomers({ ids: ['a'], force: true }, { role: 'ADMIN' })
     expect(lookup).toHaveBeenCalledWith('x', { fresh: true })
+  })
+
+  it('starts no new lookup once the shared bucket is under the floor (15); those rows are pending', async () => {
+    let tokens = 17
+    const lookup = vi.fn(async () => {
+      tokens -= 1
+      return { found: false }
+    })
+    const rows = Array.from({ length: 6 }, (_, i) => row(`r${i}`, `u${i}`))
+    const { service, saved } = make({ lookup, rows, availableTokens: () => tokens })
+    const out = await service.refreshCustomers({ ids: rows.map((r) => r.id) }, { role: 'ADMIN' })
+    // 17 and 16 are at or above 15; at 15 one more starts, at 14 none.
+    expect(lookup).toHaveBeenCalledTimes(3)
+    expect(saved).toHaveLength(3)
+    expect(out.pending).toEqual(['r3', 'r4', 'r5'])
+  })
+
+  it('an empty-ish bucket checks nothing at all', async () => {
+    const lookup = vi.fn(async () => ({ found: false }))
+    const rows = [row('a', 'x'), row('b', 'y')]
+    const { service } = make({ lookup, rows, availableTokens: () => 3 })
+    const out = await service.refreshCustomers({ ids: ['a', 'b'] }, { role: 'ADMIN' })
+    expect(lookup).not.toHaveBeenCalled()
+    expect(out.pending).toEqual(['a', 'b'])
   })
 })
