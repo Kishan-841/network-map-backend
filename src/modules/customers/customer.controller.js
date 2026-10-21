@@ -1,11 +1,10 @@
-import { env } from '../../config/env.js'
-import { createOpticalLookup } from '../../lib/olt-optical.js'
 import { getStorageProvider } from '../../lib/storage/index.js'
 import { buildingRepository } from '../buildings/building.repository.js'
 import { createBuildingService } from '../buildings/building.service.js'
 import { operatorRepository } from '../operators/operator.repository.js'
 import { userRepository } from '../users/user.repository.js'
 import { zoneRepository } from '../zones/zone.repository.js'
+import { getOpticalLookup } from './optical-lookup.js'
 import { customerRepository } from './customer.repository.js'
 import { createCustomerService } from './customer.service.js'
 
@@ -20,19 +19,13 @@ const buildingService = createBuildingService({
   operatorRepository,
 })
 
-// One OLT client for the process (it holds the 10-minute cache). Tests swap it
-// with setOpticalLookupForTests(fake); null restores the one built from env.
-const buildOptical = () => createOpticalLookup({ baseUrl: env.olt.apiUrl, apiKey: env.olt.apiKey })
-let opticalLookup = buildOptical()
-export function setOpticalLookupForTests(lookup) {
-  opticalLookup = lookup ?? buildOptical()
-}
-
 const customerService = createCustomerService({
   customerRepository,
   buildingService,
-  getOpticalLookup: () => opticalLookup,
+  getOpticalLookup,
 })
+
+export { setOpticalLookupForTests } from './optical-lookup.js'
 
 export const customerController = {
   async list(req, res, next) {

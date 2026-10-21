@@ -42,6 +42,15 @@ export const customerRepository = {
     )
   },
 
+  /** Customers with a Username, least recently checked first (never checked first). */
+  listForRefresh: (limit) =>
+    prisma.customer.findMany({
+      where: { username: { not: null }, NOT: { username: '' } },
+      orderBy: [{ connCheckedAt: { sort: 'asc', nulls: 'first' } }, { id: 'asc' }],
+      take: limit,
+      select: { id: true, username: true },
+    }),
+
   remove: (id) => prisma.customer.delete({ where: { id } }),
 
   /** Located wings of many buildings, as `Map<buildingId, wings[]>`, for the import. */

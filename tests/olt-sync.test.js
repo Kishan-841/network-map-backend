@@ -1,0 +1,101 @@
+import { describe, it, expect, vi } from 'vitest'
+import { createOltSync } from '../src/lib/olt-sync.js'
+
+const online = { found: true, onus: [{ status: 'online', stale: false, rxDbm: -20, rxQuality: 'good' }] }
+
+function make({ rows = [], enabled = true, paused = false, tokens = 60, answer = () => online } = {}) {
+  const state = { paused }
+  const lookup = {
+    enabled,
+    isPaused: () => state.paused,
+    availableTokens: () => tokens,
+    lookup: vi.fn(async (u) => answer(u, state)),
+  }
+  const repo = {
+    listForRefresh: vi.fn(async (n) => rows.slice(0, n)),
+    saveConnectionSnapshots: vi.fn(async () => []),
+  }
+  const log = { error: vi.fn() }
+  return { state, lookup, repo, log, sync: createOltSync({ lookup, repo, log }) }
+}
+const mkRows = (n) => Array.from({ length: n }, (_, i) => ({ id: `c${i}`, username: `u${i}` }))
+
+describe('olt sync tick', () => {
+  it('skips when disabled, paused or busy, touching nothing', async () => {
+    for (const [opts, why] of [[{ enabled: false }, 'disabled'], [{ paused: true }, 'paused'], [{ tokens: 5 }, 'busy']]) {
+      const t = make({ rows: mkRows(3), ...opts })
+      expect(await t.sync.tick()).toMatchObject({ checked: 0, skipped: why })
+      expect(t.repo.listForRefresh).not.toHaveBeenCalled()
+    }
+  })
+
+  it('checks at most perMinute rows and saves them in one call', async () => {
+    const t = make({ rows: mkRows(50) })
+    const r = await t.sync.tick()
+    expect(r).toEqual({ checked: 30, saved: 30, skipped: null })
+    expect(t.repo.listForRefresh).toHaveBeenCalledWith(30)
+    expect(t.repo.saveConnectionSnapshots).toHaveBeenCalledTimes(1)
+    expect(t.repo.saveConnectionSnapshots.mock.calls[0][0][0]).toMatchObject({ id: 'c0', snapshot: { connState: 'online' } })
+  })
+
+  it('saves only answers that say something (not unavailable / rate limited)', async () => {
+    const t = make({
+      rows: mkRows(3),
+      answer: (u) => (u === 'u0' ? { unavailable: true } : u === 'u1' ? { unavailable: true, reason: 'rate_limited' } : online),
+    })
+    expect(await t.sync.tick()).toMatchObject({ checked: 3, saved: 1 })
+    expect(t.repo.saveConnectionSnapshots.mock.calls[0][0].map((e) => e.id)).toEqual(['c2'])
+  })
+
+  it('a throwing lookup does not stop the others', async () => {
+    const t = make({ rows: mkRows(3), answer: (u) => { if (u === 'u1') throw new Error('boom'); return online } })
+    expect(await t.sync.tick()).toMatchObject({ checked: 3, saved: 2 })
+    expect(t.log.error).toHaveBeenCalled()
+  })
+
+  it('stops when the lookup becomes paused mid-tick, keeping what it has', async () => {
+    const t = make({ rows: mkRows(5), answer: (u, s) => { if (u === 'u1') s.paused = true; return online } })
+    expect(await t.sync.tick()).toMatchObject({ checked: 2, saved: 2 })
+    expect(t.repo.saveConnectionSnapshots.mock.calls[0][0]).toHaveLength(2)
+  })
+
+  it('never overlaps a running tick', async () => {
+    let release
+    const t = make({ rows: mkRows(1), answer: () => new Promise((r) => { release = () => r(online) }) })
+    const first = t.sync.tick()
+    await Promise.resolve(); await Promise.resolve()
+    expect(await t.sync.tick()).toMatchObject({ checked: 0, skipped: 'running' })
+    release()
+    expect(await first).toMatchObject({ checked: 1 })
+    expect(t.repo.listForRefresh).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('olt sync start/stop', () => {
+  it('first tick after 15s, then every interval; stop clears both', async () => {
+    vi.useFakeTimers()
+    try {
+      const t = make({ rows: mkRows(1) })
+      t.sync.start(60000)
+      await vi.advanceTimersByTimeAsync(14000)
+      expect(t.repo.listForRefresh).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1500)
+      expect(t.repo.listForRefresh).toHaveBeenCalledTimes(1)
+      t.sync.stop()
+      await vi.advanceTimersByTimeAsync(180000)
+      expect(t.repo.listForRefresh).toHaveBeenCalledTimes(1)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('createApp() starts no sync and never reads the repo', async () => {
+    const { customerRepository } = await import('../src/modules/customers/customer.repository.js')
+    const spy = vi.spyOn(customerRepository, 'listForRefresh')
+    vi.useFakeTimers()
+    try {
+      const { createApp } = await import('../src/app.js')
+      createApp()
+      await vi.advanceTimersByTimeAsync(120000)
+      expect(spy).not.toHaveBeenCalled()
+    } finally { vi.useRealTimers(); spy.mockRestore() }
+  })
+})

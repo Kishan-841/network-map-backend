@@ -88,6 +88,8 @@ export const env = {
   olt: {
     apiUrl: (process.env.OLT_API_URL ?? '').replace(/\/+$/, ''),
     apiKey: process.env.OLT_API_KEY,
+    // Background refresh of stored connection status; OLT_SYNC=off disables it.
+    sync: String(process.env.OLT_SYNC ?? '').trim().toLowerCase() !== 'off',
   },
   duplicateRadiusMeters: Number(process.env.DUPLICATE_RADIUS_METERS ?? 100),
   // Comma-separated list of allowed browser origins, or '*' (dev default).
