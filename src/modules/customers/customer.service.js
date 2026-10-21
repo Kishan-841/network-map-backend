@@ -7,7 +7,7 @@ import {
   mergeCustomerUpdate,
   normaliseMobile,
 } from '../../lib/customers.js'
-import { mapLimit, pendingConnection, redactConnection, summariseConnection } from '../../lib/olt-optical.js'
+import { mapLimit, pendingConnection, redactConnection, snapshotOf, summariseConnection } from '../../lib/olt-optical.js'
 
 /**
  * Customers of a building (spec 2026-10-17).
@@ -117,6 +117,18 @@ export function createCustomerService({
   const connectionOf = async (optical, username) =>
     summariseConnection(await optical.lookup(username)) // blank -> null -> no_username
 
+  // Keep the last known status on the row. Awaited (one transaction) but never
+  // fatal: a failed save is logged by customer id only and the answer still goes out.
+  async function saveSnapshots(pairs) {
+    const entries = pairs.map(([id, c]) => ({ id, snapshot: snapshotOf(c) })).filter((e) => e.snapshot)
+    if (!entries.length) return
+    try {
+      await customerRepository.saveConnectionSnapshots(entries)
+    } catch (e) {
+      console.error(`customer connection snapshot not saved (${entries.map((x) => x.id).join(',')}): ${e?.message ?? e}`)
+    }
+  }
+
   async function getBuildingConnections({ buildingId }, actor) {
     await buildingService.getBuilding(buildingId, actor) // 404 out of scope
     const optical = getOpticalLookup()
@@ -147,6 +159,7 @@ export function createCustomerService({
       expired = true
     }
     const list = done.map((d) => d ?? pendingConnection())
+    await saveSnapshots(customers.map((cu, i) => [cu.id, list[i]]))
     const counts = { online: 0, offline: 0, notSeen: 0, notLinked: 0, noUsername: 0, unavailable: 0, pending: 0, weak: 0 }
     const connections = {}
     customers.forEach((cu, i) => {
@@ -161,7 +174,9 @@ export function createCustomerService({
     const customer = await getCustomer(id, actor) // 404 out of scope
     const optical = getOpticalLookup()
     if (!optical?.enabled) return { enabled: false }
-    return { enabled: true, connection: view(await connectionOf(optical, customer.username), actor) }
+    const connection = await connectionOf(optical, customer.username)
+    await saveSnapshots([[customer.id, connection]])
+    return { enabled: true, connection: view(connection, actor) }
   }
 
   async function createCustomer(body, actor) {

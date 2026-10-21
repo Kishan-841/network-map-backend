@@ -51,7 +51,7 @@ afterAll(async () => {
 
 describe('POST /customers', () => {
   it('the repository has the methods the service calls', () => {
-    for (const method of ['listByBuilding', 'findById', 'findByBuildingAndMobile', 'create', 'update', 'remove', 'findBuildingIds', 'listBuildingsForLookup', 'listWings', 'findWing', 'findByUsername', 'listWingsForBuildings', 'listForImport', 'listByUsernames', 'applyImport']) {
+    for (const method of ['listByBuilding', 'findById', 'findByBuildingAndMobile', 'create', 'update', 'remove', 'findBuildingIds', 'listBuildingsForLookup', 'listWings', 'findWing', 'findByUsername', 'listWingsForBuildings', 'listForImport', 'listByUsernames', 'applyImport', 'saveConnectionSnapshots']) {
       expect(typeof customerRepository[method]).toBe('function')
     }
   })

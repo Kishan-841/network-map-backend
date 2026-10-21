@@ -5,6 +5,8 @@ import {
   redactConnection,
   ADMIN_ONLY_ONU_FIELDS,
   mapLimit,
+  snapshotOf,
+  pendingConnection,
 } from '../src/lib/olt-optical.js'
 
 const STALE = {"username":"8686692513","onus":[{"onu_id":114922912,"olt_id":181,"olt":"PCMC-Morya-Thergaon-1-1.14","pon_no":3,"onu_no":21,"onu_index":"GPON0/3:21","serial":"GPONcbd306a8","status":"unknown","distance_m":4526,"last_seen":"2026-10-05T14:50:32.208528+00:00","session_ip":"100.64.27.128","rx_dbm":-25.38,"rx_quality":"good","tx_dbm":2.3,"baseline_rx_dbm":-25.94,"usernames":["8686692513"],"customer_ips":["100.64.27.128"],"stale":true,"mapping":"live"}]}
@@ -345,5 +347,66 @@ describe('mapLimit', () => {
     })
     expect(out).toEqual([2, 4, 6, 8, 10, 12, 14, 16])
     expect(peak).toBe(3)
+  })
+})
+
+describe('snapshotOf', () => {
+  it('online: copies the best ONU and the weak flag', async () => {
+    const c = summariseConnection(await make(async () => reply(200, ONLINE)).lookup('u'))
+    expect(snapshotOf(c)).toEqual({
+      connState: 'online', connRxDbm: -15.8, connRxQuality: 'good', connOlt: 'PCMC-Morya-Thergaon-2-1.22',
+      connPon: 3, connOnu: 53, connLastSeen: new Date('2026-10-19T06:53:20.407533+00:00'), connWeak: false,
+    })
+  })
+
+  it('not_seen keeps the best ONU too', async () => {
+    const c = summariseConnection(await make(async () => reply(200, STALE)).lookup('u'))
+    const s = snapshotOf(c)
+    expect(s.connState).toBe('not_seen')
+    expect(s.connRxDbm).toBe(-25.38)
+    expect(s.connLastSeen).toBeInstanceOf(Date)
+  })
+
+  it('offline stores state and best ONU', () => {
+    const c = summariseConnection({ found: true, onus: [{ status: 'down', stale: false, rxDbm: -20, rxQuality: 'weak', olt: 'O', pon: 1, onu: 2, lastSeen: null, baselineRxDbm: null }] })
+    expect(snapshotOf(c)).toMatchObject({ connState: 'offline', connRxDbm: -20, connRxQuality: 'weak', connLastSeen: null, connWeak: false })
+  })
+
+  it('not_linked and no_username have null best-derived fields', () => {
+    const nulls = { connRxDbm: null, connRxQuality: null, connOlt: null, connPon: null, connOnu: null, connLastSeen: null, connWeak: false }
+    expect(snapshotOf(summariseConnection({ found: false }))).toEqual({ connState: 'not_linked', ...nulls })
+    expect(snapshotOf(summariseConnection(null))).toEqual({ connState: 'no_username', ...nulls })
+  })
+
+  it('unavailable and pending give null (nothing to store)', () => {
+    expect(snapshotOf(summariseConnection({ unavailable: true, reason: 'error' }))).toBeNull()
+    expect(snapshotOf(summariseConnection({ unavailable: true, reason: 'rate_limited' }))).toBeNull()
+    expect(snapshotOf(summariseConnection({ unavailable: true }))).toBeNull()
+    expect(snapshotOf(pendingConnection())).toBeNull()
+  })
+})
+
+describe('isPaused / availableTokens', () => {
+  it('reports the 429 pause and the bucket, read-only', async () => {
+    let t = 1_000_000
+    const o = make(async () => reply(429, {}, { 'retry-after': '10' }), { now: () => t, burst: 5, ratePerSec: 1 })
+    expect(o.isPaused()).toBe(false)
+    expect(o.availableTokens()).toBe(5)
+    expect(o.availableTokens()).toBe(5)
+    await o.lookup('u')
+    expect(o.isPaused()).toBe(true)
+    expect(o.availableTokens()).toBeLessThanOrEqual(0)
+    t += 11_000
+    expect(o.isPaused()).toBe(false)
+  })
+
+  it('tokens drop per request and refill with time', async () => {
+    let t = 0
+    const o = make(async () => reply(404, {}), { now: () => t, burst: 3, ratePerSec: 1 })
+    await o.lookup('a')
+    await o.lookup('b')
+    expect(o.availableTokens()).toBe(1)
+    t += 1000
+    expect(o.availableTokens()).toBe(2)
   })
 })

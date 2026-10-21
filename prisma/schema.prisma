@@ -866,6 +866,16 @@ model Customer {
   planExpiresAt    DateTime?
   status           String?
   ageingDays       Int?
+  /// Last known OLT connection (online|offline|not_seen|not_linked|no_username); never written from an unavailable/pending answer.
+  connState        String?
+  connRxDbm        Float?
+  connRxQuality    String?
+  connOlt          String?
+  connPon          Int?
+  connOnu          Int?
+  connLastSeen     DateTime?
+  connWeak         Boolean?
+  connCheckedAt    DateTime?
   createdById      String?
   createdBy        User?    @relation("CustomerCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt        DateTime @default(now())
@@ -875,6 +885,11 @@ model Customer {
   @@index([mobile])
   @@index([wingId])
   @@index([username])
+  @@index([connState])
+  @@index([connCheckedAt])
+  @@index([planExpiresAt])
+  @@index([operator])
+  @@index([networkZone])
 }
 
 model Photo {

@@ -31,6 +31,17 @@ export const customerRepository = {
 
   update: (id, data) => prisma.customer.update({ where: { id }, data }),
 
+  /** entries: [{ id, snapshot }] — one transaction, stamps connCheckedAt. */
+  saveConnectionSnapshots: (entries) => {
+    if (!entries.length) return Promise.resolve([])
+    const connCheckedAt = new Date()
+    return prisma.$transaction(
+      entries.map(({ id, snapshot }) =>
+        prisma.customer.updateMany({ where: { id }, data: { ...snapshot, connCheckedAt } }),
+      ),
+    )
+  },
+
   remove: (id) => prisma.customer.delete({ where: { id } }),
 
   /** Located wings of many buildings, as `Map<buildingId, wings[]>`, for the import. */

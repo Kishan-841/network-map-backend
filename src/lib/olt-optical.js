@@ -137,7 +137,13 @@ export function createOpticalLookup({
     return p
   }
 
-  return { enabled, lookup }
+  /** Read-only: is a 429 pause active now? */
+  const isPaused = () => now() < pausedUntil
+  /** Read-only: tokens now, after refill (may be <= 0 while queued/paused). */
+  const availableTokens = () =>
+    Math.min(burst, tokens + (Math.max(0, now() - refilledAt) / 1000) * ratePerSec)
+
+  return { enabled, lookup, isPaused, availableTokens }
 }
 
 const isOnline = (o) => o.status === 'online' && !o.stale
@@ -167,6 +173,26 @@ export function summariseConnection(lookup) {
     best.rxDbm != null && best.baselineRxDbm != null && best.rxDbm <= best.baselineRxDbm - DROP_DB + 1e-9
   const weak = state === 'online' && ((best.rxQuality != null && best.rxQuality !== 'good') || signalDropped)
   return { state, onus, best, signalDropped, weak }
+}
+
+/**
+ * What we keep of a Connection on the Customer row, or null when the answer
+ * says nothing about the customer (unavailable / pending): those never
+ * overwrite a stored snapshot.
+ */
+export function snapshotOf(connection) {
+  const { state, best, weak } = connection ?? {}
+  if (!['online', 'offline', 'not_seen', 'not_linked', 'no_username'].includes(state)) return null
+  return {
+    connState: state,
+    connRxDbm: best?.rxDbm ?? null,
+    connRxQuality: best?.rxQuality ?? null,
+    connOlt: best?.olt ?? null,
+    connPon: best?.pon ?? null,
+    connOnu: best?.onu ?? null,
+    connLastSeen: best?.lastSeen ? new Date(best.lastSeen) : null,
+    connWeak: Boolean(weak),
+  }
 }
 
 const strip = (onu) => {

@@ -87,7 +87,7 @@ describe('building connections deadline', () => {
     const rows = [{ id: 'a', username: 'fast' }, { id: 'b', username: 'hang' }, { id: 'c', username: null }]
     const lookup = async (u) => (u === 'hang' ? new Promise(() => {}) : u ? { found: false } : null)
     const svc = createCustomerService({
-      customerRepository: { listByBuilding: async () => rows },
+      customerRepository: { listByBuilding: async () => rows, saveConnectionSnapshots: async () => {} },
       buildingService: { getBuilding: async () => ({}) },
       getOpticalLookup: () => ({ enabled: true, lookup }),
       connectionDeadlineMs: 50,
@@ -106,7 +106,7 @@ describe('building connections deadline', () => {
     const rows = [{ id: 'a', username: 'rl' }, { id: 'b', username: 'bad' }]
     const lookup = async (u) => ({ unavailable: true, reason: u === 'rl' ? 'rate_limited' : 'error' })
     const svc = createCustomerService({
-      customerRepository: { listByBuilding: async () => rows },
+      customerRepository: { listByBuilding: async () => rows, saveConnectionSnapshots: async () => {} },
       buildingService: { getBuilding: async () => ({}) },
       getOpticalLookup: () => ({ enabled: true, lookup }),
     })
@@ -212,5 +212,71 @@ describe('GET /customers/:id/connection', () => {
     expect((await one(c.on.id)).body.data).toEqual({ enabled: false })
     setOpticalLookupForTests(fake())
     expect((await one('nope')).status).toBe(404)
+  })
+})
+
+describe('snapshot write-through', () => {
+  const snap = (id) => prisma.customer.findUnique({ where: { id }, select: { connState: true, connRxDbm: true, connRxQuality: true, connOlt: true, connPon: true, connOnu: true, connWeak: true, connLastSeen: true, connCheckedAt: true } })
+  const reset = () =>
+    prisma.customer.updateMany({
+      where: { building: { buildingName: { startsWith: S } } },
+      data: { connState: null, connRxDbm: null, connRxQuality: null, connOlt: null, connPon: null, connOnu: null, connWeak: null, connLastSeen: null, connCheckedAt: null },
+    })
+
+  it('the building fan-out stores answered rows and leaves an unavailable row untouched', async () => {
+    await reset()
+    const old = new Date('2026-01-01T00:00:00Z')
+    await prisma.customer.update({ where: { id: c.down.id }, data: { connState: 'online', connRxDbm: -10, connCheckedAt: old } })
+    setOpticalLookupForTests(fake())
+    await conns(mine.id)
+    const on = await snap(c.on.id)
+    expect(on).toMatchObject({ connState: 'online', connRxDbm: -15, connRxQuality: 'good', connOlt: 'OLT-1', connPon: 3, connOnu: 4, connWeak: false })
+    expect(on.connLastSeen).toBeInstanceOf(Date)
+    expect(on.connCheckedAt.getTime()).toBeGreaterThan(Date.now() - 60000)
+    expect((await snap(c.off.id)).connState).toBe('offline')
+    expect((await snap(c.nl.id))).toMatchObject({ connState: 'not_linked', connRxDbm: null })
+    expect((await snap(c.none.id)).connState).toBe('no_username')
+    expect((await snap(c.blank.id)).connState).toBe('no_username')
+    const down = await snap(c.down.id) // 503 -> unavailable: previous snapshot kept
+    expect(down.connState).toBe('online')
+    expect(down.connRxDbm).toBe(-10)
+    expect(down.connCheckedAt).toEqual(old)
+    expect((await snap(c.far.id)).connState).toBeNull() // other building untouched
+  })
+
+  it('a rate-limited (pending) row keeps its stored snapshot', async () => {
+    await reset()
+    await prisma.customer.update({ where: { id: c.on.id }, data: { connState: 'offline', connCheckedAt: new Date('2026-01-01T00:00:00Z') } })
+    const lookup = { enabled: true, lookup: async () => ({ unavailable: true, reason: 'rate_limited' }) }
+    setOpticalLookupForTests(lookup)
+    await conns(mine.id)
+    expect((await snap(c.on.id)).connState).toBe('offline')
+  })
+
+  it('a failing save is logged and does not fail the request', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const svc = createCustomerService({
+      customerRepository: { listByBuilding: async () => [{ id: 'a', username: 'x' }], saveConnectionSnapshots: async () => { throw new Error('db down') } },
+      buildingService: { getBuilding: async () => ({}) },
+      getOpticalLookup: () => ({ enabled: true, lookup: async () => ({ found: false }) }),
+    })
+    const out = await svc.getBuildingConnections({ buildingId: 'x' }, { role: 'ADMIN' })
+    expect(out.connections.a.state).toBe('not_linked')
+    expect(err).toHaveBeenCalled()
+    expect(JSON.stringify(err.mock.calls)).not.toContain('test-key')
+    err.mockRestore()
+  })
+
+  it('the single-customer route stores too, and keeps the old one on unavailable', async () => {
+    await reset()
+    setOpticalLookupForTests(fake())
+    await request(app).get(`/api/v1/customers/${c.on.id}/connection`).set(ADMIN)
+    expect((await snap(c.on.id)).connState).toBe('online')
+    await request(app).get(`/api/v1/customers/${c.down.id}/connection`).set(ADMIN)
+    expect((await snap(c.down.id)).connState).toBeNull()
+    await prisma.customer.update({ where: { id: c.on.id }, data: { connState: 'offline' } })
+    setOpticalLookupForTests({ enabled: true, lookup: async () => ({ unavailable: true, reason: 'error' }) })
+    await request(app).get(`/api/v1/customers/${c.on.id}/connection`).set(ADMIN)
+    expect((await snap(c.on.id)).connState).toBe('offline')
   })
 })
