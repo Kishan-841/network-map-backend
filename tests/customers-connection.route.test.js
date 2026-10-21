@@ -6,7 +6,7 @@ import { env } from '../src/config/env.js'
 import { prisma } from '../src/lib/prisma.js'
 import { createOpticalLookup, ADMIN_ONLY_ONU_FIELDS } from '../src/lib/olt-optical.js'
 import { createCustomerService } from '../src/modules/customers/customer.service.js'
-import { setOpticalLookupForTests } from '../src/modules/customers/customer.controller.js'
+import { setOpticalLookupForTests, setOltReachabilityForTests } from '../src/modules/customers/customer.controller.js'
 
 const app = createApp()
 const S = `conn-${Date.now()}`
@@ -18,7 +18,8 @@ const ADMIN = auth(IDS.admin, 'ADMIN')
 const SV = auth(IDS.surveyor, 'SURVEYOR')
 const OTHER = auth(IDS.other, 'SURVEYOR')
 
-const U = { online: `${S}-u-on`, off: `${S}-u-off`, down: `${S}-u-down`, unlinked: `${S}-u-nl` }
+const U = { online: `${S}-u-on`, off: `${S}-u-off`, down: `${S}-u-down`, unlinked: `${S}-u-nl`, gone: `${S}-u-gone`, quiet: `${S}-u-quiet`, up: `${S}-u-up` }
+const DOWN_OLT = `${S}-OLT-DOWN`
 const onu = (status, extra = {}) => ({
   onu_id: 1, olt_id: 2, olt: 'OLT-1', pon_no: 3, onu_no: 4, onu_index: 'GPON0/3:4', serial: 'SERIAL123',
   status, distance_m: 100, last_seen: '2026-10-19T06:00:00+00:00', session_ip: '100.64.0.9',
@@ -33,6 +34,9 @@ const fakeFetch = vi.fn(async (url) => {
   if (u === U.online) return reply(200, { username: u, onus: [onu('online')] })
   if (u === U.off) return reply(200, { username: u, onus: [onu('down')] })
   if (u === U.down) return reply(503, {})
+  if (u === U.gone) return reply(200, { username: u, onus: [onu('unknown', { stale: true, olt: DOWN_OLT })] })
+  if (u === U.quiet) return reply(200, { username: u, onus: [onu('unknown', { stale: true })] })
+  if (u === U.up) return reply(200, { username: u, onus: [onu('online', { olt: DOWN_OLT })] })
   return reply(404, { detail: 'No ONU mapped' })
 })
 const fake = (enabled = true) =>
@@ -42,11 +46,12 @@ const fake = (enabled = true) =>
     apiKey: enabled ? 'test-key' : '',
   })
 
-let zone, mine, theirs, c
+let zone, mine, theirs, third, c
 const conns = (buildingId, who = ADMIN) =>
   request(app).get('/api/v1/customers/connections').query({ buildingId }).set(who)
 
 beforeAll(async () => {
+  setOltReachabilityForTests({ unreachableOlts: async () => new Set([DOWN_OLT]) })
   zone = await prisma.zone.create({ data: { name: `${S}-z`, city: 'Test' } })
   for (const [id, role] of [[IDS.admin, 'ADMIN'], [IDS.surveyor, 'SURVEYOR'], [IDS.other, 'SURVEYOR']]) {
     await prisma.user.create({ data: { id, name: id, email: `${id}@t.local`, passwordHash: 'x', role } })
@@ -57,6 +62,7 @@ beforeAll(async () => {
     })
   mine = await b('Mine', IDS.surveyor)
   theirs = await b('Theirs', IDS.admin)
+  third = await b('Third', IDS.surveyor)
   const cust = (buildingId, name, mobile, username) =>
     prisma.customer.create({ data: { buildingId, name, mobile, username, createdById: IDS.admin } })
   c = {
@@ -67,6 +73,9 @@ beforeAll(async () => {
     none: await cust(mine.id, 'None', '9000000015', null),
     blank: await cust(mine.id, 'Blank', '9000000016', '  '),
     far: await cust(theirs.id, 'Far', '9000000017', U.online),
+    gone: await cust(third.id, 'Gone', '9000000018', U.gone),
+    quiet: await cust(third.id, 'Quiet', '9000000019', U.quiet),
+    up: await cust(third.id, 'Up', '9000000020', U.up),
   }
 })
 
@@ -76,6 +85,7 @@ afterEach(() => {
 })
 
 afterAll(async () => {
+  setOltReachabilityForTests(null)
   await prisma.customer.deleteMany({ where: { building: { buildingName: { startsWith: S } } } })
   await prisma.building.deleteMany({ where: { buildingName: { startsWith: S } } })
   await prisma.user.deleteMany({ where: { id: { in: Object.values(IDS) } } })
@@ -96,7 +106,7 @@ describe('building connections deadline', () => {
     const out = await svc.getBuildingConnections({ buildingId: 'x' }, { role: 'ADMIN' })
     expect(Date.now() - t0).toBeLessThan(1000)
     expect(out.connections.a.state).toBe('not_linked')
-    expect(out.connections.b).toEqual({ state: 'pending', onus: [], best: null, signalDropped: false, weak: false })
+    expect(out.connections.b).toEqual({ state: 'pending', onus: [], best: null, signalDropped: false, weak: false, oltReachable: null })
     expect(out.connections.c.state).toBe('no_username')
     expect(out.counts.pending).toBe(1)
     expect(out.counts.unavailable).toBe(0)
@@ -130,7 +140,7 @@ describe('GET /customers/connections', () => {
     expect(connections[c.nl.id].state).toBe('not_linked')
     expect(connections[c.none.id].state).toBe('no_username')
     expect(connections[c.blank.id].state).toBe('no_username')
-    expect(counts).toEqual({ online: 1, offline: 1, notSeen: 0, notLinked: 1, noUsername: 2, unavailable: 1, pending: 0, weak: 0 })
+    expect(counts).toEqual({ online: 1, offline: 1, notSeen: 0, oltDown: 0, notLinked: 1, noUsername: 2, unavailable: 1, pending: 0, weak: 0 })
   })
 
   it('makes no OLT call for customers without a username', async () => {
@@ -278,5 +288,44 @@ describe('snapshot write-through', () => {
     setOpticalLookupForTests({ enabled: true, lookup: async () => ({ unavailable: true, reason: 'error' }) })
     await request(app).get(`/api/v1/customers/${c.on.id}/connection`).set(ADMIN)
     expect((await snap(c.on.id)).connState).toBe('offline')
+  })
+})
+
+describe('OLT not reachable on the live connection routes', () => {
+  it('building connections: oltReachable per connection; oltDown split out of notSeen', async () => {
+    setOpticalLookupForTests(fake())
+    const res = await conns(third.id, SV)
+    expect(res.status).toBe(200)
+    const { connections, counts } = res.body.data
+    expect(connections[c.gone.id]).toMatchObject({ state: 'not_seen', oltReachable: false })
+    expect(connections[c.quiet.id]).toMatchObject({ state: 'not_seen', oltReachable: true })
+    expect(connections[c.up.id]).toMatchObject({ state: 'online', oltReachable: false })
+    expect(counts).toEqual({ online: 1, offline: 0, notSeen: 1, oltDown: 1, notLinked: 0, noUsername: 0, unavailable: 0, pending: 0, weak: 0 })
+  })
+
+  it('a connection with no ONU has oltReachable null', async () => {
+    setOpticalLookupForTests(fake())
+    const { connections } = (await conns(mine.id)).body.data
+    expect(connections[c.nl.id].oltReachable).toBeNull()
+    expect(connections[c.none.id].oltReachable).toBeNull()
+    expect(connections[c.on.id].oltReachable).toBe(true)
+  })
+
+  it('single customer: oltReachable on the connection', async () => {
+    setOpticalLookupForTests(fake())
+    const res = await request(app).get(`/api/v1/customers/${c.gone.id}/connection`).set(SV)
+    expect(res.body.data.connection).toMatchObject({ state: 'not_seen', oltReachable: false })
+  })
+
+  it('a reachability failure leaves everything reachable, never fails the route', async () => {
+    setOpticalLookupForTests(fake())
+    setOltReachabilityForTests({ unreachableOlts: async () => { throw new Error('boom') } })
+    try {
+      const res = await conns(third.id, SV)
+      expect(res.status).toBe(200)
+      expect(res.body.data.counts).toMatchObject({ notSeen: 2, oltDown: 0 })
+    } finally {
+      setOltReachabilityForTests({ unreachableOlts: async () => new Set([DOWN_OLT]) })
+    }
   })
 })

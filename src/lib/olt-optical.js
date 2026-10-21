@@ -35,7 +35,7 @@ function normaliseOnu(o) {
 }
 
 /**
- * @returns {{ enabled: boolean, lookup: (username: string) => Promise<
+ * @returns {{ enabled: boolean, lookup: (username: string, opts?: { fresh?: boolean }) => Promise<
  *   { found: true, onus: object[] } | { found: false } | { unavailable: true, reason?: 'rate_limited' | 'error' } | null>}}
  * lookup() returns null (and sends no request) for a blank username: deciding
  * "no username" is the caller's job (summariseConnection(null)). When the
@@ -86,7 +86,35 @@ export function createOpticalLookup({
     return secs * 1000
   }
 
+  /**
+   * Take one token from the shared bucket (waiting for it if needed). false =
+   * paused by a 429, or the wait would be longer than maxWaitMs: send nothing.
+   * Other OLT API calls (the /olts reachability list) use this too, so the
+   * whole process stays inside one key budget.
+   */
+  async function acquire() {
+    if (!enabled) return false
+    if (now() < pausedUntil) return false
+    const wait = reserve()
+    if (wait == null) return false
+    if (wait > 0) {
+      await sleep(wait)
+      if (now() < pausedUntil) return false
+    }
+    return true
+  }
+
+  /** A 429 answer (from any OLT API call): pause everything for Retry-After. */
+  function notePause(res) {
+    pausedUntil = Math.max(pausedUntil, now() + retryAfterMs(res))
+    // Drain the bucket and hold refill until the pause ends, so we
+    // don't burst the moment it lifts (the server has refilled far less).
+    tokens = Math.min(tokens, 0)
+    refilledAt = pausedUntil
+  }
+
   async function fetchOne(u) {
+    // Same steps as acquire(), inlined so a free token sends with no extra tick.
     if (now() < pausedUntil) return RATE_LIMITED()
     const wait = reserve()
     if (wait == null) return RATE_LIMITED()
@@ -106,11 +134,7 @@ export function createOpticalLookup({
         const json = await res.json()
         value = { found: true, onus: (Array.isArray(json?.onus) ? json.onus : []).map(normaliseOnu) }
       } else if (res.status === 429) {
-        pausedUntil = Math.max(pausedUntil, now() + retryAfterMs(res))
-        // Drain the bucket and hold refill until the pause ends, so we
-        // don't burst the moment it lifts (the server has refilled far less).
-        tokens = Math.min(tokens, 0)
-        refilledAt = pausedUntil
+        notePause(res)
         return RATE_LIMITED()
       } else return { unavailable: true, reason: 'error' }
     } catch {
@@ -122,13 +146,16 @@ export function createOpticalLookup({
     return value
   }
 
-  async function lookup(username) {
+  /** `fresh`: skip the cache read (the answer still refreshes the cache). */
+  async function lookup(username, { fresh = false } = {}) {
     const u = String(username ?? '').trim()
     if (!u) return null
     if (!enabled) return { unavailable: true }
 
-    const hit = cache.get(u)
-    if (hit && now() - hit.at < ttlMs) return hit.value
+    if (!fresh) {
+      const hit = cache.get(u)
+      if (hit && now() - hit.at < ttlMs) return hit.value
+    }
 
     const pending = inflight.get(u)
     if (pending) return pending
@@ -143,7 +170,7 @@ export function createOpticalLookup({
   const availableTokens = () =>
     Math.min(burst, tokens + (Math.max(0, now() - refilledAt) / 1000) * ratePerSec)
 
-  return { enabled, lookup, isPaused, availableTokens }
+  return { enabled, lookup, isPaused, availableTokens, acquire, notePause }
 }
 
 const isOnline = (o) => o.status === 'online' && !o.stale

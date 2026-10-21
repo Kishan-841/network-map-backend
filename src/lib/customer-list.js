@@ -8,6 +8,10 @@ import { istDay } from './visit-plan.js'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 export const CSV_CAP = 5000
+/** POST /customers/refresh re-checks a row only when its snapshot is older than this (or never taken), unless forced. */
+export const REFRESH_STALE_MS = 5 * 60 * 1000
+/** At most this many ids per refresh call. */
+export const REFRESH_MAX_IDS = 50
 
 /**
  * Plan expiry windows are ROLLING from `now` (the web app uses the same rule):
@@ -32,10 +36,30 @@ export function mobileFragment(q) {
 }
 
 /**
+ * "OLT not reachable" (spec 2026-10-21-customers-refresh §1): stored state
+ * not_seen on an OLT the monitoring cannot reach. `downOlts` is that set of
+ * OLT names; null when it is empty (nothing can match).
+ */
+export function oltDownWhere(downOlts) {
+  return downOlts?.size ? { connState: 'not_seen', connOlt: { in: [...downOlts] } } : null
+}
+
+/** Plain not_seen: not_seen on a reachable (or unknown) OLT. */
+export function notSeenWhere(downOlts) {
+  if (!downOlts?.size) return { connState: 'not_seen' }
+  // connOlt NOT IN (...) is NULL (false) for a null connOlt: keep those explicitly.
+  return { connState: 'not_seen', OR: [{ connOlt: null }, { connOlt: { notIn: [...downOlts] } }] }
+}
+
+/** false = on an OLT the monitoring cannot reach; true = a known, reachable OLT; null = no OLT stored. */
+export const oltReachableOf = (oltName, downOlts) => (oltName ? !downOlts?.has(oltName) : null)
+
+/**
  * The customer filter as one AND list. `buildingIds` is the caller's scope,
  * already narrowed by `zoneId` / `buildingId` — this function never widens it.
+ * `downOlts` (Set of unreachable OLT names) splits not_seen from olt_down.
  */
-export function customerListWhere(query, buildingIds, now = new Date()) {
+export function customerListWhere(query, buildingIds, now = new Date(), downOlts = new Set()) {
   const and = [{ buildingId: { in: buildingIds } }]
   const q = query.q?.trim()
   if (q) {
@@ -54,6 +78,8 @@ export function customerListWhere(query, buildingIds, now = new Date()) {
   const blank = [{ username: null }, { username: '' }]
   if (query.conn === 'never') and.push({ connCheckedAt: null, NOT: { OR: blank } })
   else if (query.conn === 'no_username') and.push({ OR: [{ connState: 'no_username' }, ...blank] })
+  else if (query.conn === 'olt_down') and.push(oltDownWhere(downOlts) ?? { id: { in: [] } })
+  else if (query.conn === 'not_seen') and.push(notSeenWhere(downOlts))
   else if (query.conn) and.push({ connState: query.conn })
   if (query.weak === 'true') and.push({ connWeak: true })
   if (query.expiry) and.push(expiryWhere(query.expiry, now))
@@ -79,7 +105,7 @@ export function customerListOrderBy(sort) {
 }
 
 /** The list row — what the screen and the export may show. Never serial/IP. */
-export function toListRow(c) {
+export function toListRow(c, downOlts = new Set()) {
   return {
     id: c.id,
     name: c.name,
@@ -107,6 +133,7 @@ export function toListRow(c) {
     connLastSeen: c.connLastSeen,
     connWeak: c.connWeak,
     connCheckedAt: c.connCheckedAt,
+    oltReachable: oltReachableOf(c.connOlt, downOlts),
   }
 }
 
@@ -157,7 +184,11 @@ export const CSV_COLUMNS = [
   ['Auto renewal', (r) => (r.autoRenewal == null ? null : r.autoRenewal ? 'Yes' : 'No')],
   ['PON', (r) => r.ponNumber],
   ['OLT', (r) => r.olt],
-  ['Connection', (r) => (r.connCheckedAt ? (CONN_WORDS[r.connState] ?? r.connState) : 'Not checked')],
+  ['Connection', (r) => {
+    if (!r.connCheckedAt) return 'Not checked'
+    if (r.connState === 'not_seen' && r.oltReachable === false) return 'OLT not reachable'
+    return CONN_WORDS[r.connState] ?? r.connState
+  }],
   ['Signal (dBm)', (r) => r.connRxDbm],
   ['Signal quality', (r) => r.connRxQuality],
   ['Last seen', (r) => (r.connLastSeen ? istDateTime(new Date(r.connLastSeen)) : null)],

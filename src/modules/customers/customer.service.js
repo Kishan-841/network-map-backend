@@ -13,6 +13,9 @@ import {
   customerListWhere,
   customersCsv,
   expiryWhere,
+  oltDownWhere,
+  oltReachableOf,
+  REFRESH_STALE_MS,
   toListRow,
 } from '../../lib/customer-list.js'
 import { NO_CONNECTION, mapLimit, pendingConnection, redactConnection, snapshotOf, summariseConnection } from '../../lib/olt-optical.js'
@@ -31,7 +34,9 @@ export function createCustomerService({
   customerRepository,
   buildingService,
   getOpticalLookup = () => null,
+  getOltReachability = () => null,
   connectionDeadlineMs = 15000,
+  refreshDeadlineMs = 10000,
 }) {
   const TEXT_FIELDS = [
     'username',
@@ -116,14 +121,64 @@ export function createCustomerService({
     online: 'online',
     offline: 'offline',
     not_seen: 'notSeen',
+    olt_down: 'oltDown',
     not_linked: 'notLinked',
     no_username: 'noUsername',
     unavailable: 'unavailable',
     pending: 'pending',
   }
   const view = (connection, actor) => (actor?.role === 'ADMIN' ? connection : redactConnection(connection))
-  const connectionOf = async (optical, username) =>
-    summariseConnection(await optical.lookup(username)) // blank -> null -> no_username
+  const connectionOf = async (optical, username, opts) =>
+    summariseConnection(await optical.lookup(username, opts)) // blank -> null -> no_username
+
+  /**
+   * Names of the OLTs the monitoring cannot reach (spec 2026-10-21-customers-refresh §1).
+   * Never fatal: anything wrong → an empty set (everything reads as before).
+   */
+  async function downOlts() {
+    try {
+      return (await getOltReachability()?.unreachableOlts()) ?? new Set()
+    } catch {
+      return new Set()
+    }
+  }
+
+  /** A live Connection plus whether its OLT is reachable (null = no OLT). */
+  const withReachability = (connection, down) => ({
+    ...connection,
+    oltReachable: oltReachableOf(connection.best?.olt, down),
+  })
+  /** The count bucket: not_seen on an unreachable OLT is "OLT not reachable", not "not seen". */
+  const countKey = (connection) =>
+    connection.state === 'not_seen' && connection.oltReachable === false ? 'oltDown' : COUNT_KEY[connection.state]
+
+  /**
+   * Run fn over items, FAN_OUT at a time, for at most deadlineMs. Returns one
+   * entry per item: fn's result, or null when it did not finish in time
+   * (items not started by then are never started — no new OLT call).
+   * fn must not throw (wrap it); a throw leaves its slot null.
+   */
+  async function withDeadline(items, deadlineMs, fn) {
+    const done = new Array(items.length).fill(null)
+    let expired = false
+    const work = mapLimit(items, FAN_OUT, async (item, i) => {
+      if (expired) return null
+      done[i] = await fn(item, i)
+      return null
+    }).catch(() => {})
+    let timer
+    const deadline = new Promise((resolve) => {
+      timer = setTimeout(resolve, deadlineMs)
+    })
+    try {
+      await Promise.race([work, deadline])
+    } finally {
+      clearTimeout(timer)
+      expired = true
+    }
+    // A copy: lookups still running may fill `done` later; the caller must not see that.
+    return [...done]
+  }
 
   // Keep the last known status on the row. Awaited (one transaction) but never
   // fatal: a failed save is logged by customer id only and the answer still goes out.
@@ -142,38 +197,27 @@ export function createCustomerService({
     const optical = getOpticalLookup()
     if (!optical?.enabled) return { enabled: false }
     const customers = await customerRepository.listByBuilding(buildingId)
+    const downPromise = downOlts()
     // Overall deadline: lookups still running when it passes count as
     // pending (not checked yet); they may finish later and fill the lookup cache.
     const unavailable = () => summariseConnection({ unavailable: true })
-    const done = new Array(customers.length).fill(null)
-    let expired = false
-    const work = mapLimit(customers, FAN_OUT, async (cu, i) => {
-      if (expired) return null // not started in time: no new OLT call
+    const done = await withDeadline(customers, connectionDeadlineMs, async (cu) => {
       try {
-        done[i] = await connectionOf(optical, cu.username)
+        return await connectionOf(optical, cu.username)
       } catch {
-        done[i] = unavailable()
+        return unavailable()
       }
-      return null
-    }).catch(() => {})
-    let timer
-    const deadline = new Promise((resolve) => {
-      timer = setTimeout(resolve, connectionDeadlineMs)
     })
-    try {
-      await Promise.race([work, deadline])
-    } finally {
-      clearTimeout(timer)
-      expired = true
-    }
     const list = done.map((d) => d ?? pendingConnection())
     await saveSnapshots(customers.map((cu, i) => [cu.id, list[i]]))
-    const counts = { online: 0, offline: 0, notSeen: 0, notLinked: 0, noUsername: 0, unavailable: 0, pending: 0, weak: 0 }
+    const down = await downPromise
+    const counts = { online: 0, offline: 0, notSeen: 0, oltDown: 0, notLinked: 0, noUsername: 0, unavailable: 0, pending: 0, weak: 0 }
     const connections = {}
     customers.forEach((cu, i) => {
-      counts[COUNT_KEY[list[i].state]] += 1
-      if (list[i].weak) counts.weak += 1
-      connections[cu.id] = view(list[i], actor)
+      const connection = withReachability(list[i], down)
+      counts[countKey(connection)] += 1
+      if (connection.weak) counts.weak += 1
+      connections[cu.id] = view(connection, actor)
     })
     return { enabled: true, connections, counts }
   }
@@ -182,9 +226,9 @@ export function createCustomerService({
     const customer = await getCustomer(id, actor) // 404 out of scope
     const optical = getOpticalLookup()
     if (!optical?.enabled) return { enabled: false }
-    const connection = await connectionOf(optical, customer.username)
+    const [connection, down] = await Promise.all([connectionOf(optical, customer.username), downOlts()])
     await saveSnapshots([[customer.id, connection]])
-    return { enabled: true, connection: view(connection, actor) }
+    return { enabled: true, connection: view(withReachability(connection, down), actor) }
   }
 
   async function createCustomer(body, actor) {
@@ -433,14 +477,15 @@ export function createCustomerService({
 
   async function listAllCustomers(query, actor) {
     const now = new Date()
-    const buildings = await scopedBuildings(actor)
-    const where = customerListWhere(query, narrowedIds(buildings, query), now)
+    const [buildings, down] = await Promise.all([scopedBuildings(actor), downOlts()])
+    const where = customerListWhere(query, narrowedIds(buildings, query), now, down)
+    const oltDown = oltDownWhere(down)
     const scopeWhere = { buildingId: { in: buildings.map((b) => b.id) } }
     const page = query.page ?? 1
     const pageSize = query.pageSize ?? 50
     const and = (extra) => ({ AND: [where, extra] })
 
-    const [rows, total, byState, weak, expiring7d, networkZones, operators, billingStatuses, planNames] =
+    const [rows, total, byState, weak, expiring7d, oltDownCount, networkZones, operators, billingStatuses, planNames] =
       await Promise.all([
         customerRepository.listPage({
           where,
@@ -452,6 +497,7 @@ export function createCustomerService({
         customerRepository.countByConnState(where),
         customerRepository.count(and({ connWeak: true })),
         customerRepository.count(and(expiryWhere('7d', now))),
+        oltDown ? customerRepository.count(and(oltDown)) : 0,
         customerRepository.distinctValues('networkZone', scopeWhere),
         customerRepository.distinctValues('operator', scopeWhere),
         customerRepository.distinctValues('status', scopeWhere),
@@ -461,7 +507,7 @@ export function createCustomerService({
     const zones = new Map()
     for (const b of buildings) if (b.zone) zones.set(b.zone.id, b.zone)
     return {
-      rows: rows.map(toListRow),
+      rows: rows.map((row) => toListRow(row, down)),
       total,
       page,
       pageSize,
@@ -469,7 +515,9 @@ export function createCustomerService({
         total,
         online: byState.online ?? 0,
         offline: byState.offline ?? 0,
-        notSeen: byState.not_seen ?? 0,
+        // not_seen on an unreachable OLT is counted as oltDown instead.
+        notSeen: Math.max(0, (byState.not_seen ?? 0) - oltDownCount),
+        oltDown: oltDownCount,
         weak,
         expiring7d,
       },
@@ -488,8 +536,8 @@ export function createCustomerService({
 
   /** The export: same filter and sort, up to CSV_CAP rows. */
   async function exportCustomersCsv(query, actor) {
-    const buildings = await scopedBuildings(actor)
-    const where = customerListWhere(query, narrowedIds(buildings, query), new Date())
+    const [buildings, down] = await Promise.all([scopedBuildings(actor), downOlts()])
+    const where = customerListWhere(query, narrowedIds(buildings, query), new Date(), down)
     const rows = await customerRepository.listPage({
       where,
       orderBy: customerListOrderBy(query.sort),
@@ -497,12 +545,72 @@ export function createCustomerService({
       take: CSV_CAP + 1,
     })
     const truncated = rows.length > CSV_CAP
-    return { csv: customersCsv(rows.slice(0, CSV_CAP).map(toListRow)), truncated }
+    return { csv: customersCsv(rows.slice(0, CSV_CAP).map((row) => toListRow(row, down))), truncated }
+  }
+
+  /**
+   * Fresh status for the rows on screen (spec 2026-10-21-customers-refresh §2).
+   * Ids outside the actor's building scope are dropped silently. A customer
+   * with a Username is looked up when its snapshot is older than
+   * REFRESH_STALE_MS (or missing), or always with `force` — which also skips
+   * the lookup's 10-minute memory cache. Same shared lookup (bucket, cache,
+   * de-dup) as every other OLT read; FAN_OUT at a time, refreshDeadlineMs overall.
+   * Answers are saved as snapshots; rows that got no answer in time, or a
+   * rate-limited / unavailable one, keep their stored snapshot and are listed
+   * in `pending`. Rows come back in the list row shape, in the order asked.
+   */
+  async function refreshCustomers({ ids, force = false }, actor) {
+    const wanted = [...new Set(ids)]
+    const [buildings, down] = await Promise.all([scopedBuildings(actor), downOlts()])
+    const loadRows = () =>
+      buildings.length
+        ? customerRepository.listPage({
+            where: { AND: [{ id: { in: wanted } }, { buildingId: { in: buildings.map((b) => b.id) } }] },
+            orderBy: [{ id: 'asc' }],
+            skip: 0,
+            take: wanted.length,
+          })
+        : Promise.resolve([])
+    let rows = await loadRows()
+
+    const optical = getOpticalLookup()
+    const pending = []
+    if (optical?.enabled) {
+      const cutoff = Date.now() - REFRESH_STALE_MS
+      const due = rows.filter(
+        (row) =>
+          String(row.username ?? '').trim() &&
+          (force || !row.connCheckedAt || new Date(row.connCheckedAt).getTime() < cutoff),
+      )
+      const done = await withDeadline(due, refreshDeadlineMs, async (row) => {
+        try {
+          return await connectionOf(optical, row.username, force ? { fresh: true } : undefined)
+        } catch {
+          return summariseConnection({ unavailable: true })
+        }
+      })
+      const pairs = []
+      due.forEach((row, i) => {
+        const connection = done[i]
+        if (connection && snapshotOf(connection)) pairs.push([row.id, connection])
+        else pending.push(row.id)
+      })
+      if (pairs.length) {
+        await saveSnapshots(pairs)
+        rows = await loadRows()
+      }
+    }
+
+    const order = new Map(wanted.map((id, i) => [id, i]))
+    rows.sort((a, b) => order.get(a.id) - order.get(b.id))
+    pending.sort((a, b) => order.get(a) - order.get(b))
+    return { rows: rows.map((row) => toListRow(row, down)), pending }
   }
 
   return {
     listAllCustomers,
     exportCustomersCsv,
+    refreshCustomers,
     listCustomers,
     getCustomer,
     getBuildingConnections,

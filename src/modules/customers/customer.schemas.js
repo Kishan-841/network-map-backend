@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { REFRESH_MAX_IDS } from '../../lib/customer-list.js'
 
 /** '' / null → null, otherwise the trimmed text. */
 const nullableText = (max) =>
@@ -106,7 +107,7 @@ export const listAllQuerySchema = z.object({
   networkZone: filterText,
   operator: filterText,
   billingStatus: filterText,
-  conn: filterEnum(['online', 'offline', 'not_seen', 'not_linked', 'no_username', 'never']),
+  conn: filterEnum(['online', 'offline', 'not_seen', 'olt_down', 'not_linked', 'no_username', 'never']),
   weak: filterEnum(['true']),
   expiry: filterEnum(['expired', '7d', '30d']),
   buildingId: filterText,
@@ -148,4 +149,10 @@ const importRowSchema = z.object({
 export const importCustomersSchema = z.object({
   rows: z.array(importRowSchema).min(1).max(1000),
   dryRun: z.boolean().optional(),
+})
+
+/** POST /customers/refresh — fresh status for the rows on screen (spec 2026-10-21-customers-refresh §2). */
+export const refreshCustomersSchema = z.object({
+  ids: z.array(z.string().min(1)).min(1).max(REFRESH_MAX_IDS),
+  force: z.boolean().optional(),
 })

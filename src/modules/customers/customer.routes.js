@@ -7,6 +7,7 @@ import {
   listAllQuerySchema,
   listQuerySchema,
   lookupSchema,
+  refreshCustomersSchema,
   updateCustomerSchema,
 } from './customer.schemas.js'
 import { customerController } from './customer.controller.js'
@@ -25,6 +26,10 @@ customerRoutes.get('/', validateQuery(listQuerySchema), customerController.list)
 // '/:id' so "list" is not read as a customer id.
 customerRoutes.get('/list', validateQuery(listAllQuerySchema), customerController.listAll)
 customerRoutes.get('/list.csv', validateQuery(listAllQuerySchema), customerController.exportCsv)
+
+// Fresh connection status for the rows on screen (spec 2026-10-21-customers-refresh §2):
+// any signed-in staff; ids outside the actor's building scope are dropped.
+customerRoutes.post('/refresh', validateBody(refreshCustomersSchema), customerController.refresh)
 
 // Before '/:id' so "connections" is not read as a customer id.
 customerRoutes.get('/connections', validateQuery(listQuerySchema), customerController.connections)

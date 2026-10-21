@@ -410,3 +410,55 @@ describe('isPaused / availableTokens', () => {
     expect(o.availableTokens()).toBe(2)
   })
 })
+
+describe('lookup(username, { fresh: true })', () => {
+  it('skips the cache read but still writes it', async () => {
+    let n = 0
+    const f = vi.fn(async () => reply(200, n++ === 0 ? ONLINE : STALE))
+    const o = make(f)
+    expect(summariseConnection(await o.lookup('u')).state).toBe('online')
+    expect(summariseConnection(await o.lookup('u', { fresh: true })).state).toBe('not_seen')
+    expect(f).toHaveBeenCalledTimes(2)
+    // The fresh answer replaced the cached one.
+    expect(summariseConnection(await o.lookup('u')).state).toBe('not_seen')
+    expect(f).toHaveBeenCalledTimes(2)
+  })
+
+  it('joins a request already in flight for that username', async () => {
+    let release
+    const f = vi.fn(() => new Promise((r) => { release = () => r(reply(200, ONLINE)) }))
+    const o = make(f)
+    const a = o.lookup('u')
+    const b = o.lookup('u', { fresh: true })
+    release()
+    expect(await b).toEqual(await a)
+    expect(f).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('acquire / notePause (the shared budget for other OLT API calls)', () => {
+  it('takes a token from the same bucket the lookups use', async () => {
+    const f = vi.fn(async () => reply(200, ONLINE))
+    const o = make(f, { burst: 2, ratePerSec: 0.01, maxWaitMs: 1000 })
+    expect(await o.acquire()).toBe(true)
+    await o.lookup('a')
+    expect(await o.acquire()).toBe(false) // bucket empty
+    expect(await o.lookup('b')).toEqual({ unavailable: true, reason: 'rate_limited' })
+  })
+
+  it('a 429 seen elsewhere pauses the lookups too', async () => {
+    let t = 1000
+    const f = vi.fn(async () => reply(200, ONLINE))
+    const o = make(f, { now: () => t })
+    o.notePause(reply(429, {}, { 'retry-after': '10' }))
+    expect(o.isPaused()).toBe(true)
+    expect(await o.acquire()).toBe(false)
+    expect(await o.lookup('a')).toEqual({ unavailable: true, reason: 'rate_limited' })
+    expect(f).not.toHaveBeenCalled()
+  })
+
+  it('a disabled client grants nothing', async () => {
+    const o = createOpticalLookup({ fetchImpl: vi.fn(), baseUrl: '', apiKey: '' })
+    expect(await o.acquire()).toBe(false)
+  })
+})

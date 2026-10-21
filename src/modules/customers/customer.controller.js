@@ -4,7 +4,7 @@ import { createBuildingService } from '../buildings/building.service.js'
 import { operatorRepository } from '../operators/operator.repository.js'
 import { userRepository } from '../users/user.repository.js'
 import { zoneRepository } from '../zones/zone.repository.js'
-import { getOpticalLookup } from './optical-lookup.js'
+import { getOltReachability, getOpticalLookup } from './optical-lookup.js'
 import { customerRepository } from './customer.repository.js'
 import { createCustomerService } from './customer.service.js'
 import { csvFilename } from '../../lib/customer-list.js'
@@ -24,9 +24,10 @@ const customerService = createCustomerService({
   customerRepository,
   buildingService,
   getOpticalLookup,
+  getOltReachability,
 })
 
-export { setOpticalLookupForTests } from './optical-lookup.js'
+export { setOpticalLookupForTests, setOltReachabilityForTests } from './optical-lookup.js'
 
 export const customerController = {
   async list(req, res, next) {
@@ -55,6 +56,16 @@ export const customerController = {
       res.setHeader('Content-Disposition', `attachment; filename="${csvFilename()}"`)
       if (truncated) res.setHeader('X-Truncated', 'true')
       res.send(csv)
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  /** Fresh connection status for up to 50 visible rows (scope-filtered). */
+  async refresh(req, res, next) {
+    try {
+      const data = await customerService.refreshCustomers(req.body, req.user)
+      res.json({ success: true, data })
     } catch (err) {
       next(err)
     }

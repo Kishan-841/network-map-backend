@@ -5,6 +5,7 @@ import { createApp } from '../src/app.js'
 import { env } from '../src/config/env.js'
 import { prisma } from '../src/lib/prisma.js'
 import { istDay } from '../src/lib/visit-plan.js'
+import { setOltReachabilityForTests } from '../src/modules/customers/customer.controller.js'
 
 // GET /customers/list and /customers/list.csv (spec 2026-10-21, decisions 2, 4–7).
 const app = createApp()
@@ -12,19 +13,23 @@ const S = `clist-${Date.now()}`
 const auth = (id, role) => ({
   Authorization: `Bearer ${jwt.sign({ sub: id, role }, env.jwtSecret, { audience: 'staff', expiresIn: '1h' })}`,
 })
-const IDS = { admin: `${S}-admin`, svA: `${S}-sva`, svB: `${S}-svb`, svC: `${S}-svc`, agent: `${S}-agent` }
+const IDS = { admin: `${S}-admin`, svA: `${S}-sva`, svB: `${S}-svb`, svC: `${S}-svc`, svD: `${S}-svd`, agent: `${S}-agent` }
 const ADMIN = auth(IDS.admin, 'ADMIN')
 const SVA = auth(IDS.svA, 'SURVEYOR')
 const SVB = auth(IDS.svB, 'SURVEYOR')
 const AGENT = auth(IDS.agent, 'ACQUISITION_AGENT')
 const SVC = auth(IDS.svC, 'SURVEYOR')
+const SVD = auth(IDS.svD, 'SURVEYOR')
+// The OLT the monitoring cannot reach (fake /olts answer — never the real API).
+const DOWN = `${S}-OLT-DOWN`
+let downSet = new Set([DOWN])
 
 const HOUR = 3600 * 1000
 const DAY = 24 * HOUR
 const now = Date.now()
 const at = (ms) => new Date(now + ms)
 
-let z1, z2, z3, delta, alpha, beta, gamma, hidden, big, wingA
+let z1, z2, z3, z4, echo, delta, alpha, beta, gamma, hidden, big, wingA
 const c = {}
 
 const list = (query = {}, who = SVA) => request(app).get('/api/v1/customers/list').query(query).set(who)
@@ -43,9 +48,11 @@ const csv = (query = {}, who = SVA) =>
 const names = (res) => res.body.data.rows.map((r) => r.name)
 
 beforeAll(async () => {
+  setOltReachabilityForTests({ unreachableOlts: async () => new Set(downSet) })
   z1 = await prisma.zone.create({ data: { name: `${S}-z1`, city: 'Test' } })
   z2 = await prisma.zone.create({ data: { name: `${S}-z2`, city: 'Test' } })
   z3 = await prisma.zone.create({ data: { name: `${S}-z3`, city: 'Test' } })
+  z4 = await prisma.zone.create({ data: { name: `${S}-z4`, city: 'Test' } })
   const user = (id, role, zoneId) =>
     prisma.user.create({
       data: {
@@ -58,6 +65,7 @@ beforeAll(async () => {
   await user(IDS.svB, 'SURVEYOR', z2.id)
   await user(IDS.agent, 'ACQUISITION_AGENT')
   await user(IDS.svC, 'SURVEYOR', z3.id)
+  await user(IDS.svD, 'SURVEYOR', z4.id)
   const building = (name, zoneId, extra = {}) =>
     prisma.building.create({
       data: { buildingName: `${S} ${name}`, formattedAddress: 'x', latitude: 18.5, longitude: 73.8, zoneId, createdById: IDS.admin, ...extra },
@@ -69,6 +77,7 @@ beforeAll(async () => {
   hidden = await building('Hidden', z1.id, { source: 'PERMISSION' })
   big = await building('Big', null)
   delta = await building('Delta', z3.id)
+  echo = await building('Echo', z4.id)
   wingA = await prisma.buildingWing.create({ data: { buildingId: alpha.id, name: 'A', latitude: 18.5, longitude: 73.8 } })
 
   const cust = (buildingId, data) => prisma.customer.create({ data: { buildingId, createdById: IDS.admin, ...data } })
@@ -101,15 +110,22 @@ beforeAll(async () => {
   c.kiran = await cust(delta.id, { name: 'Kiran', mobile: '9155555555', username: `${S}abc5` })
   c.lata = await cust(delta.id, { name: 'Lata', mobile: '9100000555', username: 'lata' })
   c.mohan = await cust(delta.id, { name: 'Mohan', mobile: '9200000123' })
+  // OLT not reachable (spec 2026-10-21-customers-refresh §1).
+  const checked = at(-HOUR)
+  c.ola = await cust(echo.id, { name: 'Ola', mobile: '9300000101', username: `${S}-ola`, connState: 'not_seen', connOlt: DOWN, connCheckedAt: checked })
+  c.pia = await cust(echo.id, { name: 'Pia', mobile: '9300000102', username: `${S}-pia`, connState: 'not_seen', connOlt: 'OLT-OK', connCheckedAt: checked })
+  c.raj = await cust(echo.id, { name: 'Raj', mobile: '9300000103', username: `${S}-raj`, connState: 'not_seen', connCheckedAt: checked })
+  c.sam = await cust(echo.id, { name: 'Sam', mobile: '9300000104', username: `${S}-sam`, connState: 'online', connOlt: DOWN, connRxDbm: -18, connCheckedAt: checked })
   c.hidden = await cust(hidden.id, { name: 'Hidden', mobile: '9100000007', operator: 'Secret' })
 })
 
 afterAll(async () => {
+  setOltReachabilityForTests(null)
   await prisma.customer.deleteMany({ where: { building: { buildingName: { startsWith: S } } } })
   await prisma.buildingWing.deleteMany({ where: { building: { buildingName: { startsWith: S } } } })
   await prisma.building.deleteMany({ where: { buildingName: { startsWith: S } } })
   await prisma.user.deleteMany({ where: { id: { in: Object.values(IDS) } } })
-  await prisma.zone.deleteMany({ where: { id: { in: [z1.id, z2.id, z3.id] } } })
+  await prisma.zone.deleteMany({ where: { id: { in: [z1.id, z2.id, z3.id, z4.id] } } })
 })
 
 describe('GET /customers/list — scope', () => {
@@ -118,11 +134,11 @@ describe('GET /customers/list — scope', () => {
     expect(res.status).toBe(200)
     expect(names(res).sort()).toEqual(['=SUM(A1)', 'Asha', 'Bharat', 'Chitra', 'Dev'])
     expect(res.body.data.total).toBe(5)
-    expect(res.body.data.counts).toEqual({ total: 5, online: 2, offline: 1, notSeen: 1, weak: 1, expiring7d: 1 })
+    expect(res.body.data.counts).toEqual({ total: 5, online: 2, offline: 1, notSeen: 1, oltDown: 0, weak: 1, expiring7d: 1 })
 
     const other = await list({}, SVB)
     expect(names(other)).toEqual(['Farid'])
-    expect(other.body.data.counts).toEqual({ total: 1, online: 1, offline: 0, notSeen: 0, weak: 0, expiring7d: 0 })
+    expect(other.body.data.counts).toEqual({ total: 1, online: 1, offline: 0, notSeen: 0, oltDown: 0, weak: 0, expiring7d: 0 })
     expect(other.body.data.facets).toEqual({
       zones: [{ id: z2.id, name: z2.name }],
       networkZones: [],
@@ -165,6 +181,7 @@ describe('GET /customers/list — rows and facets', () => {
         'id', 'name', 'username', 'mobile', 'email', 'operator', 'networkZone', 'planName', 'planAmount',
         'planExpiresAt', 'status', 'autoRenewal', 'ponNumber', 'olt', 'building', 'wing', 'zone', 'connState',
         'connRxDbm', 'connRxQuality', 'connOlt', 'connPon', 'connOnu', 'connLastSeen', 'connWeak', 'connCheckedAt',
+        'oltReachable',
       ].sort(),
     )
     expect(row).toMatchObject({
@@ -236,7 +253,7 @@ describe('GET /customers/list — filters', () => {
   it('filters combine with AND, and counts follow the filter', async () => {
     const both = await list({ operator: 'Airtel', conn: 'online' })
     expect(names(both).sort()).toEqual(['=SUM(A1)', 'Asha'])
-    expect(both.body.data.counts).toEqual({ total: 2, online: 2, offline: 0, notSeen: 0, weak: 0, expiring7d: 1 })
+    expect(both.body.data.counts).toEqual({ total: 2, online: 2, offline: 0, notSeen: 0, oltDown: 0, weak: 0, expiring7d: 1 })
     const three = await list({ operator: 'Airtel', conn: 'online', expiry: '7d' })
     expect(names(three)).toEqual(['Asha'])
   })
@@ -362,4 +379,69 @@ describe('GET /customers/list.csv', () => {
     expect(page.body.data.total).toBe(5001)
     expect(page.body.data.rows[0].zone).toBeNull()
   }, 30000)
+})
+
+describe('GET /customers/list — OLT not reachable', () => {
+  const byName = (res) => Object.fromEntries(res.body.data.rows.map((r) => [r.name, r]))
+
+  it('rows carry oltReachable: false on a down OLT, true on a known one, null with no OLT', async () => {
+    const res = await list({}, SVD)
+    expect(res.status).toBe(200)
+    const rows = byName(res)
+    expect(rows.Ola.oltReachable).toBe(false)
+    expect(rows.Sam.oltReachable).toBe(false) // online on a down OLT: flagged, but not counted as down
+    expect(rows.Pia.oltReachable).toBe(true)
+    expect(rows.Raj.oltReachable).toBeNull()
+  })
+
+  it('counts: oltDown split out of notSeen', async () => {
+    const res = await list({}, SVD)
+    expect(res.body.data.counts).toEqual({ total: 4, online: 1, offline: 0, notSeen: 2, oltDown: 1, weak: 0, expiring7d: 0 })
+  })
+
+  it('conn=olt_down is not_seen on a down OLT; conn=not_seen excludes them (keeps a null OLT)', async () => {
+    expect(names(await list({ conn: 'olt_down' }, SVD))).toEqual(['Ola'])
+    expect(names(await list({ conn: 'not_seen' }, SVD)).sort()).toEqual(['Pia', 'Raj'])
+    const down = await list({ conn: 'olt_down' }, SVD)
+    expect(down.body.data.counts).toMatchObject({ total: 1, notSeen: 0, oltDown: 1 })
+  })
+
+  it('the filter never widens the scope', async () => {
+    expect((await list({ conn: 'olt_down' }, SVA)).body.data.total).toBe(0)
+    expect(names(await list({ conn: 'olt_down' }, ADMIN))).toEqual(['Ola'])
+  })
+
+  it('no unreachable OLT known → nothing is olt_down and not_seen is as before', async () => {
+    downSet = new Set()
+    try {
+      expect((await list({ conn: 'olt_down' }, SVD)).body.data.total).toBe(0)
+      expect(names(await list({ conn: 'not_seen' }, SVD)).sort()).toEqual(['Ola', 'Pia', 'Raj'])
+      const res = await list({}, SVD)
+      expect(res.body.data.counts).toMatchObject({ notSeen: 3, oltDown: 0 })
+      expect(byName(res).Ola.oltReachable).toBe(true)
+    } finally {
+      downSet = new Set([DOWN])
+    }
+  })
+
+  it('a reachability failure never fails the list', async () => {
+    setOltReachabilityForTests({ unreachableOlts: async () => { throw new Error('boom') } })
+    try {
+      const res = await list({}, SVD)
+      expect(res.status).toBe(200)
+      expect(res.body.data.counts).toMatchObject({ notSeen: 3, oltDown: 0 })
+    } finally {
+      setOltReachabilityForTests({ unreachableOlts: async () => new Set(downSet) })
+    }
+  })
+
+  it('CSV says "OLT not reachable" for them', async () => {
+    const res = await csv({}, SVD)
+    const lines = res.body.slice(1).split('\r\n').filter(Boolean)
+    const conn = (name) => lines.find((l) => l.startsWith(`${name},`)).split(',')[16]
+    expect(conn('Ola')).toBe('OLT not reachable')
+    expect(conn('Pia')).toBe('Not seen')
+    expect(conn('Raj')).toBe('Not seen')
+    expect(conn('Sam')).toBe('Online')
+  })
 })
