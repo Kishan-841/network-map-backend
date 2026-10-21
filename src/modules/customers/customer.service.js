@@ -416,17 +416,13 @@ export function createCustomerService({
   async function scopedBuildings(actor) {
     const canRead = await buildingService.readScope(actor)
     const rows = await customerRepository.listBuildingsWithCustomers()
-    const buildings = rows.filter((b) => canRead(b))
-    // Every building that has customers passed (ADMIN, or a SUPERVISOR with no
-    // unapproved society holding customers): the IN list would be all of them,
-    // so the queries can skip it.
-    return { buildings, everything: rows.length > 0 && buildings.length === rows.length }
+    // Always an explicit `buildingId IN` list, even for ADMIN — a scope check
+    // never relies on "nothing changed since the building query".
+    return rows.filter((b) => canRead(b))
   }
 
-  /** The scope narrowed by the zone / building filters — never widened.
-   *  null = no restriction (everything in scope and no zone/building filter). */
-  function narrowedIds({ buildings, everything }, query) {
-    if (everything && !query.zoneId && !query.buildingId) return null
+  /** The scope narrowed by the zone / building filters — never widened. */
+  function narrowedIds(buildings, query) {
     return buildings
       .filter((b) => (!query.zoneId || b.zoneId === query.zoneId) && (!query.buildingId || b.id === query.buildingId))
       .map((b) => b.id)
@@ -434,10 +430,9 @@ export function createCustomerService({
 
   async function listAllCustomers(query, actor) {
     const now = new Date()
-    const scope = await scopedBuildings(actor)
-    const { buildings } = scope
-    const where = customerListWhere(query, narrowedIds(scope, query), now)
-    const scopeWhere = scope.everything ? {} : { buildingId: { in: buildings.map((b) => b.id) } }
+    const buildings = await scopedBuildings(actor)
+    const where = customerListWhere(query, narrowedIds(buildings, query), now)
+    const scopeWhere = { buildingId: { in: buildings.map((b) => b.id) } }
     const page = query.page ?? 1
     const pageSize = query.pageSize ?? 50
     const and = (extra) => ({ AND: [where, extra] })
@@ -490,8 +485,8 @@ export function createCustomerService({
 
   /** The export: same filter and sort, up to CSV_CAP rows. */
   async function exportCustomersCsv(query, actor) {
-    const scope = await scopedBuildings(actor)
-    const where = customerListWhere(query, narrowedIds(scope, query), new Date())
+    const buildings = await scopedBuildings(actor)
+    const where = customerListWhere(query, narrowedIds(buildings, query), new Date())
     const rows = await customerRepository.listPage({
       where,
       orderBy: customerListOrderBy(query.sort),

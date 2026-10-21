@@ -34,11 +34,9 @@ export function mobileFragment(q) {
 /**
  * The customer filter as one AND list. `buildingIds` is the caller's scope,
  * already narrowed by `zoneId` / `buildingId` — this function never widens it.
- * `null` means no building restriction at all (the caller decided the scope is everything).
  */
 export function customerListWhere(query, buildingIds, now = new Date()) {
-  // null = the scope is every building (an ADMIN with no zone/building filter).
-  const and = buildingIds === null ? [] : [{ buildingId: { in: buildingIds } }]
+  const and = [{ buildingId: { in: buildingIds } }]
   const q = query.q?.trim()
   if (q) {
     const or = [

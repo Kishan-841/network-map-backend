@@ -262,7 +262,7 @@ describe('GET /customers/list — search by mobile only for a phone fragment', (
   it('a username with a digit matches only its own customer', async () => {
     expect(await search('abc5')).toEqual(['Kiran'])
     expect(await search(`${S}abc5`)).toEqual(['Kiran'])
-    expect(await search(`${S}abc5`, ADMIN)).toEqual(['Kiran']) // ADMIN: whole-registry path
+    expect(await search(`${S}abc5`, ADMIN)).toEqual(['Kiran'])
   })
   it('a pure-digit fragment (3+ digits, + spaces ( ) -) still matches by mobile', async () => {
     expect(await search('55555')).toEqual(['Kiran'])
