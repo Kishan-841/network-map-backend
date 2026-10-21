@@ -8,14 +8,15 @@ function make({ rows = [], enabled = true, paused = false, tokens = 60, answer =
   const lookup = {
     enabled,
     isPaused: () => state.paused,
-    availableTokens: () => tokens,
+    availableTokens: () => (typeof tokens === 'function' ? tokens() : tokens),
     lookup: vi.fn(async (u) => answer(u, state)),
   }
   const repo = {
     listForRefresh: vi.fn(async (n, ex = []) => rows.filter((r) => !ex.includes(r.id)).slice(0, n)),
     saveConnectionSnapshots: vi.fn(async () => []),
+    markNoUsername: vi.fn(async () => 0),
   }
-  const log = { error: vi.fn() }
+  const log = { error: vi.fn(), warn: vi.fn() }
   return { state, lookup, repo, log, sync: createOltSync({ lookup, repo, log }) }
 }
 const mkRows = (n) => Array.from({ length: n }, (_, i) => ({ id: `c${i}`, username: `u${i}` }))
@@ -68,6 +69,53 @@ describe('olt sync tick', () => {
     release()
     expect(await first).toMatchObject({ checked: 1 })
     expect(t.repo.listForRefresh).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('olt sync safety rails', () => {
+  it('stops mid-tick when tokens fall below the floor, saving what it has', async () => {
+    let tokens = 60
+    const t = make({ rows: mkRows(5), tokens: () => tokens, answer: () => { tokens = 5; return online } })
+    expect(await t.sync.tick()).toMatchObject({ checked: 1, saved: 1 })
+    expect(t.repo.saveConnectionSnapshots.mock.calls[0][0]).toHaveLength(1)
+  })
+
+  it('marks blank usernames without any OLT lookup', async () => {
+    const t = make({ rows: [] })
+    await t.sync.tick()
+    expect(t.repo.markNoUsername).toHaveBeenCalledWith(200)
+    expect(t.lookup.lookup).not.toHaveBeenCalled()
+  })
+
+  it('saves nothing and warns when 10+ lookups all say "not linked"', async () => {
+    const t = make({ rows: mkRows(12), answer: () => ({ found: false }) })
+    expect(await t.sync.tick()).toMatchObject({ checked: 12, saved: 0 })
+    expect(t.repo.saveConnectionSnapshots).not.toHaveBeenCalled()
+    expect(t.log.warn).toHaveBeenCalledWith('OLT status refresh: every lookup said "not linked" — check OLT_API_URL')
+  })
+
+  it('fewer than 10 "not linked" answers are believed', async () => {
+    const t = make({ rows: mkRows(9), answer: () => ({ found: false }) })
+    expect(await t.sync.tick()).toMatchObject({ checked: 9, saved: 9 })
+    expect(t.log.warn).not.toHaveBeenCalled()
+  })
+
+  it('10+ lookups with some linked rows still save', async () => {
+    const t = make({ rows: mkRows(12), answer: (u) => (u === 'u0' ? online : { found: false }) })
+    expect(await t.sync.tick()).toMatchObject({ checked: 12, saved: 12 })
+  })
+
+  it('warns once when every lookup was an error', async () => {
+    const t = make({ rows: mkRows(3), answer: () => ({ unavailable: true, reason: 'error' }) })
+    expect(await t.sync.tick()).toMatchObject({ checked: 3, saved: 0 })
+    expect(t.log.warn).toHaveBeenCalledTimes(1)
+    expect(t.log.warn).toHaveBeenCalledWith('OLT status refresh: OLT API unreachable this round')
+  })
+
+  it('does not warn when only some lookups errored', async () => {
+    const t = make({ rows: mkRows(3), answer: (u) => (u === 'u0' ? { unavailable: true, reason: 'error' } : online) })
+    await t.sync.tick()
+    expect(t.log.warn).not.toHaveBeenCalled()
   })
 })
 

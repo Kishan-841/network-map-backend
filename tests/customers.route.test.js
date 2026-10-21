@@ -557,3 +557,69 @@ describe('POST /customers/import — upsert, dry run, wings, not in this sheet',
     expect(res.body.data.createdCount).toBe(900)
   })
 })
+
+describe('Username change resets the stored connection', () => {
+  const patch = (id, body) => request(app).patch(`/api/v1/customers/${id}`).set(ADMIN).send(body)
+  const snap = { connState: 'online', connRxDbm: -18, connRxQuality: 'good', connOlt: 'O', connPon: 1, connOnu: 2, connLastSeen: new Date(), connWeak: false, connCheckedAt: new Date() }
+  const CONN_KEYS = Object.keys(snap)
+  const seed = (n, username) =>
+    prisma.customer.create({ data: { buildingId: mine.id, name: `Rst${n}`, mobile: `9300000${n}`, username, createdById: IDS.admin, ...snap } })
+  const connOf = async (id) => {
+    const row = await prisma.customer.findUnique({ where: { id } })
+    return Object.fromEntries(CONN_KEYS.map((k) => [k, row[k]]))
+  }
+  const allNull = Object.fromEntries(CONN_KEYS.map((k) => [k, null]))
+
+  it('PATCH with a new Username clears every conn* column', async () => {
+    const a = await seed('001', `${S}-rst1`)
+    expect((await patch(a.id, { username: `${S}-rst1b` })).status).toBe(200)
+    expect(await connOf(a.id)).toEqual(allNull)
+  })
+
+  it('PATCH clearing the Username clears them too', async () => {
+    const a = await seed('002', `${S}-rst2`)
+    expect((await patch(a.id, { username: '' })).status).toBe(200)
+    expect(await connOf(a.id)).toEqual(allNull)
+  })
+
+  it('PATCH leaving the Username alone keeps the snapshot', async () => {
+    const a = await seed('003', `${S}-rst3`)
+    expect((await patch(a.id, { name: 'Renamed' })).status).toBe(200)
+    expect((await connOf(a.id)).connState).toBe('online')
+  })
+
+  it('import claiming a hand-added row with a Username clears the snapshot; an unchanged Username keeps it', async () => {
+    const a = await seed('004', null)
+    const b = await seed('005', `${S}-rst5`)
+    const run = (rows) => request(app).post('/api/v1/customers/import').set(ADMIN).send({ rows })
+    const res = await run([
+      { row: 2, buildingId: mine.id, username: `${S}-rst4`, name: 'Rst004', mobile: '9300000004' },
+      { row: 3, buildingId: mine.id, username: `${S}-rst5`, name: 'Rst005 new name', mobile: '9300000005' },
+    ])
+    expect(res.status).toBe(201)
+    expect(res.body.data.updatedCount).toBe(2)
+    expect(await connOf(a.id)).toEqual(allNull)
+    expect((await connOf(b.id)).connState).toBe('online')
+  })
+})
+
+describe('customerRepository.markNoUsername (real DB)', () => {
+  it('marks blank-username rows no_username without touching others, once', async () => {
+    const bl = await prisma.building.create({
+      data: { buildingName: `${S} Blank Tower`, formattedAddress: 'x', latitude: 18.5, longitude: 73.8, zoneId: zone.id, createdById: IDS.admin },
+    })
+    const mk = (n, username, extra = {}) =>
+      prisma.customer.create({ data: { buildingId: bl.id, name: n, mobile: `9400000${n}`, username, ...extra } })
+    const nul = await mk('01', null)
+    const empty = await mk('02', '', { connState: 'online', connRxDbm: -20, connCheckedAt: new Date('2026-01-01') })
+    const done = await mk('03', null, { connState: 'no_username', connCheckedAt: new Date('2026-01-01') })
+    const named = await mk('04', `${S}-bl4`)
+    await customerRepository.markNoUsername(100000)
+    const get = (id) => prisma.customer.findUnique({ where: { id } })
+    expect(await get(nul.id)).toMatchObject({ connState: 'no_username', connRxDbm: null })
+    expect((await get(nul.id)).connCheckedAt).toBeInstanceOf(Date)
+    expect(await get(empty.id)).toMatchObject({ connState: 'no_username', connRxDbm: null })
+    expect((await get(done.id)).connCheckedAt.toISOString()).toBe('2026-01-01T00:00:00.000Z')
+    expect(await get(named.id)).toMatchObject({ connState: null, connCheckedAt: null })
+  })
+})

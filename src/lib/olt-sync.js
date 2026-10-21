@@ -38,11 +38,20 @@ export function createOltSync({
     running = true
     try {
       for (const [id, at] of backoff) if (at <= now()) backoff.delete(id)
+      // No OLT call, no token: blank-username rows are simply "no username".
+      try {
+        await repo.markNoUsername?.(200)
+      } catch (err) {
+        log.error?.('OLT status refresh: marking blank usernames failed:', err?.message)
+      }
       const rows = await repo.listForRefresh(perMinute, [...backoff.keys()])
       const entries = []
       let checked = 0
+      let notLinked = 0
+      let errored = 0
       for (const row of rows) {
-        if (stopped || lookup.isPaused()) break
+        // Give way to building pages that started mid-tick: same floor as the start guard.
+        if (stopped || lookup.isPaused() || lookup.availableTokens() < minTokens) break
         const username = String(row.username ?? '').trim()
         if (!username) {
           holdBack(row.id)
@@ -50,7 +59,13 @@ export function createOltSync({
         }
         checked += 1
         try {
-          const snapshot = snapshotOf(summarise(await lookup.lookup(username)))
+          const answer = await lookup.lookup(username)
+          if (answer?.unavailable && answer.reason === 'error') errored += 1
+          const snapshot = snapshotOf(summarise(answer))
+          if (snapshot?.connState === 'not_linked') {
+            notLinked += 1
+            holdBack(row.id)
+          }
           if (snapshot) entries.push({ id: row.id, snapshot })
           else holdBack(row.id)
         } catch (err) {
@@ -58,6 +73,12 @@ export function createOltSync({
           log.error?.('OLT status refresh: one lookup failed:', err?.message)
         }
       }
+      if (checked >= 10 && notLinked === checked) {
+        // A misrouted API answers "not linked" for everyone: believe none of it.
+        log.warn?.('OLT status refresh: every lookup said "not linked" — check OLT_API_URL')
+        return { checked, saved: 0, skipped: null }
+      }
+      if (checked >= 1 && errored === checked) log.warn?.('OLT status refresh: OLT API unreachable this round')
       if (entries.length) await repo.saveConnectionSnapshots(entries)
       return { checked, saved: entries.length, skipped: null }
     } catch (err) {

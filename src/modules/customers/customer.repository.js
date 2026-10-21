@@ -1,4 +1,5 @@
 import { prisma } from '../../lib/prisma.js'
+import { NO_CONNECTION } from '../../lib/olt-optical.js'
 
 export const customerRepository = {
   listByBuilding: (buildingId) =>
@@ -51,6 +52,29 @@ export const customerRepository = {
       take: limit,
       select: { id: true, username: true },
     }),
+
+  /**
+   * Blank-username rows never reach the OLT API: mark up to `limit` of them
+   * `no_username` (those not already so) in one write. No token spent.
+   */
+  markNoUsername: async (limit = 200) => {
+    const rows = await prisma.customer.findMany({
+      where: {
+        AND: [
+          { OR: [{ username: null }, { username: '' }] },
+          { OR: [{ connState: null }, { connState: { not: 'no_username' } }] },
+        ],
+      },
+      select: { id: true },
+      take: limit,
+    })
+    if (!rows.length) return 0
+    const { count } = await prisma.customer.updateMany({
+      where: { id: { in: rows.map((r) => r.id) } },
+      data: { ...NO_CONNECTION, connState: 'no_username', connCheckedAt: new Date() },
+    })
+    return count
+  },
 
   remove: (id) => prisma.customer.delete({ where: { id } }),
 

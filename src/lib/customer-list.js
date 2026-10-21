@@ -51,7 +51,9 @@ export function customerListWhere(query, buildingIds, now = new Date()) {
   if (query.operator) and.push({ operator: query.operator })
   if (query.billingStatus) and.push({ status: query.billingStatus })
   if (query.planName) and.push({ planName: query.planName })
-  if (query.conn === 'never') and.push({ connCheckedAt: null })
+  const blank = [{ username: null }, { username: '' }]
+  if (query.conn === 'never') and.push({ connCheckedAt: null, NOT: { OR: blank } })
+  else if (query.conn === 'no_username') and.push({ OR: [{ connState: 'no_username' }, ...blank] })
   else if (query.conn) and.push({ connState: query.conn })
   if (query.weak === 'true') and.push({ connWeak: true })
   if (query.expiry) and.push(expiryWhere(query.expiry, now))

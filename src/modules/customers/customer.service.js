@@ -15,7 +15,7 @@ import {
   expiryWhere,
   toListRow,
 } from '../../lib/customer-list.js'
-import { mapLimit, pendingConnection, redactConnection, snapshotOf, summariseConnection } from '../../lib/olt-optical.js'
+import { NO_CONNECTION, mapLimit, pendingConnection, redactConnection, snapshotOf, summariseConnection } from '../../lib/olt-optical.js'
 
 /**
  * Customers of a building (spec 2026-10-17).
@@ -220,6 +220,8 @@ export function createCustomerService({
         throw ApiError.conflict('A customer with this mobile number already exists in this building')
       }
     }
+    // A new (or cleared) Username makes the stored OLT answer about the old one wrong.
+    if ((data.username ?? null) !== (existing.username ?? null)) Object.assign(data, NO_CONNECTION)
     return customerRepository.update(id, data)
   }
 
@@ -361,6 +363,7 @@ export function createCustomerService({
         const { data, changed } = mergeCustomerUpdate(match, cleaned)
         const finalWingId = data.wingId ?? match.wingId
         if (changed) {
+          if ('username' in data && (data.username ?? null) !== (match.username ?? null)) Object.assign(data, NO_CONNECTION)
           updates.push({ id: match.id, data })
           finish('update', wingName(row.buildingId, finalWingId))
         } else {

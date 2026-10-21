@@ -153,6 +153,12 @@ function pickBest(onus) {
   return [...onus].sort((a, b) => Number(isOnline(b)) - Number(isOnline(a)) || rank(b) - rank(a))[0] ?? null
 }
 
+/** Every stored connection column cleared — used when a Username changes. */
+export const NO_CONNECTION = {
+  connState: null, connRxDbm: null, connRxQuality: null, connOlt: null, connPon: null,
+  connOnu: null, connLastSeen: null, connWeak: null, connCheckedAt: null,
+}
+
 /** Not checked yet (rate-limited, or the building deadline passed first). */
 export function pendingConnection() {
   return { state: 'pending', onus: [], best: null, signalDropped: false, weak: false }
