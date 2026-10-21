@@ -42,10 +42,11 @@ export const customerRepository = {
     )
   },
 
-  /** Customers with a Username, least recently checked first (never checked first). */
-  listForRefresh: (limit) =>
+  /** Customers with a Username, least recently checked first (never checked first),
+   *  skipping excludeIds (rows the refresher is backing off from). */
+  listForRefresh: (limit, excludeIds = []) =>
     prisma.customer.findMany({
-      where: { username: { not: null }, NOT: { username: '' } },
+      where: { username: { not: null }, NOT: { username: '' }, ...(excludeIds.length ? { id: { notIn: excludeIds } } : {}) },
       orderBy: [{ connCheckedAt: { sort: 'asc', nulls: 'first' } }, { id: 'asc' }],
       take: limit,
       select: { id: true, username: true },

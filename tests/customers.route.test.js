@@ -49,6 +49,26 @@ afterAll(async () => {
   await prisma.zone.delete({ where: { id: zone.id } })
 })
 
+describe('customerRepository.listForRefresh (real DB)', () => {
+  it('orders never-checked first then oldest, skips empty usernames, honours excludeIds', async () => {
+    const b = await prisma.building.create({
+      data: { buildingName: `${S} Refresh Tower`, formattedAddress: 'x', latitude: 18.5, longitude: 73.8, zoneId: zone.id, createdById: IDS.admin },
+    })
+    const mk = (n, username, connCheckedAt) =>
+      prisma.customer.create({ data: { buildingId: b.id, name: n, mobile: `99000${n}`, username, connCheckedAt } })
+    const old = await mk('01', `${S}-old`, new Date('2026-01-01'))
+    const recent = await mk('02', `${S}-recent`, new Date('2026-06-01'))
+    const never = await mk('03', `${S}-never`, null)
+    const blank = await mk('04', '', null)
+    const noUser = await mk('05', null, null)
+    const mine = new Set([old.id, recent.id, never.id, blank.id, noUser.id])
+    const run = async (ex) =>
+      (await customerRepository.listForRefresh(100000, ex)).filter((r) => mine.has(r.id)).map((r) => r.id)
+    expect(await run()).toEqual([never.id, old.id, recent.id])
+    expect(await run([never.id, old.id])).toEqual([recent.id])
+  })
+})
+
 describe('POST /customers', () => {
   it('the repository has the methods the service calls', () => {
     for (const method of ['listByBuilding', 'findById', 'findByBuildingAndMobile', 'create', 'update', 'remove', 'findBuildingIds', 'listBuildingsForLookup', 'listWings', 'findWing', 'findByUsername', 'listWingsForBuildings', 'listForImport', 'listByUsernames', 'applyImport', 'saveConnectionSnapshots', 'listForRefresh']) {

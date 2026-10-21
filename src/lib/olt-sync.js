@@ -11,13 +11,24 @@ export function createOltSync({
   lookup,
   repo,
   summarise = summariseConnection,
+  now = Date.now,
   perMinute = 30,
   minTokens = 20,
+  backoffMs = 30 * 60 * 1000,
+  maxBackoff = 5000,
   log = console,
 }) {
   let running = false
-  let interval = null
-  let first = null
+  let stopped = false
+  let timer = null
+  // customerId -> retryAt. A row that gave no snapshot keeps its old
+  // connCheckedAt, so without this it would be picked first on every tick.
+  const backoff = new Map()
+
+  function holdBack(id) {
+    if (!backoff.has(id) && backoff.size >= maxBackoff) backoff.delete(backoff.keys().next().value)
+    backoff.set(id, now() + backoffMs)
+  }
 
   async function tick() {
     if (!lookup.enabled) return { checked: 0, saved: 0, skipped: 'disabled' }
@@ -26,16 +37,24 @@ export function createOltSync({
     if (lookup.availableTokens() < minTokens) return { checked: 0, saved: 0, skipped: 'busy' }
     running = true
     try {
-      const rows = await repo.listForRefresh(perMinute)
+      for (const [id, at] of backoff) if (at <= now()) backoff.delete(id)
+      const rows = await repo.listForRefresh(perMinute, [...backoff.keys()])
       const entries = []
       let checked = 0
       for (const row of rows) {
-        if (lookup.isPaused()) break
+        if (stopped || lookup.isPaused()) break
+        const username = String(row.username ?? '').trim()
+        if (!username) {
+          holdBack(row.id)
+          continue
+        }
         checked += 1
         try {
-          const snapshot = snapshotOf(summarise(await lookup.lookup(row.username)))
+          const snapshot = snapshotOf(summarise(await lookup.lookup(username)))
           if (snapshot) entries.push({ id: row.id, snapshot })
+          else holdBack(row.id)
         } catch (err) {
+          holdBack(row.id)
           log.error?.('OLT status refresh: one lookup failed:', err?.message)
         }
       }
@@ -49,21 +68,28 @@ export function createOltSync({
     }
   }
 
+  // First tick after 15 s; each next one gap ms after the previous FINISHES,
+  // so at most perMinute lookups per gap.
+  function schedule(ms, gap) {
+    if (stopped) return
+    timer = setTimeout(async () => {
+      timer = null
+      await tick()
+      schedule(gap, gap)
+    }, ms)
+    timer.unref?.()
+  }
+
   function start(intervalMs = 60000) {
     stop()
-    first = setTimeout(() => {
-      first = null
-      tick()
-    }, 15000)
-    first.unref?.()
-    interval = setInterval(tick, intervalMs)
-    interval.unref?.()
+    stopped = false
+    schedule(15000, intervalMs)
   }
 
   function stop() {
-    if (first) clearTimeout(first)
-    if (interval) clearInterval(interval)
-    first = interval = null
+    stopped = true
+    if (timer) clearTimeout(timer)
+    timer = null
   }
 
   return { tick, start, stop }

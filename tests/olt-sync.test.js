@@ -12,7 +12,7 @@ function make({ rows = [], enabled = true, paused = false, tokens = 60, answer =
     lookup: vi.fn(async (u) => answer(u, state)),
   }
   const repo = {
-    listForRefresh: vi.fn(async (n) => rows.slice(0, n)),
+    listForRefresh: vi.fn(async (n, ex = []) => rows.filter((r) => !ex.includes(r.id)).slice(0, n)),
     saveConnectionSnapshots: vi.fn(async () => []),
   }
   const log = { error: vi.fn() }
@@ -33,7 +33,7 @@ describe('olt sync tick', () => {
     const t = make({ rows: mkRows(50) })
     const r = await t.sync.tick()
     expect(r).toEqual({ checked: 30, saved: 30, skipped: null })
-    expect(t.repo.listForRefresh).toHaveBeenCalledWith(30)
+    expect(t.repo.listForRefresh).toHaveBeenCalledWith(30, [])
     expect(t.repo.saveConnectionSnapshots).toHaveBeenCalledTimes(1)
     expect(t.repo.saveConnectionSnapshots.mock.calls[0][0][0]).toMatchObject({ id: 'c0', snapshot: { connState: 'online' } })
   })
@@ -68,6 +68,65 @@ describe('olt sync tick', () => {
     release()
     expect(await first).toMatchObject({ checked: 1 })
     expect(t.repo.listForRefresh).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('olt sync backoff and scheduling', () => {
+  it('rows that give no snapshot or throw are excluded next tick, so others get checked', async () => {
+    const bad = (u) => u === 'u0' || u === 'u1'
+    const t = make({
+      rows: mkRows(4),
+      answer: (u) => { if (u === 'u0') throw new Error('x'); return bad(u) ? { unavailable: true } : online },
+    })
+    const sync = createOltSync({ lookup: t.lookup, repo: t.repo, perMinute: 2, log: t.log })
+    expect(await sync.tick()).toMatchObject({ checked: 2, saved: 0 })
+    expect(await sync.tick()).toMatchObject({ checked: 2, saved: 2 })
+    expect(t.repo.listForRefresh.mock.calls[1][1].sort()).toEqual(['c0', 'c1'])
+  })
+
+  it('backoff expires after the delay', async () => {
+    let clock = 0
+    const t = make({ rows: mkRows(1), answer: () => ({ unavailable: true }) })
+    const sync = createOltSync({ lookup: t.lookup, repo: t.repo, now: () => clock, log: t.log })
+    await sync.tick()
+    await sync.tick()
+    expect(t.lookup.lookup).toHaveBeenCalledTimes(1)
+    clock = 31 * 60 * 1000
+    await sync.tick()
+    expect(t.lookup.lookup).toHaveBeenCalledTimes(2)
+  })
+
+  it('never looks up a whitespace-only username', async () => {
+    const t = make({ rows: [{ id: 'w', username: '   ' }, { id: 'ok', username: ' u ' }] })
+    expect(await t.sync.tick()).toMatchObject({ checked: 1, saved: 1 })
+    expect(t.lookup.lookup).toHaveBeenCalledWith('u')
+  })
+
+  it('stop() during a running tick halts between rows and no further tick is scheduled', async () => {
+    vi.useFakeTimers()
+    try {
+      const t = make({ rows: mkRows(5), answer: (u) => { if (u === 'u1') t.sync.stop(); return online } })
+      t.sync.start(60000)
+      await vi.advanceTimersByTimeAsync(15000)
+      expect(t.lookup.lookup).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(300000)
+      expect(t.repo.listForRefresh).toHaveBeenCalledTimes(1)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('next tick is a gap after the previous finishes', async () => {
+    vi.useFakeTimers()
+    try {
+      const t = make({ rows: mkRows(1) })
+      t.sync.start(60000)
+      await vi.advanceTimersByTimeAsync(15000)
+      expect(t.repo.listForRefresh).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(59000)
+      expect(t.repo.listForRefresh).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(t.repo.listForRefresh).toHaveBeenCalledTimes(2)
+      t.sync.stop()
+    } finally { vi.useRealTimers() }
   })
 })
 
