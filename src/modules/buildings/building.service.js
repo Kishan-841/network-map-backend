@@ -467,6 +467,9 @@ export function createBuildingService({ buildingRepository, storage, userReposit
   }
 
   return {
+    // The one building read rule, for lists that ride it (customers, spec 2026-10-21).
+    readScope,
+
     async createBuilding(input, createdById, actor) {
       // eslint-disable-next-line prefer-const -- photos is normalised below
       let { details, permission, photos, contact, remark, ...building } = input

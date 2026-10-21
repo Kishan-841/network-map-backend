@@ -7,6 +7,14 @@ import {
   mergeCustomerUpdate,
   normaliseMobile,
 } from '../../lib/customers.js'
+import {
+  CSV_CAP,
+  customerListOrderBy,
+  customerListWhere,
+  customersCsv,
+  expiryWhere,
+  toListRow,
+} from '../../lib/customer-list.js'
 import { mapLimit, pendingConnection, redactConnection, snapshotOf, summariseConnection } from '../../lib/olt-optical.js'
 
 /**
@@ -398,7 +406,98 @@ export function createCustomerService({
     }
   }
 
+  // ── Every customer the actor may see (spec 2026-10-21) ──
+
+  /**
+   * The buildings (with customers) this actor may read: the building read
+   * rule applied to lean rows, once per request. A role it allows nothing
+   * gets an empty list downstream, never a 403.
+   */
+  async function scopedBuildings(actor) {
+    const canRead = await buildingService.readScope(actor)
+    const rows = await customerRepository.listBuildingsWithCustomers()
+    return rows.filter((b) => canRead(b))
+  }
+
+  /** The scope narrowed by the zone / building filters — never widened. */
+  function narrowedIds(buildings, query) {
+    return buildings
+      .filter((b) => (!query.zoneId || b.zoneId === query.zoneId) && (!query.buildingId || b.id === query.buildingId))
+      .map((b) => b.id)
+  }
+
+  async function listAllCustomers(query, actor) {
+    const now = new Date()
+    const buildings = await scopedBuildings(actor)
+    const where = customerListWhere(query, narrowedIds(buildings, query), now)
+    const scopeWhere = { buildingId: { in: buildings.map((b) => b.id) } }
+    const page = query.page ?? 1
+    const pageSize = query.pageSize ?? 50
+    const and = (extra) => ({ AND: [where, extra] })
+
+    const [rows, total, byState, weak, expiring7d, networkZones, operators, billingStatuses, planNames] =
+      await Promise.all([
+        customerRepository.listPage({
+          where,
+          orderBy: customerListOrderBy(query.sort),
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+        }),
+        customerRepository.count(where),
+        customerRepository.countByConnState(where),
+        customerRepository.count(and({ connWeak: true })),
+        customerRepository.count(and(expiryWhere('7d', now))),
+        customerRepository.distinctValues('networkZone', scopeWhere),
+        customerRepository.distinctValues('operator', scopeWhere),
+        customerRepository.distinctValues('status', scopeWhere),
+        customerRepository.distinctValues('planName', scopeWhere),
+      ])
+
+    const zones = new Map()
+    for (const b of buildings) if (b.zone) zones.set(b.zone.id, b.zone)
+    return {
+      rows: rows.map(toListRow),
+      total,
+      page,
+      pageSize,
+      counts: {
+        total,
+        online: byState.online ?? 0,
+        offline: byState.offline ?? 0,
+        notSeen: byState.not_seen ?? 0,
+        weak,
+        expiring7d,
+      },
+      facets: {
+        zones: [...zones.values()]
+          .map((z) => ({ id: z.id, name: z.name }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+        networkZones,
+        operators,
+        billingStatuses,
+        planNames,
+        buildings: buildings.map((b) => ({ id: b.id, buildingName: b.buildingName })),
+      },
+    }
+  }
+
+  /** The export: same filter and sort, up to CSV_CAP rows. */
+  async function exportCustomersCsv(query, actor) {
+    const buildings = await scopedBuildings(actor)
+    const where = customerListWhere(query, narrowedIds(buildings, query), new Date())
+    const rows = await customerRepository.listPage({
+      where,
+      orderBy: customerListOrderBy(query.sort),
+      skip: 0,
+      take: CSV_CAP + 1,
+    })
+    const truncated = rows.length > CSV_CAP
+    return { csv: customersCsv(rows.slice(0, CSV_CAP).map(toListRow)), truncated }
+  }
+
   return {
+    listAllCustomers,
+    exportCustomersCsv,
     listCustomers,
     getCustomer,
     getBuildingConnections,

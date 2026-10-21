@@ -86,6 +86,37 @@ export const listQuerySchema = z.object({
   buildingId: z.string().min(1),
 })
 
+/** A query param: '' (an empty select in the URL) means "no filter". */
+const blankToUndefined = (schema) =>
+  z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? undefined : v), schema)
+const filterText = blankToUndefined(z.string().trim().max(200).optional())
+const filterEnum = (values) => blankToUndefined(z.enum(values).optional())
+const pageInt = (max) =>
+  blankToUndefined(
+    z.preprocess(
+      (v) => (typeof v === 'string' && /^\d+$/.test(v.trim()) ? Number(v.trim()) : v),
+      z.number().int().min(1).max(max).optional(),
+    ),
+  )
+
+/** GET /customers/list and /customers/list.csv — the spec's API section. */
+export const listAllQuerySchema = z.object({
+  q: filterText,
+  zoneId: filterText,
+  networkZone: filterText,
+  operator: filterText,
+  billingStatus: filterText,
+  conn: filterEnum(['online', 'offline', 'not_seen', 'not_linked', 'no_username', 'never']),
+  weak: filterEnum(['true']),
+  expiry: filterEnum(['expired', '7d', '30d']),
+  buildingId: filterText,
+  planName: filterText,
+  autoRenewal: filterEnum(['yes', 'no', 'unset']),
+  sort: filterEnum(['name', 'expiry', 'signal', 'checked']).transform((v) => v ?? 'name'),
+  page: pageInt(1_000_000).transform((v) => v ?? 1),
+  pageSize: pageInt(100).transform((v) => v ?? 50),
+})
+
 /** The import preview asks about every distinct building name in the file. */
 export const lookupSchema = z.object({
   names: z.array(z.string().trim().min(1).max(200)).min(1).max(200),

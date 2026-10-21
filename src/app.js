@@ -55,7 +55,7 @@ export function createApp() {
       // list, so a cross-origin download would arrive with no filename and no
       // row count. The API and the web app are on different origins in every
       // environment, so these have to be named explicitly.
-      exposedHeaders: ['Content-Disposition', 'X-Export-Rows', 'X-Export-Truncated'],
+      exposedHeaders: ['Content-Disposition', 'X-Export-Rows', 'X-Export-Truncated', 'X-Truncated'],
     }),
   )
   // gzip responses: JSON like the map's marker list is very repetitive and

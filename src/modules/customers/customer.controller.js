@@ -7,6 +7,7 @@ import { zoneRepository } from '../zones/zone.repository.js'
 import { getOpticalLookup } from './optical-lookup.js'
 import { customerRepository } from './customer.repository.js'
 import { createCustomerService } from './customer.service.js'
+import { csvFilename } from '../../lib/customer-list.js'
 
 // The list read rides the buildings read rule, so the buildings service is
 // assembled here exactly as building.controller.js does — same repositories,
@@ -32,6 +33,28 @@ export const customerController = {
     try {
       const data = await customerService.listCustomers(req.validatedQuery, req.user)
       res.json({ success: true, data })
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  async listAll(req, res, next) {
+    try {
+      const data = await customerService.listAllCustomers(req.validatedQuery, req.user)
+      res.json({ success: true, data })
+    } catch (err) {
+      next(err)
+    }
+  },
+
+  /** The current filter as a CSV file (cap 5 000; X-Truncated when cut short). */
+  async exportCsv(req, res, next) {
+    try {
+      const { csv, truncated } = await customerService.exportCustomersCsv(req.validatedQuery, req.user)
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+      res.setHeader('Content-Disposition', `attachment; filename="${csvFilename()}"`)
+      if (truncated) res.setHeader('X-Truncated', 'true')
+      res.send(csv)
     } catch (err) {
       next(err)
     }

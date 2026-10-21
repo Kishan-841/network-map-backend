@@ -4,6 +4,7 @@ import { validateBody, validateQuery } from '../../middleware/validate.js'
 import {
   createCustomerSchema,
   importCustomersSchema,
+  listAllQuerySchema,
   listQuerySchema,
   lookupSchema,
   updateCustomerSchema,
@@ -19,6 +20,11 @@ export const customerRoutes = Router()
 customerRoutes.use(requireAuth)
 
 customerRoutes.get('/', validateQuery(listQuerySchema), customerController.list)
+
+// Every customer in the actor's building scope (spec 2026-10-21). Before
+// '/:id' so "list" is not read as a customer id.
+customerRoutes.get('/list', validateQuery(listAllQuerySchema), customerController.listAll)
+customerRoutes.get('/list.csv', validateQuery(listAllQuerySchema), customerController.exportCsv)
 
 // Before '/:id' so "connections" is not read as a customer id.
 customerRoutes.get('/connections', validateQuery(listQuerySchema), customerController.connections)

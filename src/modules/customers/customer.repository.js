@@ -54,6 +54,59 @@ export const customerRepository = {
 
   remove: (id) => prisma.customer.delete({ where: { id } }),
 
+  // ── The all-customers list (spec 2026-10-21) ──
+
+  /**
+   * Every building that has a customer, lean: just the fields the building
+   * read rule needs (readScope + isVisibleBuilding) and the names the list's
+   * pickers show. One query; the scope is applied in memory by the service.
+   */
+  listBuildingsWithCustomers: () =>
+    prisma.building.findMany({
+      where: { customers: { some: {} } },
+      select: {
+        id: true,
+        buildingName: true,
+        zoneId: true,
+        createdById: true,
+        source: true,
+        permissionApproval: true,
+        zone: { select: { id: true, name: true } },
+      },
+      orderBy: [{ buildingName: 'asc' }, { id: 'asc' }],
+    }),
+
+  /** One page (or the export's first `take`) of the filtered list. */
+  listPage: ({ where, orderBy, skip, take }) =>
+    prisma.customer.findMany({
+      where,
+      orderBy,
+      skip,
+      take,
+      include: {
+        building: { select: { id: true, buildingName: true, zone: { select: { id: true, name: true } } } },
+        wing: { select: { id: true, name: true } },
+      },
+    }),
+
+  count: (where) => prisma.customer.count({ where }),
+
+  /** `{ [connState]: n }` for the filtered list — one grouped query. */
+  countByConnState: async (where) => {
+    const groups = await prisma.customer.groupBy({ by: ['connState'], where, _count: { _all: true } })
+    return Object.fromEntries(groups.map((g) => [g.connState, g._count._all]))
+  },
+
+  /** Distinct non-empty values of one text column, sorted. */
+  distinctValues: async (field, where) => {
+    const groups = await prisma.customer.groupBy({
+      by: [field],
+      where: { AND: [where, { [field]: { not: null } }, { NOT: { [field]: '' } }] },
+      orderBy: { [field]: 'asc' },
+    })
+    return groups.map((g) => g[field])
+  },
+
   /** Located wings of many buildings, as `Map<buildingId, wings[]>`, for the import. */
   listWingsForBuildings: async (buildingIds) => {
     const rows = await prisma.buildingWing.findMany({
