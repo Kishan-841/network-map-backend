@@ -111,7 +111,12 @@ export function createCustomerService({
       ...customer,
       wing: customer.wing ?? null,
       wings,
-      building: { id: building.id, buildingName: building.buildingName },
+      building: {
+        id: building.id,
+        buildingName: building.buildingName,
+        latitude: building.latitude,
+        longitude: building.longitude,
+      },
     }
   }
 
@@ -229,7 +234,39 @@ export function createCustomerService({
     if (!optical?.enabled) return { enabled: false }
     const [connection, down] = await Promise.all([connectionOf(optical, customer.username), downOlts()])
     await saveSnapshots([[customer.id, connection]])
-    return { enabled: true, connection: view(withReachability(connection, down), actor) }
+    const samePon = await samePonOf(customer, connection, down, actor)
+    return { enabled: true, connection: view(withReachability(connection, down), actor), samePon }
+  }
+
+  /**
+   * Health of the customer's PON from STORED snapshots (spec 2026-10-21-customer-detail §3):
+   * the live best ONU's olt/pon, else the stored ones; counts only, over the
+   * reader's building scope, the customer included. Never fatal.
+   */
+  async function samePonOf(customer, connection, down, actor) {
+    const best = connection.best
+    const live = best?.olt != null && best?.pon != null
+    const olt = live ? best.olt : customer.connOlt
+    const pon = live ? best.pon : customer.connPon
+    if (olt == null || olt === '' || pon == null) return null
+    try {
+      const buildings = await scopedBuildings(actor)
+      const by = await customerRepository.countSamePon({ olt, pon, buildingIds: buildings.map((b) => b.id) })
+      const oltIsDown = Boolean(down?.has(olt))
+      const total = Object.values(by).reduce((a, n) => a + n, 0)
+      return {
+        olt,
+        pon,
+        total,
+        online: by.online ?? 0,
+        offline: by.offline ?? 0,
+        notSeen: oltIsDown ? 0 : (by.not_seen ?? 0),
+        oltDown: oltIsDown ? (by.not_seen ?? 0) : 0,
+      }
+    } catch (e) {
+      console.error(`customer same-PON counts failed (${customer.id}): ${e?.message ?? e}`)
+      return null
+    }
   }
 
   async function createCustomer(body, actor) {

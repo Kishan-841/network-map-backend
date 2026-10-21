@@ -121,6 +121,16 @@ export const customerRepository = {
     return Object.fromEntries(groups.map((g) => [g.connState, g._count._all]))
   },
 
+  /** `{ [connState]: n }` of the customers stored on one OLT + PON inside these buildings — one grouped query. */
+  countSamePon: async ({ olt, pon, buildingIds }) => {
+    const groups = await prisma.customer.groupBy({
+      by: ['connState'],
+      where: { connOlt: olt, connPon: pon, buildingId: { in: buildingIds } },
+      _count: { _all: true },
+    })
+    return Object.fromEntries(groups.map((g) => [g.connState, g._count._all]))
+  },
+
   /** Distinct non-empty values of one text column, sorted. */
   distinctValues: async (field, where) => {
     const groups = await prisma.customer.groupBy({
