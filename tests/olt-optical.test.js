@@ -11,7 +11,12 @@ const STALE = {"username":"8686692513","onus":[{"onu_id":114922912,"olt_id":181,
 const ONLINE = {"username":"8983453863","onus":[{"onu_id":27398167,"olt_id":182,"olt":"PCMC-Morya-Thergaon-2-1.22","pon_no":3,"onu_no":53,"onu_index":"GPON0/3:53","serial":"VTXX41ADC258","status":"online","distance_m":692,"last_seen":"2026-10-19T06:53:20.407533+00:00","session_ip":"100.64.18.132","rx_dbm":-15.8,"rx_quality":"good","tx_dbm":2.27,"baseline_rx_dbm":-15.8,"usernames":["8983453863"],"customer_ips":["100.64.18.132"],"stale":false,"mapping":"live"}]}
 const NOT_LINKED = {"detail":"No ONU mapped to this username"}
 
-const reply = (status, body) => ({ status, ok: status >= 200 && status < 300, json: async () => body })
+const reply = (status, body, headers = {}) => ({
+  status,
+  ok: status >= 200 && status < 300,
+  headers: { get: (k) => headers[String(k).toLowerCase()] ?? null },
+  json: async () => body,
+})
 const make = (fetchImpl, extra = {}) =>
   createOpticalLookup({ fetchImpl, baseUrl: 'https://olt.test/api/', apiKey: 'test-key', ...extra })
 
@@ -70,7 +75,7 @@ describe('lookup + normalise', () => {
     ['timeout', async () => { throw new DOMException('timed out', 'TimeoutError') }],
   ])('%s -> unavailable', async (_n, impl) => {
     const r = await make(impl).lookup('1')
-    expect(r).toEqual({ unavailable: true })
+    expect(r).toEqual({ unavailable: true, reason: 'error' })
     expect(summariseConnection(r).state).toBe('unavailable')
   })
 
@@ -138,8 +143,8 @@ describe('cache', () => {
   it('hits within ttl, refetches after, never caches unavailable', async () => {
     let t = 1000
     const f = vi.fn(async () => reply(200, ONLINE))
-    const o = make(f, { now: () => t, ttlMs: 300000 })
-    await o.lookup('u'); t += 299999; await o.lookup('u')
+    const o = make(f, { now: () => t, ttlMs: 600000 })
+    await o.lookup('u'); t += 599999; await o.lookup('u')
     expect(f).toHaveBeenCalledTimes(1)
     t += 2; await o.lookup('u')
     expect(f).toHaveBeenCalledTimes(2)
@@ -155,6 +160,98 @@ describe('cache', () => {
     const o = make(f)
     await o.lookup('u'); await o.lookup('u')
     expect(f).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('rate limiting', () => {
+  const RL = { unavailable: true, reason: 'rate_limited' }
+  const clock = () => {
+    const c = { t: 1000, slept: [] }
+    c.now = () => c.t
+    c.sleep = async (ms) => { c.slept.push(ms); c.t += ms }
+    return c
+  }
+  const ok = () => vi.fn(async () => reply(200, ONLINE))
+
+  it('token bucket: burst spent, the next call waits for a token', async () => {
+    const c = clock(), f = ok()
+    const o = make(f, { now: c.now, sleep: c.sleep, burst: 3, ratePerSec: 1 })
+    await Promise.all(['a', 'b', 'c'].map((u) => o.lookup(u)))
+    expect(f).toHaveBeenCalledTimes(3)
+    expect(c.slept).toEqual([])
+    await o.lookup('d')
+    expect(f).toHaveBeenCalledTimes(4)
+    expect(c.slept).toEqual([1000])
+  })
+
+  it('gives up instead of waiting longer than maxWaitMs', async () => {
+    const c = clock(), f = ok()
+    const o = make(f, { now: c.now, sleep: c.sleep, burst: 1, ratePerSec: 0.01, maxWaitMs: 1000 })
+    await o.lookup('a')
+    expect(await o.lookup('b')).toEqual(RL)
+    expect(f).toHaveBeenCalledTimes(1)
+    expect(c.slept).toEqual([])
+    expect(summariseConnection(RL).state).toBe('unavailable')
+  })
+
+  it('429 pauses every lookup for Retry-After seconds', async () => {
+    const c = clock()
+    const f = vi.fn(async () => reply(429, { detail: 'Rate limit exceeded' }, { 'retry-after': '12' }))
+    const o = make(f, { now: c.now, sleep: c.sleep })
+    expect(await o.lookup('a')).toEqual(RL)
+    c.t += 5000
+    expect(await o.lookup('b')).toEqual(RL)
+    expect(f).toHaveBeenCalledTimes(1)
+    c.t += 8000 // +13 s
+    await o.lookup('b')
+    expect(f).toHaveBeenCalledTimes(2)
+  })
+
+  it('429 without a usable header pauses 15 s; a huge one is capped at 120 s', async () => {
+    const c = clock()
+    const f = vi.fn(async () => reply(429, {}))
+    const o = make(f, { now: c.now, sleep: c.sleep })
+    await o.lookup('a')
+    c.t += 14000
+    expect(await o.lookup('b')).toEqual(RL)
+    c.t += 2000
+    await o.lookup('b')
+    expect(f).toHaveBeenCalledTimes(2)
+
+    const g = vi.fn(async () => reply(429, {}, { 'retry-after': '99999' }))
+    const p = make(g, { now: c.now, sleep: c.sleep })
+    await p.lookup('a')
+    c.t += 119000
+    expect(await p.lookup('b')).toEqual(RL)
+    c.t += 2000
+    await p.lookup('b')
+    expect(g).toHaveBeenCalledTimes(2)
+  })
+
+  it('cache hits and blank usernames use no token', async () => {
+    const c = clock(), f = ok()
+    const o = make(f, { now: c.now, sleep: c.sleep, burst: 1, ratePerSec: 0.01, maxWaitMs: 1000 })
+    const first = await o.lookup('a')
+    expect(await o.lookup('a')).toEqual(first)
+    expect(await o.lookup('')).toBeNull()
+    expect(f).toHaveBeenCalledTimes(1)
+    expect(await o.lookup('b')).toEqual(RL) // bucket still empty: the hit took nothing and gave nothing
+  })
+
+  it('concurrent lookups of one username share one request', async () => {
+    const f = ok()
+    const o = make(f)
+    const [x, y] = await Promise.all([o.lookup('u'), o.lookup('u')])
+    expect(f).toHaveBeenCalledTimes(1)
+    expect(x).toEqual(y)
+  })
+
+  it('other failures stay plain unavailable and are not cached', async () => {
+    const f = vi.fn(async () => reply(500, {}))
+    const o = make(f)
+    expect((await o.lookup('u')).unavailable).toBe(true)
+    await o.lookup('u')
+    expect(f).toHaveBeenCalledTimes(2)
   })
 })
 

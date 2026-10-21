@@ -3,7 +3,8 @@
  * optical signal). Server-only: the key never reaches the browser.
  *
  * Never reads or returns the API's `location` field (it carries device
- * passwords). Answers are cached in memory per Username; failures are not.
+ * passwords). Answers are cached in memory per Username (10 min); failures are not.
+ * Requests are paced by a token bucket and pause on a 429 (Retry-After).
  */
 const MAX_CACHE = 5000
 const DROP_DB = 3
@@ -35,7 +36,7 @@ function normaliseOnu(o) {
 
 /**
  * @returns {{ enabled: boolean, lookup: (username: string) => Promise<
- *   { found: true, onus: object[] } | { found: false } | { unavailable: true } | null>}}
+ *   { found: true, onus: object[] } | { found: false } | { unavailable: true, reason?: 'rate_limited' | 'error' } | null>}}
  * lookup() returns null (and sends no request) for a blank username: deciding
  * "no username" is the caller's job (summariseConnection(null)). When the
  * client is disabled it answers { unavailable: true } without fetching.
@@ -45,20 +46,50 @@ export function createOpticalLookup({
   baseUrl,
   apiKey,
   timeoutMs = 8000,
-  ttlMs = 300000,
+  ttlMs = 600000, // 10 min
   now = Date.now,
+  sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  burst = 100,
+  ratePerSec = 2,
+  maxWaitMs = 10000,
 } = {}) {
   const base = String(baseUrl ?? '').replace(/\/+$/, '')
   const enabled = Boolean(base && apiKey)
   const cache = new Map()
+  const inflight = new Map()
 
-  async function lookup(username) {
-    const u = String(username ?? '').trim()
-    if (!u) return null
-    if (!enabled) return { unavailable: true }
+  // The API accepts ~120 requests in a burst, then ~2/s. One bucket per
+  // instance (= per API process). tokens may go negative: that is the queue.
+  let tokens = burst
+  let refilledAt = now()
+  let pausedUntil = 0
+  const RATE_LIMITED = () => ({ unavailable: true, reason: 'rate_limited' })
 
-    const hit = cache.get(u)
-    if (hit && now() - hit.at < ttlMs) return hit.value
+  /** Reserve a token; resolves to the ms to wait, or null if too long. */
+  function reserve() {
+    const t = now()
+    tokens = Math.min(burst, tokens + ((t - refilledAt) / 1000) * ratePerSec)
+    refilledAt = t
+    const wait = tokens >= 1 ? 0 : Math.ceil(((1 - tokens) / ratePerSec) * 1000)
+    if (wait > maxWaitMs) return null
+    tokens -= 1
+    return wait
+  }
+
+  function retryAfterMs(res) {
+    const n = Number(res.headers?.get?.('retry-after'))
+    const secs = Number.isFinite(n) && n > 0 ? Math.min(n, 120) : 15
+    return secs * 1000
+  }
+
+  async function fetchOne(u) {
+    if (now() < pausedUntil) return RATE_LIMITED()
+    const wait = reserve()
+    if (wait == null) return RATE_LIMITED()
+    if (wait > 0) {
+      await sleep(wait)
+      if (now() < pausedUntil) return RATE_LIMITED()
+    }
 
     let value
     try {
@@ -70,14 +101,32 @@ export function createOpticalLookup({
       else if (res.status === 200) {
         const json = await res.json()
         value = { found: true, onus: (Array.isArray(json?.onus) ? json.onus : []).map(normaliseOnu) }
-      } else return { unavailable: true }
+      } else if (res.status === 429) {
+        pausedUntil = now() + retryAfterMs(res)
+        return RATE_LIMITED()
+      } else return { unavailable: true, reason: 'error' }
     } catch {
-      return { unavailable: true }
+      return { unavailable: true, reason: 'error' }
     }
 
     if (cache.size >= MAX_CACHE) cache.clear()
     cache.set(u, { at: now(), value })
     return value
+  }
+
+  async function lookup(username) {
+    const u = String(username ?? '').trim()
+    if (!u) return null
+    if (!enabled) return { unavailable: true }
+
+    const hit = cache.get(u)
+    if (hit && now() - hit.at < ttlMs) return hit.value
+
+    const pending = inflight.get(u)
+    if (pending) return pending
+    const p = fetchOne(u).finally(() => inflight.delete(u))
+    inflight.set(u, p)
+    return p
   }
 
   return { enabled, lookup }
