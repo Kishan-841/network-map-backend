@@ -246,6 +246,14 @@ describe('rate limiting', () => {
     expect(x).toEqual(y)
   })
 
+  it('defaults: 50 at once, the 51st waits 1000 ms', async () => {
+    const c = clock(), f = ok()
+    const o = make(f, { now: c.now, sleep: c.sleep })
+    await Promise.all(Array.from({ length: 51 }, (_, i) => o.lookup(`u${i}`)))
+    expect(c.slept).toEqual([1000])
+    expect(f).toHaveBeenCalledTimes(51)
+  })
+
   it('concurrent waiters get distinct, increasing waits', async () => {
     const c = clock(), f = ok()
     const o = make(f, { now: c.now, sleep: c.sleep, burst: 1, ratePerSec: 1 })

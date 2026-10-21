@@ -49,8 +49,11 @@ export function createOpticalLookup({
   ttlMs = 600000, // 10 min
   now = Date.now,
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
-  burst = 100,
-  ratePerSec = 2,
+  // Measured limit: 120 requests per rolling 60 s, then 429 + Retry-After.
+  // Worst case in any minute is burst + 60 * ratePerSec; keep it under 120
+  // (50 + 60 = 110) so a shared key budget still has headroom.
+  burst = 50,
+  ratePerSec = 1,
   maxWaitMs = 10000,
 } = {}) {
   const base = String(baseUrl ?? '').replace(/\/+$/, '')
