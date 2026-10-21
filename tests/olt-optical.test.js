@@ -191,7 +191,8 @@ describe('rate limiting', () => {
     expect(await o.lookup('b')).toEqual(RL)
     expect(f).toHaveBeenCalledTimes(1)
     expect(c.slept).toEqual([])
-    expect(summariseConnection(RL).state).toBe('unavailable')
+    expect(summariseConnection(RL).state).toBe('pending')
+    expect(summariseConnection({ unavailable: true, reason: 'error' }).state).toBe('unavailable')
   })
 
   it('429 pauses every lookup for Retry-After seconds', async () => {

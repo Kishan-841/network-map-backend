@@ -83,7 +83,7 @@ afterAll(async () => {
 })
 
 describe('building connections deadline', () => {
-  it('a lookup that never resolves is unavailable once the deadline passes; others intact', async () => {
+  it('a lookup that never resolves is pending once the deadline passes; others intact', async () => {
     const rows = [{ id: 'a', username: 'fast' }, { id: 'b', username: 'hang' }, { id: 'c', username: null }]
     const lookup = async (u) => (u === 'hang' ? new Promise(() => {}) : u ? { found: false } : null)
     const svc = createCustomerService({
@@ -96,9 +96,24 @@ describe('building connections deadline', () => {
     const out = await svc.getBuildingConnections({ buildingId: 'x' }, { role: 'ADMIN' })
     expect(Date.now() - t0).toBeLessThan(1000)
     expect(out.connections.a.state).toBe('not_linked')
-    expect(out.connections.b).toEqual({ state: 'unavailable', onus: [], best: null, signalDropped: false, weak: false })
+    expect(out.connections.b).toEqual({ state: 'pending', onus: [], best: null, signalDropped: false, weak: false })
     expect(out.connections.c.state).toBe('no_username')
-    expect(out.counts.unavailable).toBe(1)
+    expect(out.counts.pending).toBe(1)
+    expect(out.counts.unavailable).toBe(0)
+  })
+
+  it('a rate_limited lookup is pending, a real error stays unavailable', async () => {
+    const rows = [{ id: 'a', username: 'rl' }, { id: 'b', username: 'bad' }]
+    const lookup = async (u) => ({ unavailable: true, reason: u === 'rl' ? 'rate_limited' : 'error' })
+    const svc = createCustomerService({
+      customerRepository: { listByBuilding: async () => rows },
+      buildingService: { getBuilding: async () => ({}) },
+      getOpticalLookup: () => ({ enabled: true, lookup }),
+    })
+    const out = await svc.getBuildingConnections({ buildingId: 'x' }, { role: 'ADMIN' })
+    expect(out.connections.a.state).toBe('pending')
+    expect(out.connections.b.state).toBe('unavailable')
+    expect(out.counts).toMatchObject({ pending: 1, unavailable: 1 })
   })
 })
 
@@ -115,7 +130,7 @@ describe('GET /customers/connections', () => {
     expect(connections[c.nl.id].state).toBe('not_linked')
     expect(connections[c.none.id].state).toBe('no_username')
     expect(connections[c.blank.id].state).toBe('no_username')
-    expect(counts).toEqual({ online: 1, offline: 1, notSeen: 0, notLinked: 1, noUsername: 2, unavailable: 1, weak: 0 })
+    expect(counts).toEqual({ online: 1, offline: 1, notSeen: 0, notLinked: 1, noUsername: 2, unavailable: 1, pending: 0, weak: 0 })
   })
 
   it('makes no OLT call for customers without a username', async () => {

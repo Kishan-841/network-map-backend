@@ -146,10 +146,16 @@ function pickBest(onus) {
   return [...onus].sort((a, b) => Number(isOnline(b)) - Number(isOnline(a)) || rank(b) - rank(a))[0] ?? null
 }
 
+/** Not checked yet (rate-limited, or the building deadline passed first). */
+export function pendingConnection() {
+  return { state: 'pending', onus: [], best: null, signalDropped: false, weak: false }
+}
+
 /** A lookup result (or null = customer has no Username) -> one Connection. */
 export function summariseConnection(lookup) {
   const empty = { onus: [], best: null, signalDropped: false, weak: false }
   if (lookup == null) return { state: 'no_username', ...empty }
+  if (lookup.unavailable && lookup.reason === 'rate_limited') return pendingConnection()
   if (lookup.unavailable) return { state: 'unavailable', ...empty }
   if (!lookup.found || !lookup.onus?.length) return { state: 'not_linked', ...empty }
 

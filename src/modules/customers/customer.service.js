@@ -7,7 +7,7 @@ import {
   mergeCustomerUpdate,
   normaliseMobile,
 } from '../../lib/customers.js'
-import { mapLimit, redactConnection, summariseConnection } from '../../lib/olt-optical.js'
+import { mapLimit, pendingConnection, redactConnection, summariseConnection } from '../../lib/olt-optical.js'
 
 /**
  * Customers of a building (spec 2026-10-17).
@@ -111,6 +111,7 @@ export function createCustomerService({
     not_linked: 'notLinked',
     no_username: 'noUsername',
     unavailable: 'unavailable',
+    pending: 'pending',
   }
   const view = (connection, actor) => (actor?.role === 'ADMIN' ? connection : redactConnection(connection))
   const connectionOf = async (optical, username) =>
@@ -122,7 +123,7 @@ export function createCustomerService({
     if (!optical?.enabled) return { enabled: false }
     const customers = await customerRepository.listByBuilding(buildingId)
     // Overall deadline: lookups still running when it passes count as
-    // unavailable; they may finish later and fill the lookup cache.
+    // pending (not checked yet); they may finish later and fill the lookup cache.
     const unavailable = () => summariseConnection({ unavailable: true })
     const done = new Array(customers.length).fill(null)
     let expired = false
@@ -145,8 +146,8 @@ export function createCustomerService({
       clearTimeout(timer)
       expired = true
     }
-    const list = done.map((d) => d ?? unavailable())
-    const counts = { online: 0, offline: 0, notSeen: 0, notLinked: 0, noUsername: 0, unavailable: 0, weak: 0 }
+    const list = done.map((d) => d ?? pendingConnection())
+    const counts = { online: 0, offline: 0, notSeen: 0, notLinked: 0, noUsername: 0, unavailable: 0, pending: 0, weak: 0 }
     const connections = {}
     customers.forEach((cu, i) => {
       counts[COUNT_KEY[list[i].state]] += 1
