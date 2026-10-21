@@ -21,18 +21,31 @@ export function expiryWhere(window, now = new Date()) {
 }
 
 /**
+ * The digits to look for in a mobile number — only when the search looks like
+ * a phone fragment (digits, spaces, + ( ) -, at least 3 digits). Otherwise
+ * "user5" would match every mobile holding a 5.
+ */
+export function mobileFragment(q) {
+  if (!/^[\d\s+()-]+$/.test(q)) return null
+  const digits = normaliseMobile(q)
+  return digits && digits.length >= 3 ? digits : null
+}
+
+/**
  * The customer filter as one AND list. `buildingIds` is the caller's scope,
  * already narrowed by `zoneId` / `buildingId` — this function never widens it.
+ * `null` means no building restriction at all (the caller decided the scope is everything).
  */
 export function customerListWhere(query, buildingIds, now = new Date()) {
-  const and = [{ buildingId: { in: buildingIds } }]
+  // null = the scope is every building (an ADMIN with no zone/building filter).
+  const and = buildingIds === null ? [] : [{ buildingId: { in: buildingIds } }]
   const q = query.q?.trim()
   if (q) {
     const or = [
       { name: { contains: q, mode: 'insensitive' } },
       { username: { contains: q, mode: 'insensitive' } },
     ]
-    const digits = normaliseMobile(q)
+    const digits = mobileFragment(q)
     if (digits) or.push({ mobile: { contains: digits } })
     and.push({ OR: or })
   }

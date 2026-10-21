@@ -113,7 +113,7 @@ export const listAllQuerySchema = z.object({
   planName: filterText,
   autoRenewal: filterEnum(['yes', 'no', 'unset']),
   sort: filterEnum(['name', 'expiry', 'signal', 'checked']).transform((v) => v ?? 'name'),
-  page: pageInt(1_000_000).transform((v) => v ?? 1),
+  page: pageInt(10_000).transform((v) => v ?? 1),
   pageSize: pageInt(100).transform((v) => v ?? 50),
 })
 

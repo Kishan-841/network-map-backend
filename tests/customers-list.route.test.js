@@ -12,18 +12,19 @@ const S = `clist-${Date.now()}`
 const auth = (id, role) => ({
   Authorization: `Bearer ${jwt.sign({ sub: id, role }, env.jwtSecret, { audience: 'staff', expiresIn: '1h' })}`,
 })
-const IDS = { admin: `${S}-admin`, svA: `${S}-sva`, svB: `${S}-svb`, agent: `${S}-agent` }
+const IDS = { admin: `${S}-admin`, svA: `${S}-sva`, svB: `${S}-svb`, svC: `${S}-svc`, agent: `${S}-agent` }
 const ADMIN = auth(IDS.admin, 'ADMIN')
 const SVA = auth(IDS.svA, 'SURVEYOR')
 const SVB = auth(IDS.svB, 'SURVEYOR')
 const AGENT = auth(IDS.agent, 'ACQUISITION_AGENT')
+const SVC = auth(IDS.svC, 'SURVEYOR')
 
 const HOUR = 3600 * 1000
 const DAY = 24 * HOUR
 const now = Date.now()
 const at = (ms) => new Date(now + ms)
 
-let z1, z2, alpha, beta, gamma, hidden, big, wingA
+let z1, z2, z3, delta, alpha, beta, gamma, hidden, big, wingA
 const c = {}
 
 const list = (query = {}, who = SVA) => request(app).get('/api/v1/customers/list').query(query).set(who)
@@ -44,6 +45,7 @@ const names = (res) => res.body.data.rows.map((r) => r.name)
 beforeAll(async () => {
   z1 = await prisma.zone.create({ data: { name: `${S}-z1`, city: 'Test' } })
   z2 = await prisma.zone.create({ data: { name: `${S}-z2`, city: 'Test' } })
+  z3 = await prisma.zone.create({ data: { name: `${S}-z3`, city: 'Test' } })
   const user = (id, role, zoneId) =>
     prisma.user.create({
       data: {
@@ -55,6 +57,7 @@ beforeAll(async () => {
   await user(IDS.svA, 'SURVEYOR', z1.id)
   await user(IDS.svB, 'SURVEYOR', z2.id)
   await user(IDS.agent, 'ACQUISITION_AGENT')
+  await user(IDS.svC, 'SURVEYOR', z3.id)
   const building = (name, zoneId, extra = {}) =>
     prisma.building.create({
       data: { buildingName: `${S} ${name}`, formattedAddress: 'x', latitude: 18.5, longitude: 73.8, zoneId, createdById: IDS.admin, ...extra },
@@ -65,6 +68,7 @@ beforeAll(async () => {
   // A society permission still waiting for approval: only ADMIN reads it.
   hidden = await building('Hidden', z1.id, { source: 'PERMISSION' })
   big = await building('Big', null)
+  delta = await building('Delta', z3.id)
   wingA = await prisma.buildingWing.create({ data: { buildingId: alpha.id, name: 'A', latitude: 18.5, longitude: 73.8 } })
 
   const cust = (buildingId, data) => prisma.customer.create({ data: { buildingId, createdById: IDS.admin, ...data } })
@@ -93,6 +97,10 @@ beforeAll(async () => {
     connState: 'online', connRxDbm: -15, connRxQuality: 'good', connWeak: false, connCheckedAt: at(-60 * 1000),
   })
   c.farid = await cust(gamma.id, { name: 'Farid', mobile: '9100000006', operator: 'BSNL', status: 'Active', connState: 'online' })
+  // The search set: mobiles full of 5s, a username holding a digit.
+  c.kiran = await cust(delta.id, { name: 'Kiran', mobile: '9155555555', username: `${S}abc5` })
+  c.lata = await cust(delta.id, { name: 'Lata', mobile: '9100000555', username: 'lata' })
+  c.mohan = await cust(delta.id, { name: 'Mohan', mobile: '9200000123' })
   c.hidden = await cust(hidden.id, { name: 'Hidden', mobile: '9100000007', operator: 'Secret' })
 })
 
@@ -101,7 +109,7 @@ afterAll(async () => {
   await prisma.buildingWing.deleteMany({ where: { building: { buildingName: { startsWith: S } } } })
   await prisma.building.deleteMany({ where: { buildingName: { startsWith: S } } })
   await prisma.user.deleteMany({ where: { id: { in: Object.values(IDS) } } })
-  await prisma.zone.deleteMany({ where: { id: { in: [z1.id, z2.id] } } })
+  await prisma.zone.deleteMany({ where: { id: { in: [z1.id, z2.id, z3.id] } } })
 })
 
 describe('GET /customers/list — scope', () => {
@@ -244,6 +252,27 @@ describe('GET /customers/list — filters', () => {
     expect((await list({ pageSize: 101 })).status).toBe(400)
     expect((await list({ pageSize: 0 })).status).toBe(400)
     expect((await list({ page: 0 })).status).toBe(400)
+    expect((await list({ page: 10001 })).status).toBe(400)
+    expect((await list({ page: 10000 })).status).toBe(200)
+  })
+})
+
+describe('GET /customers/list — search by mobile only for a phone fragment', () => {
+  const search = async (q, who = SVC) => names(await list({ q }, who)).sort()
+  it('a username with a digit matches only its own customer', async () => {
+    expect(await search('abc5')).toEqual(['Kiran'])
+    expect(await search(`${S}abc5`)).toEqual(['Kiran'])
+    expect(await search(`${S}abc5`, ADMIN)).toEqual(['Kiran']) // ADMIN: whole-registry path
+  })
+  it('a pure-digit fragment (3+ digits, + spaces ( ) -) still matches by mobile', async () => {
+    expect(await search('55555')).toEqual(['Kiran'])
+    expect(await search('0000555')).toEqual(['Lata'])
+    expect(await search('+91 92000-00123')).toEqual(['Mohan'])
+  })
+  it('a mixed query or a 1–2 digit fragment does not match by mobile', async () => {
+    expect(await search('Flat 5')).toEqual([])
+    expect(await search('x555')).toEqual([])
+    expect(await search('12')).toEqual([])
   })
 })
 
