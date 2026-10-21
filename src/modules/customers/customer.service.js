@@ -556,7 +556,7 @@ export function createCustomerService({
    * REFRESH_STALE_MS (or missing), or always with `force` — which also skips
    * the lookup's 10-minute memory cache. Same shared lookup (bucket, cache,
    * de-dup) as every other OLT read; FAN_OUT at a time, refreshDeadlineMs overall,
- * and no new lookup once the bucket is under REFRESH_MIN_TOKENS.
+   * and no new lookup once the bucket is under REFRESH_MIN_TOKENS.
    * Answers are saved as snapshots; rows that got no answer in time, or a
    * rate-limited / unavailable one, keep their stored snapshot and are listed
    * in `pending`. Rows come back in the list row shape, in the order asked.
