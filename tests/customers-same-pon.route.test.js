@@ -19,7 +19,7 @@ const ADMIN = auth(IDS.admin, 'ADMIN')
 const SV = auth(IDS.surveyor, 'SURVEYOR')
 const OLT_A = `${S}-OLT-A`
 const OLT_D = `${S}-OLT-D`
-const U = { live: `${S}-u-live`, fallback: `${S}-u-fb` }
+const U = { live: `${S}-u-live`, fallback: `${S}-u-fb`, left: `${S}-u-left` }
 
 const reply = (status, body) => ({ status, ok: status >= 200 && status < 300, json: async () => body })
 const fakeFetch = vi.fn(async (url) => {
@@ -27,6 +27,7 @@ const fakeFetch = vi.fn(async (url) => {
   if (u === U.live) {
     return reply(200, { username: u, onus: [{ onu_id: 1, olt_id: 2, olt: OLT_A, pon_no: 3, onu_no: 4, status: 'online', rx_dbm: -15, rx_quality: 'good', stale: false }] })
   }
+  if (u === U.left) return reply(200, { username: u, onus: [] }) // linked nowhere now
   return reply(503, {}) // fallback customer: live answer unavailable
 })
 const fake = (enabled = true) =>
@@ -62,6 +63,7 @@ beforeAll(async () => {
     dn1: await cust(mine.id, 'Dn1', snap('not_seen', OLT_D, 5)),
     dn2: await cust(theirs.id, 'Dn2', snap('not_seen', OLT_D, 5)),
     dOn: await cust(mine.id, 'DOn', snap('online', OLT_D, 5)),
+    left: await cust(mine.id, 'Left', { username: U.left, ...snap('online', OLT_A, 9) }),
     none: await cust(mine.id, 'None'),
   }
 })
@@ -101,6 +103,14 @@ describe('GET /customers/:id/connection samePon', () => {
     expect(sv.body.data.samePon).toEqual({ olt: OLT_D, pon: 5, total: 3, online: 1, offline: 0, notSeen: 0, oltDown: 2 })
   })
 
+  it('is null when the live state says the customer left the PON (no stored fallback)', async () => {
+    setOpticalLookupForTests(fake())
+    const res = await one(c.left.id)
+    expect(res.status).toBe(200)
+    expect(['not_linked', 'no_username']).toContain(res.body.data.connection.state)
+    expect(res.body.data.samePon).toBeNull()
+  })
+
   it('is null when olt or pon is unknown', async () => {
     setOpticalLookupForTests(fake())
     const res = await one(c.none.id)
@@ -119,5 +129,19 @@ describe('GET /customers/:id building location', () => {
     const res = await request(app).get(`/api/v1/customers/${c.live.id}`).set(ADMIN)
     expect(res.status).toBe(200)
     expect(res.body.data.building).toEqual({ id: mine.id, buildingName: `${S} Mine`, latitude: 19.8762, longitude: 75.3433 })
+  })
+})
+
+describe('GET /customers/:id oltReachable', () => {
+  const get = async (id) => (await request(app).get(`/api/v1/customers/${id}`).set(ADMIN)).body.data.oltReachable
+  it('is false on a down OLT, true on a reachable one, null with no OLT', async () => {
+    expect(await get(c.dn1.id)).toBe(false)
+    expect(await get(c.onA.id)).toBe(true)
+    expect(await get(c.none.id)).toBeNull()
+  })
+  it('falls back to reachable when the reachability lookup throws', async () => {
+    setOltReachabilityForTests({ unreachableOlts: async () => { throw new Error('boom') } })
+    expect(await get(c.dn1.id)).toBe(true)
+    setOltReachabilityForTests({ unreachableOlts: async () => new Set([OLT_D]) })
   })
 })

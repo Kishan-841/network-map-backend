@@ -107,10 +107,12 @@ export function createCustomerService({
     if (!customer) throw ApiError.notFound('Customer not found')
     const building = await buildingService.getBuilding(customer.buildingId, actor)
     const wings = await customerRepository.listWings(customer.buildingId)
+    const down = await downOlts() // cached, never fatal
     return {
       ...customer,
       wing: customer.wing ?? null,
       wings,
+      oltReachable: oltReachableOf(customer.connOlt, down),
       building: {
         id: building.id,
         buildingName: building.buildingName,
@@ -246,6 +248,10 @@ export function createCustomerService({
   async function samePonOf(customer, connection, down, actor) {
     const best = connection.best
     const live = best?.olt != null && best?.pon != null
+    // Stored olt/pon only when the live answer is missing (unavailable / pending);
+    // a live not_linked / no_username means the customer left that PON.
+    const useStored = connection.state === 'unavailable' || connection.state === 'pending'
+    if (!live && !useStored) return null
     const olt = live ? best.olt : customer.connOlt
     const pon = live ? best.pon : customer.connPon
     if (olt == null || olt === '' || pon == null) return null
