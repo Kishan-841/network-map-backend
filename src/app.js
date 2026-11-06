@@ -2,6 +2,7 @@ import path from 'node:path'
 import express from 'express'
 import cors from 'cors'
 import compression from 'compression'
+import { slowRequestLog } from './middleware/slow-request-log.js'
 import { buildCorsOrigin } from './lib/cors-origin.js'
 import { env } from './config/env.js'
 import { errorHandler } from './middleware/error-handler.js'
@@ -45,6 +46,9 @@ export function createApp() {
   // https detection).
   if (env.nodeEnv === 'production') app.set('trust proxy', 1)
 
+  // First, so it times the whole request — including CORS and compression.
+  app.use(slowRequestLog({ thresholdMs: env.slowRequestMs }))
+
   // Restrict which browser origins may call the API. '*' in dev; a specific
   // list in production (CORS_ORIGIN, wildcards allowed for Vercel previews).
   // We authenticate via bearer tokens, not cookies, so credentials stay off.
@@ -56,6 +60,10 @@ export function createApp() {
       // row count. The API and the web app are on different origins in every
       // environment, so these have to be named explicitly.
       exposedHeaders: ['Content-Disposition', 'X-Export-Rows', 'X-Export-Truncated', 'X-Truncated'],
+      // Every call carries a bearer token from another origin, so the browser
+      // preflights it. Let it remember the answer for 2 hours (Chrome's cap)
+      // instead of the 5 s default — one round trip per request, not two.
+      maxAge: 7200,
     }),
   )
   // gzip responses: JSON like the map's marker list is very repetitive and

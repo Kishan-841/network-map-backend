@@ -34,3 +34,20 @@ describe('buildCorsOrigin', () => {
     expect(await allows(m, undefined)).toBe(true)
   })
 })
+
+describe('preflight caching', () => {
+  // Every API call carries a bearer token from another origin, so the browser
+  // sends an OPTIONS preflight first. Without Access-Control-Max-Age Chrome
+  // forgets the answer after 5 s and pays an extra round trip per request.
+  it('tells the browser to remember a preflight for 2 hours', async () => {
+    const { default: request } = await import('supertest')
+    const { createApp } = await import('../src/app.js')
+    const res = await request(createApp())
+      .options('/api/v1/fibers')
+      .set('Origin', 'http://localhost:3000')
+      .set('Access-Control-Request-Method', 'GET')
+      .set('Access-Control-Request-Headers', 'authorization')
+    expect(res.status).toBe(204)
+    expect(res.headers['access-control-max-age']).toBe('7200')
+  })
+})

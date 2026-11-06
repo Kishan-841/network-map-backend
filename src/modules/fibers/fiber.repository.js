@@ -11,8 +11,25 @@ export const FIBER_INCLUDE = {
   fedBy: { select: { portNo: true, splitter: { select: { id: true, code: true, ratio: true, location: true, fiberType: true, closure: { select: { id: true, code: true } }, inputFiber: { select: { id: true, name: true } } } } } },
 }
 
+/**
+ * What GET /fibers (the list) actually sends — see listFiber. The list used to
+ * load each fiber's OLT, feed, creator and full segment rows only to throw
+ * them away; at ~1,300 fibers that was most of its ~200 ms of database time.
+ * Segments keep just the fields listFiber sends plus the two metre columns
+ * shapeFiber totals. GET /fibers/:id still reads FIBER_INCLUDE in full.
+ */
+export const FIBER_LIST_INCLUDE = {
+  points: FIBER_INCLUDE.points,
+  segments: {
+    orderBy: { sequence: 'asc' },
+    select: { id: true, sequence: true, fromPointId: true, toPointId: true, isCut: true, mapMeters: true, fiberLaidMeters: true },
+  },
+  operator: FIBER_INCLUDE.operator,
+  zone: FIBER_INCLUDE.zone,
+}
+
 export const fiberRepository = {
-  list: (where = {}) => prisma.fiber.findMany({ where, orderBy: { name: 'asc' }, include: FIBER_INCLUDE }),
+  list: (where = {}) => prisma.fiber.findMany({ where, orderBy: { name: 'asc' }, include: FIBER_LIST_INCLUDE }),
   findById: (id, tx = prisma) => tx.fiber.findUnique({ where: { id }, include: FIBER_INCLUDE }),
   /** The same read, but only if the scope lets this reader have it. */
   findVisible: (id, where = {}) => prisma.fiber.findFirst({ where: { id, ...where }, include: FIBER_INCLUDE }),

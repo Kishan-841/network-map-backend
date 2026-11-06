@@ -95,6 +95,11 @@ export const env = {
   // Comma-separated list of allowed browser origins, or '*' (dev default).
   // In production set this to your frontend URL(s).
   corsOrigin: process.env.CORS_ORIGIN ?? '*',
+  // Log any API call slower than this (ms) — middleware/slow-request-log.
+  // 0 turns it off. Read with docker logs on the VM.
+  slowRequestMs: Number.isFinite(Number(process.env.SLOW_REQUEST_MS)) && process.env.SLOW_REQUEST_MS !== ''
+    ? Number(process.env.SLOW_REQUEST_MS)
+    : 500,
 }
 
 // Fail fast in production on an unchanged/weak JWT secret — a shared default
