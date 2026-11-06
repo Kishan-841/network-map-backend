@@ -61,6 +61,25 @@ export const requireFiberWrite = (req, res, next) => {
 }
 
 /**
+ * Editing a closure / splitter: the fibre tick as above, OR the person who
+ * created that row — they may always fix their own work, even after the tick
+ * is taken away (owner's rule, 6 Nov 2026). `loadCreatorId(id)` returns the
+ * row's createdById (null/undefined when there is no such row). Deleting
+ * still uses requireFiberWrite.
+ */
+export const requireFiberWriteOrCreator = (loadCreatorId) => async (req, res, next) => {
+  if (!req.user) return next(ApiError.unauthorized())
+  if (mayManageFiber(req.user)) return next()
+  try {
+    const creatorId = await loadCreatorId(req.params.id)
+    if (creatorId && creatorId === req.user.id) return next()
+    next(ApiError.forbidden())
+  } catch (err) {
+    next(err)
+  }
+}
+
+/**
  * Editing buildings. ADMIN, MANAGER and SUPERVISOR always could; a SURVEYOR
  * needs the per-user grant an ADMIN ticks on Users → Assign accesses, and even
  * then only for buildings they logged themselves — that ownership check lives

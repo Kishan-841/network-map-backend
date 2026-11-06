@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { requireAuth, requireRole, requireFiberWrite } from '../../middleware/auth.js'
+import { requireAuth, requireRole, requireFiberWrite, requireFiberWriteOrCreator } from '../../middleware/auth.js'
 import { validateBody } from '../../middleware/validate.js'
 import { audit } from '../system-logs/audit.js'
 import { closureRepository } from './closure.repository.js'
@@ -19,7 +19,8 @@ splitterRoutes.get('/:id', READ, splitterController.get)
 
 splitterRoutes.patch(
   '/:id',
-  WRITE,
+  // The tick, or the person who created this splitter (6 Nov 2026).
+  requireFiberWriteOrCreator(closureRepository.splitterCreatorId),
   audit('Splitter', 'Update', {
     load: (req) => closureRepository.findSplitterById(req.params.id),
     describe: (req, old) => `Splitter '${old?.id ?? req.params.id}' updated`,

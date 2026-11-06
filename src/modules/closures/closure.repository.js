@@ -47,6 +47,11 @@ async function fibersThrough(closureId) {
 export const closureRepository = {
   list: (where = {}) => prisma.closure.findMany({ where, orderBy: { code: 'asc' }, include: withDetail }),
   findById: (id) => prisma.closure.findUnique({ where: { id }, include: withDetail }),
+  /** Who made a closure / splitter — for the creator-may-edit rule. */
+  closureCreatorId: async (id) =>
+    (await prisma.closure.findUnique({ where: { id }, select: { createdById: true } }))?.createdById ?? null,
+  splitterCreatorId: async (id) =>
+    (await prisma.splitter.findUnique({ where: { id }, select: { createdById: true } }))?.createdById ?? null,
   findVisible: (id, where = {}) => prisma.closure.findFirst({ where: { id, ...where }, include: withDetail }),
   create: (data, tx = prisma) => tx.closure.create({ data, include: withDetail }),
   update: (id, data, tx = prisma) => tx.closure.update({ where: { id }, data, include: withDetail }),

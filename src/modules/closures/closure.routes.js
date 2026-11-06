@@ -1,5 +1,5 @@
 import { Router } from 'express'
-import { requireAuth, requireRole, requireFiberWrite } from '../../middleware/auth.js'
+import { requireAuth, requireRole, requireFiberWrite, requireFiberWriteOrCreator } from '../../middleware/auth.js'
 import { validateBody } from '../../middleware/validate.js'
 import { audit } from '../system-logs/audit.js'
 import { closureRepository } from './closure.repository.js'
@@ -26,7 +26,8 @@ closureRoutes.post(
 )
 closureRoutes.patch(
   '/:id',
-  WRITE,
+  // The tick, or the person who created this closure (6 Nov 2026).
+  requireFiberWriteOrCreator(closureRepository.closureCreatorId),
   audit('Closure', 'Update', {
     load: (req) => closureRepository.findById(req.params.id),
     describe: (req, old) => `Closure '${old?.code ?? req.params.id}' updated`,
