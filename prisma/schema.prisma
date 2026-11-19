@@ -453,7 +453,30 @@ model Closure {
   updatedAt  DateTime  @updatedAt
   points     FiberPoint[]
   splitters  Splitter[]
+  /// The cables coming In to and going Out of this closure (replaces the
+  /// single fiberType / tubeCount / inCoreCount / outCoreCount, kept unused).
+  cables     ClosureCable[]
   @@index([buildingId])
+}
+
+/// One cable at a closure, as the survey sheet records it.
+model ClosureCable {
+  id         String   @id @default(cuid())
+  closureId  String
+  closure    Closure  @relation(fields: [closureId], references: [id], onDelete: Cascade)
+  /// 'IN' | 'OUT'
+  direction  String
+  /// 'MAIN_SF' | 'SUB_SF' | 'DROP_CABLE'
+  cableType  String?
+  /// 2 | 4 | 6 | 8 | 12 | 24 | 48
+  coreCount  Int?
+  /// The fiber ID the user types (the tag on the cable) — not a link to Fiber.
+  cableTag   String?
+  /// Order within its direction.
+  position   Int      @default(0)
+  createdAt  DateTime @default(now())
+  @@index([closureId])
+  @@index([cableTag])
 }
 
 model Splitter {
