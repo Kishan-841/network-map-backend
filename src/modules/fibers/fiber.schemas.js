@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { RATIO_PORTS, closureImagesSchema } from '../closures/closure.schemas.js'
+import { RATIO_PORTS, closureCablesSchema, closureImagesSchema } from '../closures/closure.schemas.js'
 import { CORE_COUNTS, FIBER_TYPES } from '../../lib/fiber-constants.js'
 
 // Shared with the closure schemas — see lib/fiber-constants.js for why.
@@ -36,6 +36,7 @@ const pointSchema = z
           'Cores must be one of 2, 4, 6, 12, 24, 48',
         ),
         images: closureImagesSchema,
+        cables: closureCablesSchema,
       })
       .nullish(),
     newPop: z.object({ name: z.string().trim().min(1).max(100) }).nullish(),
