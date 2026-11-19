@@ -5,6 +5,7 @@ import { prisma } from '../../lib/prisma.js'
 import { closureRepository } from './closure.repository.js'
 import { fiberPointRepository } from '../fibers/fiber.repository.js'
 import { RATIO_PORTS } from './closure.schemas.js'
+import { withCableWrites } from './closure-cables.js'
 import { nextClosureCode, nextSplitterCode } from '../../lib/sequences.js'
 import { canSeeFiber, closureScope, splitterScope } from '../../lib/visibility.js'
 import { isVisibleBuilding } from '../../lib/building-source.js'
@@ -125,7 +126,7 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
       assertOwnedImages(data.images)
       const closure = await prisma.$transaction(async (tx) =>
         closureRepository.create(
-          { ...canonicalImages(data), code: await sequences.nextClosureCode(tx), createdById: actor.id },
+          { ...withCableWrites(canonicalImages(data), 'create'), code: await sequences.nextClosureCode(tx), createdById: actor.id },
           tx,
         ),
       )
@@ -135,7 +136,7 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
     async updateClosure(id, data, actor) {
       await mustFind(id, actor)
       assertOwnedImages(data.images)
-      const closure = await signImages(await closureRepository.update(id, canonicalImages(data)))
+      const closure = await signImages(await closureRepository.update(id, withCableWrites(canonicalImages(data), 'update')))
       if (data.latitude != null && data.longitude != null) {
         await fiberPointRepository.updatePositionForClosure(id, {
           latitude: data.latitude,

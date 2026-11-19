@@ -21,6 +21,7 @@ const splitterReadInclude = {
 }
 
 const withDetail = {
+  cables: { orderBy: [{ direction: 'asc' }, { position: 'asc' }] },
   splitters: { include: { outputs: outputsWithTargets } },
   building: true,
   createdBy: { select: { id: true, name: true } },

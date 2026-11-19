@@ -12,3 +12,9 @@ export const CORE_COUNTS = [2, 4, 6, 12, 24, 48]
  * off it, or the drop that reaches a building.
  */
 export const FIBER_TYPES = ['MAIN_SF', 'SUB_SF', 'DROP_CABLE']
+
+/** Core counts a closure's In / Out cable may have — the fibre list plus 8. */
+export const CLOSURE_CABLE_CORES = [2, 4, 6, 8, 12, 24, 48]
+
+/** Which side of a closure a cable is on. */
+export const CABLE_DIRECTIONS = ['IN', 'OUT']

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { CORE_COUNTS, FIBER_TYPES } from '../../lib/fiber-constants.js'
+import { CABLE_DIRECTIONS, CLOSURE_CABLE_CORES, CORE_COUNTS, FIBER_TYPES } from '../../lib/fiber-constants.js'
 
 export const RATIO_PORTS = { R1_2: 2, R1_4: 4, R1_6: 6, R1_8: 8, R1_16: 16 }
 
@@ -23,6 +23,28 @@ const count = (values, message) =>
     .preprocess((v) => (v === '' || v === null ? undefined : v), z.number().int().nullish())
     .refine((v) => v == null || values.includes(v), message)
 
+/**
+ * The cables at a closure: any number In and Out, each with an optional cable
+ * type, core count and the fiber ID the user types. Sending the list replaces
+ * what is stored; leaving it out keeps it.
+ */
+export const closureCablesSchema = z
+  .array(
+    z.object({
+      direction: z.enum(CABLE_DIRECTIONS),
+      cableType: z.enum(FIBER_TYPES).nullish(),
+      coreCount: count(CLOSURE_CABLE_CORES, 'Cores must be one of 2, 4, 6, 8, 12, 24, 48'),
+      cableTag: z
+        .string()
+        .trim()
+        .max(60)
+        .nullish()
+        .transform((v) => v || null),
+    }),
+  )
+  .max(40)
+  .optional()
+
 export const createClosureSchema = z.object({
   ...coord,
   // Still a loose string: closures recorded before the list existed may hold
@@ -38,6 +60,7 @@ export const createClosureSchema = z.object({
   notes: z.string().trim().max(500).nullish(),
   // Photos of the box — upload-API URLs only (the service checks they are ours).
   images: closureImagesSchema,
+  cables: closureCablesSchema,
 })
 export const updateClosureSchema = createClosureSchema.partial()
 

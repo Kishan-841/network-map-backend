@@ -15,6 +15,7 @@ import { popRepository } from '../pops/pop.repository.js'
 import { buildingRepository } from '../buildings/building.repository.js'
 import { userRepository } from '../users/user.repository.js'
 import { zoneRepository } from '../zones/zone.repository.js'
+import { cableWrites } from '../closures/closure-cables.js'
 
 const RATIO_LABEL = { R1_2: '1:2', R1_4: '1:4', R1_6: '1:6', R1_8: '1:8', R1_16: '1:16' }
 
@@ -154,6 +155,7 @@ export function createFiberService(deps) {
                 tubeCount: p.newClosure.tubeCount ?? null,
                 inCoreCount: p.newClosure.inCoreCount ?? null,
                 outCoreCount: p.newClosure.outCoreCount ?? null,
+                ...(p.newClosure.cables ? { cables: cableWrites(p.newClosure.cables, 'create') } : {}),
                 // Same rule as the closure form: our own uploads, stored canonical.
                 ...closureImagesOf(p.newClosure.images),
                 createdById: owner,
