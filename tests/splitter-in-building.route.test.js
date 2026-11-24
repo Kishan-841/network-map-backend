@@ -127,6 +127,59 @@ describe('reading a building splitter', () => {
   })
 })
 
+describe('giving an existing splitter a building', () => {
+  async function closureSplitter() {
+    const closure = await prisma.closure.create({ data: { code: `JC-${S}-${made.length}`, latitude: 18.61, longitude: 73.81, createdById: FIBER } })
+    const res = await request(app).post(`/api/v1/closures/${closure.id}/splitters`).set(as(FIBER)).send({ ratio: 'R1_4' })
+    expect(res.status).toBe(201)
+    return { closure, splitter: res.body.data }
+  }
+
+  it('adds a building, wing, where and note to a closure splitter, keeping its closure and position', async () => {
+    const { closure, splitter } = await closureSplitter()
+    const res = await patch(FIBER, splitter.id, { buildingId: B, wingId: W1, placement: 'BASEMENT', note: 'old box' })
+    expect(res.status).toBe(200)
+    const read = (await request(app).get(`/api/v1/splitters/${splitter.id}`).set(as(FIBER))).body.data
+    expect(read).toMatchObject({ closure: { id: closure.id }, building: { id: B }, wing: { id: W1 }, placement: 'BASEMENT',
+      note: 'old box', latitude: 18.61, longitude: 73.81 })
+    await prisma.closure.delete({ where: { id: closure.id } })
+  })
+
+  it('moving to another building drops a wing that is not in it', async () => {
+    const s = await create({ wingId: W1 })
+    const res = await patch(FIBER, s.id, { buildingId: B2 })
+    expect(res.status).toBe(200)
+    expect(res.body.data).toMatchObject({ buildingId: B2, wingId: null })
+    expect((await patch(FIBER, s.id, { wingId: W1 })).status).toBe(400)
+    expect((await patch(FIBER, s.id, { wingId: W2 })).status).toBe(200)
+  })
+
+  it('removing the building clears wing and where, keeps the note', async () => {
+    const s = await create({ wingId: W1, placement: 'FLOOR', floorNumber: 2, note: 'keep me' })
+    const res = await patch(FIBER, s.id, { buildingId: null })
+    expect(res.status).toBe(200)
+    expect(res.body.data).toMatchObject({ buildingId: null, wingId: null, placement: null, floorNumber: null, note: 'keep me' })
+  })
+
+  it("refuses a building the editor can't read or an unapproved one", async () => {
+    const s = await create()
+    expect((await patch(FIBER, s.id, { buildingId: SOC })).status).toBe(400)
+    expect((await patch(FIBER, s.id, { buildingId: `${S}-nope` })).status).toBe(400)
+    const far = await prisma.building.create({ data: { id: `${S}-far`, buildingName: `${S} far`, formattedAddress: 'x',
+      latitude: 18.6, longitude: 73.8, source: 'COVERAGE', createdById: ADMIN, zoneId: OTHER_ZONE } })
+    expect((await patch(FIBER, s.id, { buildingId: far.id })).status).toBe(400)
+    await prisma.building.delete({ where: { id: far.id } })
+  })
+
+  it('a note alone is fine on any splitter', async () => {
+    const { closure, splitter } = await closureSplitter()
+    const res = await patch(FIBER, splitter.id, { note: 'just a note' })
+    expect(res.status).toBe(200)
+    expect(res.body.data.note).toBe('just a note')
+    await prisma.closure.delete({ where: { id: closure.id } })
+  })
+})
+
 describe('editing a building splitter', () => {
   it('changes where it is; leaving Floor clears the floor number', async () => {
     const s = await create({ placement: 'GROUND' })
