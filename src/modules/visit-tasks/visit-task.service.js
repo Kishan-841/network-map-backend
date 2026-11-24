@@ -480,45 +480,64 @@ export function createVisitTaskService({ repo, scope }) {
   }
 
   /**
-   * Today's cards for a planner (spec 2026-11-24-sales-today-cards): today's
-   * plan rows, how many were visited (matchDay — the calendar's rule), the
-   * buildings held, and who made their OWN check-in today. People = the
-   * actor's active TLs + executives; `userId` narrows to one of them (else 404).
+   * The sales page's day plan (specs 2026-11-24-sales-today-cards + -sales-day-plan):
+   * one IST day's plan rows with live status (matchDay — the calendar's rule), the
+   * counts above them, the buildings held now (kept for the old web during a
+   * deploy) and who made their OWN check-in that day. People = the actor's active
+   * TLs + executives; `userId` narrows to one of them (else 404).
    */
-  async function todaySummary({ userId } = {}, actor, now = new Date()) {
-    const date = istToday(now)
+  async function todaySummary({ userId, date: wanted } = {}, actor, now = new Date()) {
+    const date = wanted ?? istToday(now)
     let people = await scope.assignees(actor)
     if (userId) {
       people = people.filter((u) => u.id === userId)
       if (!people.length) throw ApiError.notFound('Not found')
     }
     const ids = people.map((u) => u.id)
-    const out = { date, planned: 0, done: 0, held: 0, checkedIn: 0, users: ids.length, user: null }
-    if (ids.length) {
-      const tasks = await repo.tasksInRange({ assigneeIds: ids, from: date, to: date })
-      const visits = await repo.visitsInRange({
-        userIds: ids, from: new Date(`${date}T00:00:00+05:30`), to: new Date(`${addDays(date, 1)}T00:00:00+05:30`),
-      })
-      const first = new Map() // userId -> their first own check-in today
-      for (const v of visits) if (!v.viaCompanion && !first.has(v.userId)) first.set(v.userId, v.visitedAt)
-      const group = (rows, key) => {
-        const map = new Map()
-        for (const r of rows) map.set(r[key], [...(map.get(r[key]) ?? []), r])
-        return map
+    const out = { date, planned: 0, done: 0, notVisited: 0, held: 0, checkedIn: 0, users: ids.length, user: null, rows: [] }
+    if (!ids.length) return out
+    const [tasks, visits, held] = await Promise.all([
+      repo.dayPlanTasks({ assigneeIds: ids, day: date }),
+      repo.visitsInRange({ userIds: ids, from: new Date(`${date}T00:00:00+05:30`), to: new Date(`${addDays(date, 1)}T00:00:00+05:30`) }),
+      repo.countHeld(ids),
+    ])
+    const first = new Map() // userId -> their first own check-in that day
+    for (const v of visits) if (!v.viaCompanion && !first.has(v.userId)) first.set(v.userId, v.visitedAt)
+    const group = (list, key) => {
+      const map = new Map()
+      for (const r of list) {
+        if (!map.has(r[key])) map.set(r[key], [])
+        map.get(r[key]).push(r)
       }
-      const visitsOf = group(visits, 'userId')
-      for (const [id, rows] of group(tasks, 'assigneeId')) {
-        const mine = rows.map((t) => ({ ...t, taskDate: dayOf(t.taskDate) }))
-        const m = matchDay({ tasks: mine, visits: visitsOf.get(id) ?? [], now })
-        out.planned += mine.length
-        out.done += m.tasks.filter((t) => t.status === 'VISITED' || t.status === 'VISITED_OUTSIDE').length
+      return map
+    }
+    const visitsOf = group(visits, 'userId')
+    const tasksOf = group(tasks, 'assigneeId')
+    // people come name-sorted, so rows read person by person, earliest window first.
+    for (const person of people) {
+      const mine = (tasksOf.get(person.id) ?? []).map((t) => ({ ...t, taskDate: dayOf(t.taskDate) }))
+      if (!mine.length) continue
+      for (const t of matchDay({ tasks: mine, visits: visitsOf.get(person.id) ?? [], now }).tasks) {
+        const visited = t.status === 'VISITED' || t.status === 'VISITED_OUTSIDE'
+        if (visited) out.done += 1
+        out.rows.push({
+          id: t.id, taskDate: t.taskDate, startTime: t.startTime, endTime: t.endTime, status: t.status,
+          visit: t.visit && { visitedAt: t.visit.visitedAt, byName: t.visit.byName ?? null, viaCompanion: Boolean(t.visit.viaCompanion) },
+          building: {
+            id: t.building.id, buildingName: t.building.buildingName, formattedAddress: t.building.formattedAddress,
+            homePass: t.building.details?.homePass ?? null,
+          },
+          assignee: { id: person.id, name: person.name, role: person.role },
+        })
       }
-      out.held = await repo.countHeld(ids)
-      out.checkedIn = first.size
-      if (userId) {
-        const u = people[0]
-        out.user = { id: u.id, name: u.name, role: u.role, firstCheckInAt: first.get(u.id) ?? null }
-      }
+    }
+    out.planned = out.rows.length
+    out.notVisited = out.planned - out.done
+    out.held = held
+    out.checkedIn = first.size
+    if (userId) {
+      const u = people[0]
+      out.user = { id: u.id, name: u.name, role: u.role, firstCheckInAt: first.get(u.id) ?? null }
     }
     return out
   }

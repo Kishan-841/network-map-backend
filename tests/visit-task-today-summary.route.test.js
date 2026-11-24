@@ -18,6 +18,8 @@ const [MGR, MGR2, TL, SE, SE2, SE_OFF, SE_OTHER] = ['mgr', 'mgr2', 'tl', 'se', '
 const [B1, B2, B3] = [`${S}-b1`, `${S}-b2`, `${S}-b3`]
 const USERS = [SE, SE2, SE_OFF, SE_OTHER, TL, MGR, MGR2]
 const today = istToday()
+const yesterday = addDays(today, -1)
+const tomorrow = addDays(today, 1)
 const at = (hhmm, day = today) => new Date(`${day}T${hhmm}:00+05:30`)
 
 beforeAll(async () => {
@@ -39,6 +41,8 @@ beforeAll(async () => {
   await task(SE, B2)
   await task(SE, B3, addDays(today, 1))
   await task(SE_OFF, B3)
+  await task(SE, B2, yesterday)
+  await prisma.buildingDetails.create({ data: { buildingId: B1, homePass: 120 } })
   const hold = (assignedToId, buildingId) => prisma.buildingAssignment.create({ data: { buildingId, assignedToId, assignedById: MGR } })
   await hold(SE, B1)
   await hold(SE, B2)
@@ -67,14 +71,41 @@ describe('today summary', () => {
     const res = await get('', MGR, 'SALES_MANAGER')
     expect(res.status).toBe(200)
     // TL, SE, SE2 counted; SE_OFF (inactive) left out of every number.
-    expect(res.body.data).toEqual({ date: today, planned: 2, done: 2, held: 2, checkedIn: 2, users: 3, user: null })
+    const { rows, ...counts } = res.body.data
+    expect(counts).toEqual({ date: today, planned: 2, done: 2, notVisited: 0, held: 2, checkedIn: 2, users: 3, user: null })
+    expect(rows).toHaveLength(2)
+    const b1 = rows.find((r) => r.building.id === B1)
+    const b2 = rows.find((r) => r.building.id === B2)
+    expect(b1).toMatchObject({ taskDate: today, status: 'VISITED', startTime: null,
+      building: { buildingName: `${S} ${B1}`, homePass: 120 }, assignee: { id: SE, name: SE, role: 'SALES_EXECUTIVE' },
+      visit: { byName: SE, viaCompanion: false } })
+    expect(b2).toMatchObject({ status: 'VISITED', building: { homePass: null }, visit: { byName: TL, viaCompanion: true } })
+  })
+
+  it('reads a past day: unvisited rows are not visited', async () => {
+    const res = await get(`?date=${yesterday}`, MGR, 'SALES_MANAGER')
+    expect(res.status).toBe(200)
+    expect(res.body.data).toMatchObject({ date: yesterday, planned: 1, done: 0, notVisited: 1, checkedIn: 1 })
+    expect(res.body.data.rows).toEqual([expect.objectContaining({ status: 'OVERDUE', visit: null, taskDate: yesterday })])
+  })
+
+  it('reads a future day: upcoming, nobody checked in', async () => {
+    const res = await get(`?date=${tomorrow}&userId=${SE}`, MGR, 'SALES_MANAGER')
+    expect(res.body.data).toMatchObject({ date: tomorrow, planned: 1, done: 0, notVisited: 1, checkedIn: 0, user: { firstCheckInAt: null } })
+    expect(res.body.data.rows.map((r) => r.status)).toEqual(['UPCOMING'])
+  })
+
+  it('refuses a date that is not a real day', async () => {
+    expect((await get('?date=2026-02-30', MGR, 'SALES_MANAGER')).status).toBe(400)
+    expect((await get('?date=abc', MGR, 'SALES_MANAGER')).status).toBe(400)
   })
 
   it('narrows to one person', async () => {
     const res = await get(`?userId=${SE}`, MGR, 'SALES_MANAGER')
     expect(res.status).toBe(200)
-    const { user, ...counts } = res.body.data
-    expect(counts).toEqual({ date: today, planned: 2, done: 2, held: 2, checkedIn: 1, users: 1 })
+    const { user, rows, ...counts } = res.body.data
+    expect(counts).toEqual({ date: today, planned: 2, done: 2, notVisited: 0, held: 2, checkedIn: 1, users: 1 })
+    expect(rows).toHaveLength(2)
     expect(user).toMatchObject({ id: SE, name: SE, role: 'SALES_EXECUTIVE' })
     expect(new Date(user.firstCheckInAt).getTime()).toBe(at('12:00').getTime())
   })

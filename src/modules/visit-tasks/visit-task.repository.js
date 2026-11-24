@@ -71,6 +71,17 @@ export const visitTaskRepository = {
       orderBy: { buildingName: 'asc' },
     }),
 
+  /** One day's tasks for the sales page's day plan: the building's home pass rides along. */
+  dayPlanTasks: ({ assigneeIds, day }) =>
+    prisma.visitTask.findMany({
+      where: { assigneeId: { in: assigneeIds }, taskDate: dateOnly(day) },
+      select: {
+        id: true, assigneeId: true, buildingId: true, taskDate: true, startTime: true, endTime: true,
+        building: { select: { id: true, buildingName: true, formattedAddress: true, details: { select: { homePass: true } } } },
+      },
+      orderBy: [{ startTime: 'asc' }],
+    }),
+
   tasksInRange: ({ assigneeIds, from, to }) =>
     prisma.visitTask.findMany({
       where: {
