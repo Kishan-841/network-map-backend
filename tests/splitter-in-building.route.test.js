@@ -154,11 +154,26 @@ describe('giving an existing splitter a building', () => {
     expect((await patch(FIBER, s.id, { wingId: W2 })).status).toBe(200)
   })
 
-  it('removing the building clears wing and where, keeps the note', async () => {
-    const s = await create({ wingId: W1, placement: 'FLOOR', floorNumber: 2, note: 'keep me' })
-    const res = await patch(FIBER, s.id, { buildingId: null })
+  it('removing the building from a closure splitter clears wing and where, keeps the note', async () => {
+    const { closure, splitter } = await closureSplitter()
+    await patch(FIBER, splitter.id, { buildingId: B, wingId: W1, placement: 'FLOOR', floorNumber: 2, note: 'keep me' })
+    const res = await patch(FIBER, splitter.id, { buildingId: null })
     expect(res.status).toBe(200)
     expect(res.body.data).toMatchObject({ buildingId: null, wingId: null, placement: null, floorNumber: null, note: 'keep me' })
+    await prisma.closure.delete({ where: { id: closure.id } })
+  })
+
+  it("won't remove the building from a splitter that is only in a building", async () => {
+    const s = await create()
+    expect((await patch(FIBER, s.id, { buildingId: null })).status).toBe(400)
+  })
+
+  it('moving a building-only splitter to another building moves its pin there', async () => {
+    await prisma.building.update({ where: { id: B2 }, data: { latitude: 18.65, longitude: 73.85 } })
+    const s = await create()
+    const res = await patch(FIBER, s.id, { buildingId: B2 })
+    expect(res.body.data).toMatchObject({ buildingId: B2, latitude: 18.65, longitude: 73.85 })
+    await prisma.building.update({ where: { id: B2 }, data: { latitude: 18.6, longitude: 73.8 } })
   })
 
   it("refuses a building the editor can't read or an unapproved one", async () => {

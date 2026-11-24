@@ -119,7 +119,7 @@ export const closureRepository = {
   findBuildingForSplitter: (id) =>
     prisma.building.findUnique({
       where: { id },
-      select: { id: true, source: true, permissionApproval: true, wings: { select: { id: true } } },
+      select: { id: true, source: true, permissionApproval: true, latitude: true, longitude: true, wings: { select: { id: true } } },
     }),
   findWing: (id) => prisma.buildingWing.findUnique({ where: { id }, select: { id: true, buildingId: true } }),
   findBuildingForOutput: (id) =>

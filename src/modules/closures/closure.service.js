@@ -279,12 +279,21 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
       // The building (24 Nov 2026): any splitter may be given one later, moved to another, or have it
       // removed — which also clears its wing and where-in-building (the note stays).
       let buildingId = splitter.buildingId
+      // A splitter only in a building (no closure, not on a line): the building is its place.
+      const buildingOnly = !splitter.closureId && !splitter._count?.points
       if (data.buildingId === null) {
+        if (buildingOnly && splitter.buildingId) {
+          throw ApiError.badRequest('This splitter is only in its building — change the building instead of removing it')
+        }
         buildingId = null
         data = { ...data, wingId: null, placement: null, floorNumber: null }
       } else if (data.buildingId !== undefined) {
         const building = await mustUseBuilding(data.buildingId, actor)
         buildingId = building.id
+        // Moved to another building: its pin goes too (a closure / line splitter keeps the closure's / line's).
+        if (buildingOnly && building.id !== splitter.buildingId) {
+          data = { ...data, latitude: building.latitude, longitude: building.longitude }
+        }
         // A wing kept from the old building that isn't in the new one goes.
         if (data.wingId === undefined && splitter.wingId && !building.wings.some((w) => w.id === splitter.wingId)) {
           data = { ...data, wingId: null }
