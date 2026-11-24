@@ -493,6 +493,15 @@ model Splitter {
   fiberType    String?                         // 'MAIN' | 'SUB'
   inputFiberId String?
   inputFiber   Fiber?           @relation("SplitterInput", fields: [inputFiberId], references: [id], onDelete: SetNull)
+  /// A splitter fitted inside a building (Splitters page, 24 Nov 2026): the building, optionally one of its
+  /// wings, where in it ('TERRACE' | 'FLOOR' | 'GROUND' | 'BASEMENT'; floorNumber only with FLOOR) and a note.
+  buildingId   String?
+  building     Building?        @relation("SplitterBuilding", fields: [buildingId], references: [id], onDelete: SetNull)
+  wingId       String?
+  wing         BuildingWing?    @relation(fields: [wingId], references: [id], onDelete: SetNull)
+  placement    String?
+  floorNumber  Int?
+  note         String?
   /// Who made it. Only they and an ADMIN can see or change it. Null only for
   /// rows the migration could not trace to anyone — those are ADMIN's alone.
   createdById String?
@@ -502,6 +511,7 @@ model Splitter {
   points       FiberPoint[]
   @@index([inputFiberId])
   @@index([closureId])
+  @@index([buildingId])
 }
 
 model SplitterOutput {
@@ -566,6 +576,7 @@ model Building {
   updatedAt        DateTime         @updatedAt
   details          BuildingDetails?
   wings            BuildingWing[]
+  splitters        Splitter[]       @relation("SplitterBuilding")
   permission       Permission?
   contact          BuildingContact?
   photos           Photo[]
@@ -756,6 +767,7 @@ model BuildingWing {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   customers   Customer[]
+  splitters   Splitter[]
 
   @@index([buildingId])
 }

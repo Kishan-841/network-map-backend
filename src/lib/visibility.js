@@ -64,7 +64,13 @@ export function splitterScope(actor) {
   if (!zoneIds.length) return mine
   const onAFiber = { points: { some: { fiber: { zoneId: { in: zoneIds } } } } }
   return {
-    OR: [mine, onAFiber, { closure: { points: { some: { fiber: { zoneId: { in: zoneIds } } } } } }],
+    OR: [
+      mine,
+      onAFiber,
+      { closure: { points: { some: { fiber: { zoneId: { in: zoneIds } } } } } },
+      // Fitted inside a building: the building's zone team (24 Nov 2026).
+      { building: { zoneId: { in: zoneIds } } },
+    ],
   }
 }
 

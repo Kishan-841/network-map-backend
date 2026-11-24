@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { CABLE_DIRECTIONS, CLOSURE_CABLE_CORES, CORE_COUNTS, FIBER_TYPES } from '../../lib/fiber-constants.js'
+import { CABLE_DIRECTIONS, CLOSURE_CABLE_CORES, CORE_COUNTS, FIBER_TYPES, MAX_FLOOR, SPLITTER_PLACEMENTS } from '../../lib/fiber-constants.js'
 
 export const RATIO_PORTS = { R1_2: 2, R1_4: 4, R1_6: 6, R1_8: 8, R1_16: 16 }
 
@@ -70,7 +70,31 @@ export const createSplitterSchema = z.object({
   fiberType: z.enum(['MAIN', 'SUB']).nullish(),
   inputFiberId: z.string().nullish(),
 })
-export const updateSplitterSchema = createSplitterSchema.partial()
+// Where a splitter sits inside a building — shared by create (POST /splitters) and edit.
+const splitterPlaceFields = {
+  wingId: z.string().min(1).max(100).nullish(),
+  placement: z.enum(SPLITTER_PLACEMENTS).nullish(),
+  floorNumber: z.number().int().min(1, 'Floor must be 1 or more').max(MAX_FLOOR, `Floor must be ${MAX_FLOOR} or less`).nullish(),
+  note: z.string().trim().max(500).nullish().transform((v) => v || null),
+}
+export const updateSplitterSchema = createSplitterSchema.partial().extend(splitterPlaceFields).partial()
+
+/** A splitter fitted inside a building, at the pin the user dropped (spec 2026-11-24-splitter-in-building). */
+export const createBuildingSplitterSchema = createSplitterSchema
+  .extend({
+    buildingId: z.string().min(1).max(100),
+    latitude: z.number().min(-90).max(90),
+    longitude: z.number().min(-180).max(180),
+    ...splitterPlaceFields,
+  })
+  .superRefine((b, ctx) => {
+    if (b.placement === 'FLOOR' && b.floorNumber == null) {
+      ctx.addIssue({ code: 'custom', path: ['floorNumber'], message: 'Which floor?' })
+    }
+    if (b.placement !== 'FLOOR' && b.floorNumber != null) {
+      ctx.addIssue({ code: 'custom', path: ['floorNumber'], message: 'A floor number goes with Floor only' })
+    }
+  })
 
 export const setOutputSchema = z.object({
   toBuildingId: z.string().nullish(),

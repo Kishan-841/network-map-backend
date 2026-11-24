@@ -18,3 +18,7 @@ export const CLOSURE_CABLE_CORES = [2, 4, 6, 8, 12, 24, 48]
 
 /** Which side of a closure a cable is on. */
 export const CABLE_DIRECTIONS = ['IN', 'OUT']
+
+/** Where in a building a splitter is fitted (Splitters page, 24 Nov 2026). A floor number goes only with FLOOR. */
+export const SPLITTER_PLACEMENTS = ['TERRACE', 'FLOOR', 'GROUND', 'BASEMENT']
+export const MAX_FLOOR = 200
