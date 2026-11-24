@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { requireAuth, requireRole, requireFiberWrite } from '../../middleware/auth.js'
-import { validateBody } from '../../middleware/validate.js'
+import { validateBody, validateQuery } from '../../middleware/validate.js'
+import { findFibersNear, nearbyQuerySchema } from './fiber-nearby.js'
 import { audit } from '../system-logs/audit.js'
 import { fiberRepository } from './fiber.repository.js'
 import {
@@ -20,6 +21,14 @@ const READ = requireRole('ADMIN', 'MANAGER', 'SURVEYOR', 'SUPERVISOR')
 const WRITE = requireFiberWrite
 
 fiberRoutes.get('/', READ, fiberController.list)
+// A splitter's input fiber: near a pin, or by route name (24 Nov 2026). Before '/:id'.
+fiberRoutes.get('/nearby', READ, validateQuery(nearbyQuerySchema), async (req, res, next) => {
+  try {
+    res.json({ success: true, data: await findFibersNear(req.validatedQuery, req.user) })
+  } catch (err) {
+    next(err)
+  }
+})
 fiberRoutes.get('/:id', READ, fiberController.get)
 fiberRoutes.post(
   '/',

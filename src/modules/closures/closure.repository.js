@@ -14,6 +14,9 @@ const fiberForReader = { id: true, name: true, status: true, zoneId: true, creat
 
 const splitterReadInclude = {
   closure: { select: { id: true, code: true } },
+  // A splitter fitted inside a building (24 Nov 2026).
+  building: { select: { id: true, buildingName: true } },
+  wing: { select: { id: true, name: true } },
   inputFiber: { select: fiberForReader },
   // A splitter placed on a line has no closure; the fiber it sits on is its place.
   points: { select: { fiber: { select: fiberForReader } } },
@@ -112,6 +115,13 @@ export const closureRepository = {
       },
     }),
   // Just enough to decide whether a splitter output may point at this building.
+  /** A building a splitter may go in: its visibility fields and its wings' ids. */
+  findBuildingForSplitter: (id) =>
+    prisma.building.findUnique({
+      where: { id },
+      select: { id: true, source: true, permissionApproval: true, wings: { select: { id: true } } },
+    }),
+  findWing: (id) => prisma.buildingWing.findUnique({ where: { id }, select: { id: true, buildingId: true } }),
   findBuildingForOutput: (id) =>
     prisma.building.findUnique({ where: { id }, select: { id: true, source: true, permissionApproval: true } }),
   updateOutput: (splitterId, portNo, data, tx = prisma) =>

@@ -677,6 +677,12 @@ export function createBuildingService({ buildingRepository, storage, userReposit
       return { items: items.map(withTier), pagination: paginate(total) }
     },
 
+    /** May this actor read this building? THE read rule, for other modules (a splitter going in it). */
+    async canReadBuilding(id, actor) {
+      const building = await buildingRepository.findById(id)
+      return Boolean(building) && (await readScope(actor))(building)
+    },
+
     async getBuilding(id, actor) {
       const building = await buildingRepository.findById(id)
       if (!building) throw ApiError.notFound('Building not found')

@@ -9,6 +9,20 @@ import { withCableWrites } from './closure-cables.js'
 import { nextClosureCode, nextSplitterCode } from '../../lib/sequences.js'
 import { canSeeFiber, closureScope, splitterScope } from '../../lib/visibility.js'
 import { isVisibleBuilding } from '../../lib/building-source.js'
+import { createBuildingService } from '../buildings/building.service.js'
+import { buildingRepository } from '../buildings/building.repository.js'
+import { userRepository } from '../users/user.repository.js'
+import { zoneRepository } from '../zones/zone.repository.js'
+import { operatorRepository } from '../operators/operator.repository.js'
+
+// The Buildings module's read rule, for "may this user put a splitter in that building?".
+const buildingReader = createBuildingService({
+  buildingRepository,
+  storage: getStorageProvider(),
+  userRepository,
+  zoneRepository,
+  operatorRepository,
+})
 
 export function createClosureService({ closureRepository, fiberPointRepository, sequences, prisma, storage }) {
   /**
@@ -64,10 +78,33 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
       longitude: s.longitude,
       createdAt: s.createdAt,
       closure: s.closure,
+      building: s.building ?? null,
+      wing: s.wing ?? null,
+      placement: s.placement ?? null,
+      floorNumber: s.floorNumber ?? null,
+      note: s.note ?? null,
       inputFiber: visibleFiber(actor, s.inputFiber),
       onFiber,
       portsTotal: s.outputs.length,
       portsUsed: s.outputs.filter((o) => o.toFiberId || o.toBuildingId).length,
+    }
+  }
+
+  /** One splitter in full, with its outputs. Out of scope reads exactly like not found. */
+  async function splitterDetail(id, actor) {
+    const s = await closureRepository.findSplitterDetail(id, splitterScope(actor))
+    if (!s) throw ApiError.notFound('Splitter not found')
+    return {
+      ...splitterSummary(s, actor),
+      createdBy: s.createdBy,
+      outputs: s.outputs.map((o) => ({
+        portNo: o.portNo,
+        label: o.label,
+        // In use even when the reader cannot open the fiber it feeds.
+        used: Boolean(o.toFiberId || o.toBuildingId),
+        toFiber: visibleFiber(actor, o.toFiber),
+        toBuilding: o.toBuilding,
+      })),
     }
   }
 
@@ -94,21 +131,49 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
     },
 
     /** One splitter in full. Out of scope reads exactly like not found. */
-    async getSplitter(id, actor) {
-      const s = await closureRepository.findSplitterDetail(id, splitterScope(actor))
-      if (!s) throw ApiError.notFound('Splitter not found')
-      return {
-        ...splitterSummary(s, actor),
-        createdBy: s.createdBy,
-        outputs: s.outputs.map((o) => ({
-          portNo: o.portNo,
-          label: o.label,
-          // In use even when the reader cannot open the fiber it feeds.
-          used: Boolean(o.toFiberId || o.toBuildingId),
-          toFiber: visibleFiber(actor, o.toFiber),
-          toBuilding: o.toBuilding,
-        })),
+    getSplitter: (id, actor) => splitterDetail(id, actor),
+
+    /**
+     * A splitter fitted inside a building, at the pin the user dropped (spec
+     * 2026-11-24-splitter-in-building). The building follows the splitter-output
+     * rule (unknown or an unapproved society = no such building); the wing must be
+     * one of its wings; the input fiber must be one the user can read.
+     */
+    async createBuildingSplitter(data, actor) {
+      const building = await closureRepository.findBuildingForSplitter(data.buildingId)
+      // Only a building the user may read (the Buildings list's rule — zones for a surveyor or manager);
+      // anything else is "no such building", as for an unknown id.
+      if (!building || !isVisibleBuilding(building) || !(await buildingReader.canReadBuilding(building.id, actor))) {
+        throw ApiError.badRequest('Building does not exist')
       }
+      if (data.wingId && !building.wings.some((w) => w.id === data.wingId)) {
+        throw ApiError.badRequest('That wing is not in this building')
+      }
+      if (data.inputFiberId && !canSeeFiber(actor, await closureRepository.findFiberOwner(data.inputFiberId))) {
+        throw ApiError.badRequest('Fiber does not exist')
+      }
+      const created = await prisma.$transaction(async (tx) =>
+        closureRepository.createSplitter(
+          {
+            code: await sequences.nextSplitterCode(tx),
+            latitude: data.latitude,
+            longitude: data.longitude,
+            buildingId: building.id,
+            wingId: data.wingId ?? null,
+            placement: data.placement ?? null,
+            floorNumber: data.placement === 'FLOOR' ? data.floorNumber : null,
+            note: data.note ?? null,
+            ratio: data.ratio,
+            location: data.location,
+            fiberType: data.fiberType ?? null,
+            inputFiberId: data.inputFiberId ?? null,
+            createdById: actor.id,
+          },
+          RATIO_PORTS[data.ratio],
+          tx,
+        ),
+      )
+      return splitterDetail(created.id, actor)
     },
 
     async getClosure(id, actor) {
@@ -192,6 +257,33 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
 
     async updateSplitter(id, data, actor) {
       const splitter = await mustFindSplitter(id, actor)
+      // Where in a building (24 Nov 2026): a wing only on a building splitter and only one of its wings;
+      // a floor number goes with FLOOR — leaving Floor clears it, Floor without one is refused.
+      // The feed: a new one must be a fibre the editor can read (as on create); "none" from someone who
+      // can't read the current feed is their form not knowing it — keep it rather than unlink it.
+      if (data.inputFiberId && !canSeeFiber(actor, await closureRepository.findFiberOwner(data.inputFiberId))) {
+        throw ApiError.badRequest('Fiber does not exist')
+      }
+      if (data.inputFiberId === null && splitter.inputFiberId &&
+        !canSeeFiber(actor, await closureRepository.findFiberOwner(splitter.inputFiberId))) {
+        const { inputFiberId: _keep, ...rest } = data
+        data = rest
+      }
+      if (!splitter.buildingId && (data.placement || data.floorNumber != null)) {
+        throw ApiError.badRequest('Only a splitter in a building has a floor or place')
+      }
+      if (data.wingId) {
+        const wing = await closureRepository.findWing(data.wingId)
+        if (!splitter.buildingId || !wing || wing.buildingId !== splitter.buildingId) {
+          throw ApiError.badRequest('That wing is not in this building')
+        }
+      }
+      if (data.placement !== undefined || data.floorNumber !== undefined) {
+        const placement = data.placement !== undefined ? data.placement : splitter.placement
+        const floorNumber = data.floorNumber !== undefined ? data.floorNumber : splitter.floorNumber
+        if (placement === 'FLOOR' && floorNumber == null) throw ApiError.badRequest('Which floor?')
+        data = { ...data, floorNumber: placement === 'FLOOR' ? floorNumber : null }
+      }
       if (data.ratio) {
         const used = Math.max(
           0,

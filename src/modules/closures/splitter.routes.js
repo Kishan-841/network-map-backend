@@ -3,7 +3,7 @@ import { requireAuth, requireRole, requireFiberWrite, requireFiberWriteOrCreator
 import { validateBody } from '../../middleware/validate.js'
 import { audit } from '../system-logs/audit.js'
 import { closureRepository } from './closure.repository.js'
-import { updateSplitterSchema, setOutputSchema } from './closure.schemas.js'
+import { createBuildingSplitterSchema, updateSplitterSchema, setOutputSchema } from './closure.schemas.js'
 import { splitterController } from './closure.controller.js'
 
 export const splitterRoutes = Router()
@@ -16,6 +16,16 @@ const WRITE = requireFiberWrite
 
 splitterRoutes.get('/', READ, splitterController.list)
 splitterRoutes.get('/:id', READ, splitterController.get)
+// A splitter fitted inside a building, at the pin the user dropped (24 Nov 2026).
+splitterRoutes.post(
+  '/',
+  WRITE,
+  audit('Splitter', 'Create', {
+    describe: (req, old, body) => `Splitter '${body?.data?.code ?? 'unknown'}' added in a building`,
+  }),
+  validateBody(createBuildingSplitterSchema),
+  splitterController.create,
+)
 
 splitterRoutes.patch(
   '/:id',
