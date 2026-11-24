@@ -494,7 +494,7 @@ export function createVisitTaskService({ repo, scope }) {
       if (!people.length) throw ApiError.notFound('Not found')
     }
     const ids = people.map((u) => u.id)
-    const out = { date, planned: 0, done: 0, notVisited: 0, held: 0, checkedIn: 0, users: ids.length, user: null, rows: [] }
+    const out = { date, planned: 0, done: 0, notVisited: 0, held: 0, checkedIn: 0, users: ids.length, user: null, rows: [], people: [] }
     if (!ids.length) return out
     const [tasks, visits, held] = await Promise.all([
       repo.dayPlanTasks({ assigneeIds: ids, day: date }),
@@ -522,10 +522,16 @@ export function createVisitTaskService({ repo, scope }) {
         if (visited) out.done += 1
         out.rows.push({
           id: t.id, taskDate: t.taskDate, startTime: t.startTime, endTime: t.endTime, status: t.status,
-          visit: t.visit && { visitedAt: t.visit.visitedAt, byName: t.visit.byName ?? null, viaCompanion: Boolean(t.visit.viaCompanion) },
+          visit: t.visit && {
+            id: t.visit.id, visitedAt: t.visit.visitedAt, checkOutAt: t.visit.checkOutAt ?? null,
+            byName: t.visit.byName ?? null, viaCompanion: Boolean(t.visit.viaCompanion),
+          },
           building: {
             id: t.building.id, buildingName: t.building.buildingName, formattedAddress: t.building.formattedAddress,
             homePass: t.building.details?.homePass ?? null,
+            zone: t.building.zone
+              ? { id: t.building.zone.id, name: t.building.zone.name, city: t.building.zone.city, operator: t.building.zone.operator ?? null }
+              : null,
           },
           assignee: { id: person.id, name: person.name, role: person.role },
         })
@@ -535,6 +541,7 @@ export function createVisitTaskService({ repo, scope }) {
     out.notVisited = out.planned - out.done
     out.held = held
     out.checkedIn = first.size
+    out.people = people.map((u) => ({ id: u.id, name: u.name, role: u.role, firstCheckInAt: first.get(u.id) ?? null }))
     if (userId) {
       const u = people[0]
       out.user = { id: u.id, name: u.name, role: u.role, firstCheckInAt: first.get(u.id) ?? null }

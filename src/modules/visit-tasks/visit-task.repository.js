@@ -77,7 +77,12 @@ export const visitTaskRepository = {
       where: { assigneeId: { in: assigneeIds }, taskDate: dateOnly(day) },
       select: {
         id: true, assigneeId: true, buildingId: true, taskDate: true, startTime: true, endTime: true,
-        building: { select: { id: true, buildingName: true, formattedAddress: true, details: { select: { homePass: true } } } },
+        building: {
+          select: {
+            id: true, buildingName: true, formattedAddress: true, details: { select: { homePass: true } },
+            zone: { select: { id: true, name: true, city: true, operator: { select: { id: true, name: true } } } },
+          },
+        },
       },
       orderBy: [{ startTime: 'asc' }],
     }),

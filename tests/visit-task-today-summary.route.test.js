@@ -16,6 +16,7 @@ const auth = (id, role) => ({ Authorization: `Bearer ${jwt.sign({ sub: id, role 
 const S = `vts-${Date.now()}`
 const [MGR, MGR2, TL, SE, SE2, SE_OFF, SE_OTHER] = ['mgr', 'mgr2', 'tl', 'se', 'se2', 'off', 'other'].map((s) => `${S}-${s}`)
 const [B1, B2, B3] = [`${S}-b1`, `${S}-b2`, `${S}-b3`]
+const [OP, ZONE] = [`${S}-op`, `${S}-zone`]
 const USERS = [SE, SE2, SE_OFF, SE_OTHER, TL, MGR, MGR2]
 const today = istToday()
 const yesterday = addDays(today, -1)
@@ -31,9 +32,11 @@ beforeAll(async () => {
   await mk(SE2, 'SALES_EXECUTIVE', { managerId: MGR, teamLeaderId: TL })
   await mk(SE_OFF, 'SALES_EXECUTIVE', { managerId: MGR, teamLeaderId: TL, isActive: false })
   await mk(SE_OTHER, 'SALES_EXECUTIVE', { managerId: MGR2 })
+  await prisma.operator.create({ data: { id: OP, name: `${S} Op` } })
+  await prisma.zone.create({ data: { id: ZONE, name: `${S} Zone`, city: 'Pune', operatorId: OP } })
   for (const id of [B1, B2, B3]) {
     await prisma.building.create({ data: { id, buildingName: `${S} ${id}`, formattedAddress: `${S} ${id}, Test`,
-      latitude: 18.6, longitude: 73.79, source: 'COVERAGE', createdById: MGR } })
+      latitude: 18.6, longitude: 73.79, source: 'COVERAGE', createdById: MGR, ...(id === B1 ? { zoneId: ZONE } : {}) } })
   }
   const task = (assigneeId, buildingId, day = today) =>
     prisma.visitTask.create({ data: { assigneeId, buildingId, taskDate: dateOnly(day), createdById: MGR } })
@@ -48,7 +51,7 @@ beforeAll(async () => {
   await hold(SE, B2)
   await hold(SE_OFF, B3)
   // SE's own check-in; TL's visit with SE and SE2 along; TL also visited late yesterday.
-  await prisma.buildingVisit.create({ data: { buildingId: B1, userId: SE, visitedAt: at('12:00') } })
+  await prisma.buildingVisit.create({ data: { buildingId: B1, userId: SE, visitedAt: at('12:00'), checkOutAt: at('12:40') } })
   await prisma.buildingVisit.create({ data: { buildingId: B2, userId: TL, visitedAt: at('13:00'),
     companions: { create: [{ userId: SE }, { userId: SE2 }] } } })
   await prisma.buildingVisit.create({ data: { buildingId: B1, userId: TL, visitedAt: at('23:30', addDays(today, -1)) } })
@@ -61,6 +64,8 @@ afterAll(async () => {
   await prisma.buildingAssignment.deleteMany({ where: { buildingId: { in: [B1, B2, B3] } } })
   await prisma.systemLog.deleteMany({ where: { userId: { in: USERS } } }).catch(() => {})
   await prisma.building.deleteMany({ where: { id: { in: [B1, B2, B3] } } })
+  await prisma.zone.deleteMany({ where: { id: ZONE } })
+  await prisma.operator.deleteMany({ where: { id: OP } })
   await prisma.user.deleteMany({ where: { id: { in: USERS } } })
 })
 
@@ -71,7 +76,7 @@ describe('today summary', () => {
     const res = await get('', MGR, 'SALES_MANAGER')
     expect(res.status).toBe(200)
     // TL, SE, SE2 counted; SE_OFF (inactive) left out of every number.
-    const { rows, ...counts } = res.body.data
+    const { rows, people, ...counts } = res.body.data
     expect(counts).toEqual({ date: today, planned: 2, done: 2, notVisited: 0, held: 2, checkedIn: 2, users: 3, user: null })
     expect(rows).toHaveLength(2)
     const b1 = rows.find((r) => r.building.id === B1)
@@ -79,7 +84,29 @@ describe('today summary', () => {
     expect(b1).toMatchObject({ taskDate: today, status: 'VISITED', startTime: null,
       building: { buildingName: `${S} ${B1}`, homePass: 120 }, assignee: { id: SE, name: SE, role: 'SALES_EXECUTIVE' },
       visit: { byName: SE, viaCompanion: false } })
-    expect(b2).toMatchObject({ status: 'VISITED', building: { homePass: null }, visit: { byName: TL, viaCompanion: true } })
+    expect(b2).toMatchObject({ status: 'VISITED', building: { homePass: null, zone: null }, visit: { byName: TL, viaCompanion: true, checkOutAt: null } })
+  })
+
+  it('gives each row its zone, city and operator, and its visit id and check-out', async () => {
+    const { rows } = (await get('', MGR, 'SALES_MANAGER')).body.data
+    const b1 = rows.find((r) => r.building.id === B1)
+    expect(b1.building.zone).toEqual({ id: ZONE, name: `${S} Zone`, city: 'Pune', operator: { id: OP, name: `${S} Op` } })
+    const own = await prisma.buildingVisit.findFirst({ where: { userId: SE, buildingId: B1 } })
+    expect(b1.visit).toMatchObject({ id: own.id, checkOutAt: at('12:40').toISOString() })
+    const b2 = rows.find((r) => r.building.id === B2)
+    const tlVisit = await prisma.buildingVisit.findFirst({ where: { userId: TL, buildingId: B2 } })
+    expect(b2.visit.id).toBe(tlVisit.id) // the TL's visit — the page the manager opens
+  })
+
+  it('lists every person with their first check-in (null if none)', async () => {
+    const { people } = (await get('', MGR, 'SALES_MANAGER')).body.data
+    const byId = Object.fromEntries(people.map((p) => [p.id, p]))
+    expect(Object.keys(byId).sort()).toEqual([SE, SE2, TL].sort())
+    expect(byId[SE]).toEqual({ id: SE, name: SE, role: 'SALES_EXECUTIVE', firstCheckInAt: at('12:00').toISOString() })
+    expect(byId[TL].firstCheckInAt).toBe(at('13:00').toISOString())
+    expect(byId[SE2].firstCheckInAt).toBeNull()
+    const one = (await get(`?userId=${SE2}`, MGR, 'SALES_MANAGER')).body.data.people
+    expect(one).toEqual([{ id: SE2, name: SE2, role: 'SALES_EXECUTIVE', firstCheckInAt: null }])
   })
 
   it('reads a past day: unvisited rows are not visited', async () => {
@@ -103,7 +130,7 @@ describe('today summary', () => {
   it('narrows to one person', async () => {
     const res = await get(`?userId=${SE}`, MGR, 'SALES_MANAGER')
     expect(res.status).toBe(200)
-    const { user, rows, ...counts } = res.body.data
+    const { user, rows, people, ...counts } = res.body.data
     expect(counts).toEqual({ date: today, planned: 2, done: 2, notVisited: 0, held: 2, checkedIn: 1, users: 1 })
     expect(rows).toHaveLength(2)
     expect(user).toMatchObject({ id: SE, name: SE, role: 'SALES_EXECUTIVE' })
