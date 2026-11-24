@@ -13,8 +13,8 @@ import { prisma } from '../src/lib/prisma.js'
 const app = createApp()
 const S = `sib-${Date.now()}`
 const as = (sub) => ({ Authorization: `Bearer ${jwt.sign({ sub, role: 'IGNORED' }, env.jwtSecret, { audience: 'staff', expiresIn: '1h' })}` })
-const [ADMIN, FIBER, MATE, STRANGER] = ['admin', 'fiber', 'mate', 'stranger'].map((s) => `${S}-${s}`)
-const USERS = [ADMIN, FIBER, MATE, STRANGER]
+const [ADMIN, FIBER, MATE, STRANGER, FAR_FIBER] = ['admin', 'fiber', 'mate', 'stranger', 'farfiber'].map((s) => `${S}-${s}`)
+const USERS = [ADMIN, FIBER, MATE, STRANGER, FAR_FIBER]
 const [ZONE, OTHER_ZONE] = [`${S}-z`, `${S}-z2`]
 const [B, B2, SOC] = [`${S}-b`, `${S}-b2`, `${S}-soc`]
 const [W1, W2] = [`${S}-w1`, `${S}-w2`]
@@ -41,6 +41,7 @@ beforeAll(async () => {
   await mk(FIBER, 'SURVEYOR', { canManageFiber: true, assignedZones: { connect: [{ id: ZONE }] } })
   await mk(MATE, 'SURVEYOR', { assignedZones: { connect: [{ id: ZONE }] } })
   await mk(STRANGER, 'SURVEYOR', { assignedZones: { connect: [{ id: OTHER_ZONE }] } })
+  await mk(FAR_FIBER, 'SURVEYOR', { canManageFiber: true, assignedZones: { connect: [{ id: OTHER_ZONE }] } })
   const building = (id, extra = {}) =>
     prisma.building.create({ data: { id, buildingName: `${S} ${id}`, formattedAddress: `${S} ${id}`, latitude: 18.6,
       longitude: 73.8, source: 'COVERAGE', createdById: ADMIN, zoneId: ZONE, ...extra } })
@@ -101,6 +102,12 @@ describe('POST /splitters — in a building', () => {
   it("refuses an input fiber the user can't see, and a missing pin", async () => {
     expect((await post(FIBER, { ...base, inputFiberId: F_HIDDEN })).status).toBe(400)
     expect((await post(FIBER, { ...base, latitude: undefined })).status).toBe(400)
+  })
+
+  it("refuses a building outside the user's zones, even with the fibre tick", async () => {
+    const res = await post(FAR_FIBER, base)
+    expect(res.status).toBe(400)
+    expect(res.body.error.message).toBe('Building does not exist')
   })
 
   it('needs the fibre tick', async () => {

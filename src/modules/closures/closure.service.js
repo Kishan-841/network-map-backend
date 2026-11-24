@@ -9,6 +9,20 @@ import { withCableWrites } from './closure-cables.js'
 import { nextClosureCode, nextSplitterCode } from '../../lib/sequences.js'
 import { canSeeFiber, closureScope, splitterScope } from '../../lib/visibility.js'
 import { isVisibleBuilding } from '../../lib/building-source.js'
+import { createBuildingService } from '../buildings/building.service.js'
+import { buildingRepository } from '../buildings/building.repository.js'
+import { userRepository } from '../users/user.repository.js'
+import { zoneRepository } from '../zones/zone.repository.js'
+import { operatorRepository } from '../operators/operator.repository.js'
+
+// The Buildings module's read rule, for "may this user put a splitter in that building?".
+const buildingReader = createBuildingService({
+  buildingRepository,
+  storage: getStorageProvider(),
+  userRepository,
+  zoneRepository,
+  operatorRepository,
+})
 
 export function createClosureService({ closureRepository, fiberPointRepository, sequences, prisma, storage }) {
   /**
@@ -127,7 +141,11 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
      */
     async createBuildingSplitter(data, actor) {
       const building = await closureRepository.findBuildingForSplitter(data.buildingId)
-      if (!building || !isVisibleBuilding(building)) throw ApiError.badRequest('Building does not exist')
+      // Only a building the user may read (the Buildings list's rule — zones for a surveyor or manager);
+      // anything else is "no such building", as for an unknown id.
+      if (!building || !isVisibleBuilding(building) || !(await buildingReader.canReadBuilding(building.id, actor))) {
+        throw ApiError.badRequest('Building does not exist')
+      }
       if (data.wingId && !building.wings.some((w) => w.id === data.wingId)) {
         throw ApiError.badRequest('That wing is not in this building')
       }
