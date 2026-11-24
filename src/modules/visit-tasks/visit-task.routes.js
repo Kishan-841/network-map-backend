@@ -6,7 +6,7 @@ import { salesRepository } from '../sales/sales.repository.js'
 import { visitTaskRepository } from './visit-task.repository.js'
 import { createPlanScope } from './plan-scope.js'
 import { AUDIT_DETAIL, createVisitTaskService } from './visit-task.service.js'
-import { importSchema, previewSchema, rangeQuerySchema, taskDeleteQuerySchema, taskPatchSchema, taskSchema } from './visit-task.schemas.js'
+import { importSchema, previewSchema, rangeQuerySchema, summaryQuerySchema, taskDeleteQuerySchema, taskPatchSchema, taskSchema } from './visit-task.schemas.js'
 
 const scope = createPlanScope({ repo: visitTaskRepository, salesRepo: salesRepository })
 export const visitTaskService = createVisitTaskService({ repo: visitTaskRepository, scope })
@@ -31,6 +31,8 @@ visitTaskRoutes.use(requireAuth)
 // validateQuery writes to req.validatedQuery (Express 5's req.query is a getter).
 visitTaskRoutes.get('/', SALES_ANY, validateQuery(rangeQuerySchema), handle((req) => visitTaskService.listTasks(req.validatedQuery, req.user)))
 visitTaskRoutes.get('/overdue', SALES_ANY, validateQuery(rangeQuerySchema), handle((req) => visitTaskService.listOverdue(req.validatedQuery, req.user)))
+visitTaskRoutes.get('/today-summary', requireRole('ADMIN', 'SALES_MANAGER'), validateQuery(summaryQuerySchema),
+  handle((req) => visitTaskService.todaySummary(req.validatedQuery, req.user)))
 visitTaskRoutes.get('/assignees', PLANNER, handle((req) => visitTaskService.listAssignees(req.user)))
 visitTaskRoutes.get('/buildings', PLANNER, handle((req) => visitTaskService.searchBuildings(req.query.q, req.user)))
 visitTaskRoutes.get('/uploads', PLANNER, handle((req) => visitTaskService.listUploads(req.user)))

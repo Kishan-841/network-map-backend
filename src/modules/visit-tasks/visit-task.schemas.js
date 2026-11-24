@@ -47,6 +47,9 @@ export const rangeQuerySchema = z.object({
   to: day.optional(),
 })
 
+// Today cards on the Assign buildings page: the whole team, or one person in it.
+export const summaryQuerySchema = z.object({ userId: z.string().min(1).max(100).optional() }).strict()
+
 // One task added or edited by hand. A window is both times or neither (checked in the service).
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:mm').nullable()
 const taskFields = {

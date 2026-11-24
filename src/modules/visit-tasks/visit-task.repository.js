@@ -85,6 +85,9 @@ export const visitTaskRepository = {
   // were a companion on (lib/visit-matching.js), in visitedAt order.
   visitsInRange: ({ userIds, from, to }) => visitsForMatching(prisma, { userIds, from, to }),
 
+  /** Buildings these people hold right now (ACTIVE assignments). */
+  countHeld: (userIds) => prisma.buildingAssignment.count({ where: { status: 'ACTIVE', assignedToId: { in: userIds } } }),
+
   findTask: (id) => prisma.visitTask.findUnique({ where: { id }, include: taskInclude }),
   createTask: (data) => prisma.visitTask.create({ data, include: taskInclude }),
   updateTask: (id, data) => prisma.visitTask.update({ where: { id }, data, include: taskInclude }),

@@ -479,8 +479,53 @@ export function createVisitTaskService({ repo, scope }) {
     await repo.assignBuilding({ buildingId: building.id, assigneeId: who.id, actorId: actor.id, allowedHolderIds: mine ?? undefined, now })
   }
 
+  /**
+   * Today's cards for a planner (spec 2026-11-24-sales-today-cards): today's
+   * plan rows, how many were visited (matchDay — the calendar's rule), the
+   * buildings held, and who made their OWN check-in today. People = the
+   * actor's active TLs + executives; `userId` narrows to one of them (else 404).
+   */
+  async function todaySummary({ userId } = {}, actor, now = new Date()) {
+    const date = istToday(now)
+    let people = await scope.assignees(actor)
+    if (userId) {
+      people = people.filter((u) => u.id === userId)
+      if (!people.length) throw ApiError.notFound('Not found')
+    }
+    const ids = people.map((u) => u.id)
+    const out = { date, planned: 0, done: 0, held: 0, checkedIn: 0, users: ids.length, user: null }
+    if (ids.length) {
+      const tasks = await repo.tasksInRange({ assigneeIds: ids, from: date, to: date })
+      const visits = await repo.visitsInRange({
+        userIds: ids, from: new Date(`${date}T00:00:00+05:30`), to: new Date(`${addDays(date, 1)}T00:00:00+05:30`),
+      })
+      const first = new Map() // userId -> their first own check-in today
+      for (const v of visits) if (!v.viaCompanion && !first.has(v.userId)) first.set(v.userId, v.visitedAt)
+      const group = (rows, key) => {
+        const map = new Map()
+        for (const r of rows) map.set(r[key], [...(map.get(r[key]) ?? []), r])
+        return map
+      }
+      const visitsOf = group(visits, 'userId')
+      for (const [id, rows] of group(tasks, 'assigneeId')) {
+        const mine = rows.map((t) => ({ ...t, taskDate: dayOf(t.taskDate) }))
+        const m = matchDay({ tasks: mine, visits: visitsOf.get(id) ?? [], now })
+        out.planned += mine.length
+        out.done += m.tasks.filter((t) => t.status === 'VISITED' || t.status === 'VISITED_OUTSIDE').length
+      }
+      out.held = await repo.countHeld(ids)
+      out.checkedIn = first.size
+      if (userId) {
+        const u = people[0]
+        out.user = { id: u.id, name: u.name, role: u.role, firstCheckInAt: first.get(u.id) ?? null }
+      }
+    }
+    return out
+  }
+
   return {
     listTasks,
+    todaySummary,
 
     /** Add one task; an executive who doesn't hold the building is given it. */
     async createTask(body, actor, now = new Date()) {
