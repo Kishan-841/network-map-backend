@@ -77,7 +77,11 @@ const splitterPlaceFields = {
   floorNumber: z.number().int().min(1, 'Floor must be 1 or more').max(MAX_FLOOR, `Floor must be ${MAX_FLOOR} or less`).nullish(),
   note: z.string().trim().max(500).nullish().transform((v) => v || null),
 }
-export const updateSplitterSchema = createSplitterSchema.partial().extend(splitterPlaceFields).partial()
+// Any splitter may be given a building later (an old closure / line splitter), or have it removed (null).
+export const updateSplitterSchema = createSplitterSchema
+  .partial()
+  .extend({ ...splitterPlaceFields, buildingId: z.string().min(1).max(100).nullish() })
+  .partial()
 
 /** A splitter fitted inside a building, at the pin the user dropped (spec 2026-11-24-splitter-in-building). */
 export const createBuildingSplitterSchema = createSplitterSchema

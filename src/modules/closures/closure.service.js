@@ -90,6 +90,18 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
     }
   }
 
+  /**
+   * A building a splitter may be put in: it exists, is a visible building, and the user may read it
+   * (the Buildings list's rule — zones for a surveyor or manager). Anything else is "no such building".
+   */
+  async function mustUseBuilding(id, actor) {
+    const building = await closureRepository.findBuildingForSplitter(id)
+    if (!building || !isVisibleBuilding(building) || !(await buildingReader.canReadBuilding(building.id, actor))) {
+      throw ApiError.badRequest('Building does not exist')
+    }
+    return building
+  }
+
   /** One splitter in full, with its outputs. Out of scope reads exactly like not found. */
   async function splitterDetail(id, actor) {
     const s = await closureRepository.findSplitterDetail(id, splitterScope(actor))
@@ -140,12 +152,7 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
      * one of its wings; the input fiber must be one the user can read.
      */
     async createBuildingSplitter(data, actor) {
-      const building = await closureRepository.findBuildingForSplitter(data.buildingId)
-      // Only a building the user may read (the Buildings list's rule — zones for a surveyor or manager);
-      // anything else is "no such building", as for an unknown id.
-      if (!building || !isVisibleBuilding(building) || !(await buildingReader.canReadBuilding(building.id, actor))) {
-        throw ApiError.badRequest('Building does not exist')
-      }
+      const building = await mustUseBuilding(data.buildingId, actor)
       if (data.wingId && !building.wings.some((w) => w.id === data.wingId)) {
         throw ApiError.badRequest('That wing is not in this building')
       }
@@ -269,12 +276,35 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
         const { inputFiberId: _keep, ...rest } = data
         data = rest
       }
-      if (!splitter.buildingId && (data.placement || data.floorNumber != null)) {
+      // The building (24 Nov 2026): any splitter may be given one later, moved to another, or have it
+      // removed — which also clears its wing and where-in-building (the note stays).
+      let buildingId = splitter.buildingId
+      // A splitter only in a building (no closure, not on a line): the building is its place.
+      const buildingOnly = !splitter.closureId && !splitter._count?.points
+      if (data.buildingId === null) {
+        if (buildingOnly && splitter.buildingId) {
+          throw ApiError.badRequest('This splitter is only in its building — change the building instead of removing it')
+        }
+        buildingId = null
+        data = { ...data, wingId: null, placement: null, floorNumber: null }
+      } else if (data.buildingId !== undefined) {
+        const building = await mustUseBuilding(data.buildingId, actor)
+        buildingId = building.id
+        // Moved to another building: its pin goes too (a closure / line splitter keeps the closure's / line's).
+        if (buildingOnly && building.id !== splitter.buildingId) {
+          data = { ...data, latitude: building.latitude, longitude: building.longitude }
+        }
+        // A wing kept from the old building that isn't in the new one goes.
+        if (data.wingId === undefined && splitter.wingId && !building.wings.some((w) => w.id === splitter.wingId)) {
+          data = { ...data, wingId: null }
+        }
+      }
+      if (!buildingId && (data.placement || data.floorNumber != null)) {
         throw ApiError.badRequest('Only a splitter in a building has a floor or place')
       }
       if (data.wingId) {
         const wing = await closureRepository.findWing(data.wingId)
-        if (!splitter.buildingId || !wing || wing.buildingId !== splitter.buildingId) {
+        if (!buildingId || !wing || wing.buildingId !== buildingId) {
           throw ApiError.badRequest('That wing is not in this building')
         }
       }
