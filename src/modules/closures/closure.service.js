@@ -259,6 +259,19 @@ export function createClosureService({ closureRepository, fiberPointRepository, 
       const splitter = await mustFindSplitter(id, actor)
       // Where in a building (24 Nov 2026): a wing only on a building splitter and only one of its wings;
       // a floor number goes with FLOOR — leaving Floor clears it, Floor without one is refused.
+      // The feed: a new one must be a fibre the editor can read (as on create); "none" from someone who
+      // can't read the current feed is their form not knowing it — keep it rather than unlink it.
+      if (data.inputFiberId && !canSeeFiber(actor, await closureRepository.findFiberOwner(data.inputFiberId))) {
+        throw ApiError.badRequest('Fiber does not exist')
+      }
+      if (data.inputFiberId === null && splitter.inputFiberId &&
+        !canSeeFiber(actor, await closureRepository.findFiberOwner(splitter.inputFiberId))) {
+        const { inputFiberId: _keep, ...rest } = data
+        data = rest
+      }
+      if (!splitter.buildingId && (data.placement || data.floorNumber != null)) {
+        throw ApiError.badRequest('Only a splitter in a building has a floor or place')
+      }
       if (data.wingId) {
         const wing = await closureRepository.findWing(data.wingId)
         if (!splitter.buildingId || !wing || wing.buildingId !== splitter.buildingId) {

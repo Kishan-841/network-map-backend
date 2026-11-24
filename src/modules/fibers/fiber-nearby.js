@@ -26,7 +26,8 @@ export const nearbyQuerySchema = z
 // point in between are not real plant here.
 const BOX_DEG = 0.02
 const NAME_MATCHES = 15
-const CANDIDATES = 500
+// A safety cap on fibres with a point within ~2 km — far above any real plant density here.
+const CANDIDATES = 5000
 
 export async function findFibersNear({ lat, lng, q, radius = 100 }, actor, db = prisma) {
   const pin = lat != null ? { latitude: lat, longitude: lng } : null
@@ -50,9 +51,13 @@ export async function findFibersNear({ lat, lng, q, radius = 100 }, actor, db = 
     latitude: { gte: lat - BOX_DEG, lte: lat + BOX_DEG },
     longitude: { gte: lng - BOX_DEG, lte: lng + BOX_DEG },
   }
+  // Candidates through the FiberPoint (latitude, longitude) index — every fibre with a point in the box,
+  // not an arbitrary first N, so the nearest can never be cut before the distance check.
+  const inBox = await db.fiberPoint.findMany({ where: box, select: { fiberId: true }, distinct: ['fiberId'], take: CANDIDATES })
+  if (!inBox.length) return []
   const rows = await db.fiber.findMany({
-    where: { AND: [zoneScope(actor), { points: { some: box } }] },
-    select, take: CANDIDATES,
+    where: { AND: [zoneScope(actor), { id: { in: inBox.map((p) => p.fiberId) } }] },
+    select,
   })
   return rows.map(out).filter((f) => f.distanceM <= radius).sort((a, b) => a.distanceM - b.distanceM)
 }

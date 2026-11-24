@@ -402,6 +402,7 @@ model FiberPoint {
   segmentsFrom FiberSegment[] @relation("SegmentFrom")
   segmentsTo   FiberSegment[] @relation("SegmentTo")
   @@unique([fiberId, sequence])
+  @@index([latitude, longitude])
   @@index([closureId])
   @@index([popId])
   @@index([buildingId])

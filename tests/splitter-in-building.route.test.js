@@ -138,6 +138,24 @@ describe('editing a building splitter', () => {
     expect((await patch(FIBER, s.id, { placement: 'FLOOR' })).status).toBe(400)
   })
 
+  it("refuses an input fiber the editor can't see", async () => {
+    const s = await create()
+    expect((await patch(FIBER, s.id, { inputFiberId: F_HIDDEN })).status).toBe(400)
+    expect((await patch(FIBER, s.id, { inputFiberId: F_MINE })).status).toBe(200)
+  })
+
+  it("keeps an input fiber the editor can't see when their save sends none", async () => {
+    const hiddenFed = await prisma.splitter.create({
+      data: { code: `ST-${S}`, latitude: 18.6, longitude: 73.8, ratio: 'R1_2', buildingId: B, inputFiberId: F_HIDDEN,
+        createdById: ADMIN, outputs: { create: [{ portNo: 1 }, { portNo: 2 }] } },
+    })
+    made.push(hiddenFed.id)
+    const res = await patch(FIBER, hiddenFed.id, { note: 'checked', inputFiberId: null })
+    expect(res.status).toBe(200)
+    const row = await prisma.splitter.findUnique({ where: { id: hiddenFed.id } })
+    expect(row).toMatchObject({ note: 'checked', inputFiberId: F_HIDDEN })
+  })
+
   it('refuses a wing of another building, and a wing on a splitter with no building', async () => {
     const s = await create()
     expect((await patch(FIBER, s.id, { wingId: W2 })).status).toBe(400)
@@ -145,6 +163,8 @@ describe('editing a building splitter', () => {
     const inClosure = await request(app).post(`/api/v1/closures/${closure.id}/splitters`).set(as(FIBER)).send({ ratio: 'R1_2' })
     expect(inClosure.status).toBe(201)
     expect((await patch(FIBER, inClosure.body.data.id, { wingId: W1 })).status).toBe(400)
+    expect((await patch(FIBER, inClosure.body.data.id, { placement: 'TERRACE' })).status).toBe(400)
+    expect((await patch(FIBER, inClosure.body.data.id, { location: 'S2' })).status).toBe(200)
     await prisma.closure.delete({ where: { id: closure.id } })
   })
 })
